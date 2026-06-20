@@ -1,0 +1,34 @@
+task:
+  name: linear
+  params:
+    d: 20
+  n_train: 2000
+  n_test: 500
+  task_seed: 42
+  train_sample_seed: 1
+  test_sample_seed: 2
+
+model:
+  name: trm
+  hidden_dim: 64
+  latent_dim: 64
+  n_steps: 4
+  deep_supervision: true
+
+control:
+  name: ff_matched
+  hidden_dim: 64
+  latent_dim: 64
+  n_steps: 4
+  deep_supervision: false
+
+train:
+  epochs: 50
+  lr: 1e-3
+  weight_decay: 1e-4
+  batch_size: 256
+  deep_supervision_weight: 1.0
+  device: cpu
+
+seeds: [0, 1, 2, 3, 4]
+results_dir: results
