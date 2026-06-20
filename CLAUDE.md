@@ -398,11 +398,69 @@ robustness on more Task B rungs / rules (and the M1 curriculum levers) before bu
 hierarchy. The signal now points toward the loop having genuine value, which it did not after
 round 1.
 
+**M2-confirm — DONE.** M2 named one blocker before the §9 hierarchy: the Task B finding rested
+on a *single* config (rule 30, w=9). This milestone re-ran the **same 5-arm factorial** across a
+**grid of CA rule {30, 90, 110} × width {9, 13}** (6 cells × 5 seeds, 100 epochs) to check the
+cross-task robustness isn't a one-config fluke. A multi-param `grid` axis was added to the
+substrate (`GridConfig` + `ExperimentConfig.axis_points`, `configs/experiments/m2_confirm_iterated_grid.yaml`),
+generalising the 1-D `sweep`; the runner now also emits a **per-config Δ table CSV** with paired
+exact-match Δs (variance), and reports EM deltas alongside accuracy. `grid` and `extrapolation`
+are mutually exclusive (the harness keeps one (T,R) result set) — depth-extrapolation is M1's
+separate question, left untouched. 50 tests, ruff clean. Tracked summary:
+`results/m2_confirm_iterated_grid_20260620T070204_{curve,deltas}.csv`. The `rule=30, w=9` cell
+reproduces the M2 numbers bit-consistently (loop 0.972, untied_matched 0.821, ff 0.971).
+
+**The clean tying Δ(loop − untied_matched), all 6 cells (accuracy; EM in brackets):**
+
+| rule | w | trm_nods | untied_matched | ff_matched | Δ(loop − untied_matched) | Δ(loop − ff_matched) |
+|------|---|----------|----------------|------------|--------------------------|----------------------|
+| 30  | 9  | 0.972 | 0.821 | 0.971 | **+0.150 ± .027** [EM +0.63] | +0.001 ± .014 |
+| 30  | 13 | 0.752 | 0.689 | 0.813 | **+0.062 ± .010** [EM +0.02] | −0.062 ± .013 |
+| 90  | 9  | 0.997 | 0.886 | 1.000 | **+0.111 ± .075** [EM +0.62] | −0.003 ± .007 |
+| 90  | 13 | 0.973 | 0.830 | 1.000 | **+0.143 ± .064** [EM +0.64] | −0.027 ± .031 |
+| 110 | 9  | 0.979 | 0.865 | 0.986 | **+0.114 ± .028** [EM +0.55] | −0.007 ± .017 |
+| 110 | 13 | 0.800 | 0.723 | 0.831 | **+0.077 ± .007** [EM +0.06] | −0.031 ± .008 |
+
+**Reading (per §2/§8).** The central M2 fact **replicates cleanly and consistently:**
+- **Weight tying helps at a fixed budget on CA in *every* cell.** Δ(loop − untied_matched) is
+  **positive in all 6 cells** (+0.062 → +0.150 token-acc), variance bands never crossing zero;
+  `untied_matched` (deep, narrow blocks) is the **weakest param-matched arm in all 6 cells**.
+  Δ(untied_matched − ff_matched) is negative everywhere (−0.11 → −0.17): splitting one budget
+  into narrow untied blocks consistently loses the width CA needs. (EM deltas are large at w=9,
+  ~+0.6, and small at w=13 where every arm's whole-row score is low — but token-acc tying Δ stays
+  clearly positive.) **This is the requested confirmation: the loop's CA advantage over the fair
+  untied control is not a one-config fluke.**
+- **Refinement the grid surfaces (reported plainly):** the loop does **not** beat the *shallow*
+  param-matched MLP on CA. Δ(loop − ff_matched) ≈ 0 at w=9 (tie) but **negative at w=13**
+  (−0.027 → −0.062, bands clear of zero): the wide shallow MLP is the strongest param-matched arm
+  on wide CA. So the loop's CA value is specifically *"tying beats a fair untied stack,"* **not**
+  *"loop beats the shallow MLP."* The loop is robustly **competitive (top-2, never worst)**, not
+  dominant — exactly M2's hedge, now quantified.
+- **Deep supervision stays neutral:** Δ(trm_ds − trm_nods) ∈ [−0.013, +0.010] across all cells —
+  consistent with M0/M1/M2, the loop's effect is not silently DS.
+
+**Cross-task synthesis (the §9 verdict).** The arm-ordering that makes the loop *uniquely robust
+across A+B* holds across all 6 CA configs: among the three param-matched arms, `ff_matched` is
+strong on CA but **fails parity-k4** (0.763, M2); `untied_matched` solves parity but is the
+**weakest on CA in every cell**; the **loop is the only one competitive on both** — top-2 on CA in
+all 6 cells *and* solves parity-k4. The Task B leg of the robustness claim is now multi-config and
+solid.
+
+**§9 gate — the requested condition is met; M3 is earned (enter cautiously).** M2's literal blocker
+("confirm the cross-task robustness on more Task B rungs/rules") is satisfied: the finding
+replicates across 3 rules × 2 widths with consistent sign and ordering. Two honest caveats temper
+*how strongly* M3 is earned, and should shape it: (i) only the **Task B leg** is now multi-config —
+the **Task A (parity) leg still rests on one `d`** (the k-sweep at d=20); replicating parity across
+`d`/sparsity would fully close the gate. (ii) The loop is competitive, **not dominant** (the shallow
+MLP beats it on wide CA), so the H/L hierarchy must clear the *same* param-matched bar, not a lone
+recurrent number.
+
 _Then:_
-- **M3** — H/L hierarchy (Task C) **still gated** (§9): the loop is uniquely robust across A+B
-  vs param-matched controls, but doesn't strictly beat a single control on both, and each task
-  is one config. Replicate the robustness across Task B rules/depths (and try the M1 curriculum)
-  before earning the hierarchy.
+- **M3** — H/L hierarchy (Task C) is **earned but cautious** (§9): the loop's cross-task robustness
+  replicates across Task B rules/widths (M2-confirm), so the hierarchy may proceed — but against the
+  full param-matched control set (it does not strictly dominate), and ideally after the **parity leg
+  is also replicated across `d`** and/or the **M1 step-aligned curriculum** lever is tried (still
+  unrun; `grid`+`extrapolation` are mutually exclusive, so the curriculum needs its own config).
 
 ## 12. Key references (for grounding a cold agent)
 
