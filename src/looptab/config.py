@@ -10,9 +10,10 @@ confounded (CLAUDE.md §4/§8).
 
 from __future__ import annotations
 
+import itertools
 from typing import Literal, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 
 class TaskConfig(BaseModel):
@@ -64,6 +65,27 @@ class SweepConfig(BaseModel):
     values: list
 
 
+class GridConfig(BaseModel):
+    """Sweep several task parameters over a full Cartesian product, in a single run.
+
+    Where `sweep` varies one axis to draw a curve, `grid` varies *several* axes to
+    *replicate* a finding across configs — e.g. rerun the whole arm factorial across
+    CA `rule` × `w` to check the M2 cross-task robustness isn't a one-config fluke
+    (CLAUDE.md §11 / M2-confirm). Each grid cell still runs every arm at its own
+    config; cells are independent configs, not an ablation, so §5.6 ("one knob per
+    ablation") still holds *within* each cell.
+    """
+
+    params: dict[str, list]
+
+    def points(self) -> list[dict]:
+        """List of task-param override dicts, one per Cartesian-product cell."""
+        keys = list(self.params.keys())
+        return [
+            dict(zip(keys, combo)) for combo in itertools.product(*(self.params[k] for k in keys))
+        ]
+
+
 class ExtrapolationConfig(BaseModel):
     """Depth-extrapolation sweep over task CA steps (T) and test unroll steps (R)."""
 
@@ -76,12 +98,37 @@ class ExperimentConfig(BaseModel):
     arms: list[ModelConfig]
     train: TrainConfig
     sweep: Optional[SweepConfig] = None
+    grid: Optional[GridConfig] = None
     extrapolation: Optional[ExtrapolationConfig] = None
     # Pairs of arm labels to diff: [[recurrent, control], ...]. If omitted, every
     # non-last arm is diffed against the last arm (assumed to be the control).
     deltas: Optional[list[list[str]]] = None
     seeds: list[int] = Field(default_factory=lambda: [0, 1, 2, 3, 4])
     results_dir: str = "results"
+
+    @model_validator(mode="after")
+    def _check_axes(self) -> "ExperimentConfig":
+        # `sweep` (1-D curve) and `grid` (N-D replication) are mutually exclusive: both
+        # drive the same outer point-loop, so allowing both would silently ignore one.
+        if self.sweep is not None and self.grid is not None:
+            raise ValueError("Set at most one of `sweep` or `grid`, not both.")
+        # The extrapolation harness keeps a single result set keyed by (T, R); pairing
+        # it with a multi-cell grid would overwrite all but the last cell. The grid
+        # replicates the *at-training-config* Δ; depth-extrapolation is a separate run.
+        if self.grid is not None and self.extrapolation is not None:
+            raise ValueError("`grid` and `extrapolation` cannot be combined in one run.")
+        return self
+
+    def axis_points(self) -> list[tuple[str, dict]]:
+        """(label, task-param-overrides) for each point on the sweep/grid axis.
+
+        One entry with no overrides when neither `sweep` nor `grid` is set.
+        """
+        if self.grid is not None:
+            return [(", ".join(f"{k}={v}" for k, v in ov.items()), ov) for ov in self.grid.points()]
+        if self.sweep is not None:
+            return [(f"{self.sweep.param}={v}", {self.sweep.param: v}) for v in self.sweep.values]
+        return [("single", {})]
 
     def resolved_deltas(self) -> list[list[str]]:
         if self.deltas is not None:

@@ -1,5 +1,7 @@
 """Tests for the run harness: arms, sweep, Δ reporting, and determinism."""
 
+import pytest
+
 from looptab.config import ExperimentConfig
 from looptab.run import run_point
 
@@ -102,6 +104,79 @@ def test_run_point_multi_output():
         assert "accuracy" in out[lbl]
         assert out[lbl]["accuracy"] >= 0.0
     assert 0.0 <= baseline <= 1.0
+
+
+def test_axis_points_single():
+    """No sweep/grid => exactly one point with no overrides (CLAUDE.md axis_points)."""
+    cfg = _cfg()
+    assert cfg.axis_points() == [("single", {})]
+
+
+def test_axis_points_sweep():
+    cfg = _cfg(sweep=dict(param="k", values=[2, 3, 4]))
+    assert cfg.axis_points() == [("k=2", {"k": 2}), ("k=3", {"k": 3}), ("k=4", {"k": 4})]
+
+
+def test_axis_points_grid_is_cartesian_product():
+    """M2-confirm: a grid replicates the factorial across a rule × w product."""
+    cfg = _cfg(grid=dict(params={"rule": [30, 90], "w": [9, 13]}))
+    pts = cfg.axis_points()
+    assert [ov for _, ov in pts] == [
+        {"rule": 30, "w": 9},
+        {"rule": 30, "w": 13},
+        {"rule": 90, "w": 9},
+        {"rule": 90, "w": 13},
+    ]
+    # labels are human-readable and carry both axes
+    assert pts[0][0] == "rule=30, w=9"
+
+
+def test_sweep_and_grid_are_mutually_exclusive():
+    with pytest.raises(ValueError):
+        _cfg(sweep=dict(param="k", values=[2]), grid=dict(params={"w": [9]}))
+
+
+def test_grid_and_extrapolation_are_mutually_exclusive():
+    with pytest.raises(ValueError):
+        _cfg(
+            grid=dict(params={"w": [9]}),
+            extrapolation=dict(T_values=[4], R_values=[4]),
+        )
+
+
+def test_grid_point_runs_factorial_with_overrides():
+    """Each grid cell trains every arm at its own task config (overrides applied)."""
+    cfg = _cfg(grid=dict(params={"k": [2, 3]}))
+    for _, overrides in cfg.axis_points():
+        params = {**cfg.task.params, **overrides}
+        out, _, _ = run_point(cfg, params, seed=0)
+        assert set(out.keys()) == {"trm_ds", "trm_nods", "ff_matched"}
+
+
+def test_grid_cells_deterministic_and_independent():
+    """§5.3/§5.8: a grid cell reproduces bit-for-bit, and cells don't leak state into
+    each other — a cell's metrics are identical regardless of which cells ran before it
+    (the override dict must not mutate cfg.task.params)."""
+    cfg = _cfg(grid=dict(params={"k": [2, 4]}))
+    points = cfg.axis_points()
+    base_params = dict(cfg.task.params)
+
+    def run_cell(overrides):
+        return run_point(cfg, {**cfg.task.params, **overrides}, seed=0)[0]
+
+    # Same cell twice => identical (determinism).
+    a = run_cell(points[0][1])
+    b = run_cell(points[0][1])
+    for lbl in a:
+        assert a[lbl]["accuracy"] == b[lbl]["accuracy"]
+
+    # Running cell 1 in between must not change cell 0's result (independence) and must
+    # not have mutated the shared task params.
+    run_cell(points[1][1])
+    c = run_cell(points[0][1])
+    for lbl in a:
+        assert a[lbl]["accuracy"] == c[lbl]["accuracy"]
+    assert cfg.task.params == base_params
 
 
 def test_resolved_deltas_default():

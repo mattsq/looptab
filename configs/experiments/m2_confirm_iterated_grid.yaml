@@ -1,0 +1,92 @@
+# M2-confirm: replicate the M2 cross-task robustness finding on Task B across MORE
+# configs, so it isn't a one-config fluke (CLAUDE.md §11 / §9 gate for the hierarchy).
+#
+# M2 (single config: rule 30, w=9) found that, once capacity is held fixed by
+# `untied_matched`, the weight-tied loop is the only param-matched architecture robust
+# on BOTH canonical tasks — it BEATS the param-matched untied stack on CA (which
+# collapses) and ties the shallow MLP. This config re-runs the *same 5-arm factorial*
+# across a grid of CA rule × width and reports the clean per-config Δs, to check the
+# sign and size of Δ(loop − untied_matched) hold across rules/widths.
+#
+# Five arms (identical to m2_iterated_extrapolation.yaml — only the task grid changes):
+#   trm_ds         - TRM loop WITH deep supervision
+#   trm_nods       - TRM loop WITHOUT deep supervision (isolates the loop alone)
+#   untied_stack   - block stacked n_steps× WITHOUT tying, no DS (§4b); ~n_steps× params
+#   untied_matched - the same untied stack width-shrunk to TRM's budget; the CLEAN
+#                    tying control (capacity AND depth fixed, only tying varies)
+#   ff_matched     - param-matched feedforward control (§4a)
+#
+# THE clean Δ is Δ(trm_nods − untied_matched): weight tying at a *fixed parameter
+# budget* and fixed depth. The grid replaces the depth-extrapolation harness (the two
+# can't be combined; extrapolation is M1's separate question, untouched here).
+
+task:
+  name: iterated
+  params:
+    T: 4            # train CA steps (held fixed — only rule & w vary)
+    distractors: 4  # distractor noise bits
+  n_train: 4000
+  n_test: 1000
+  task_seed: 42
+  train_sample_seed: 1
+  test_sample_seed: 2
+
+grid:
+  params:
+    # 30 = chaotic, 90 = XOR/linear (easy), 110 = Turing-complete (hard) — the three
+    # canonical rules from CLAUDE.md §3. Odd widths avoid the even-width parity
+    # degeneracy M1 flagged.
+    rule: [30, 90, 110]
+    w: [9, 13]
+
+arms:
+  - name: trm
+    label: trm_ds
+    hidden_dim: 64
+    latent_dim: 64
+    n_steps: 4
+    deep_supervision: true
+    deep_supervision_weight: 1.0
+  - name: trm
+    label: trm_nods
+    hidden_dim: 64
+    latent_dim: 64
+    n_steps: 4
+    deep_supervision: false
+    deep_supervision_weight: 0.0
+  - name: untied_stack
+    label: untied_stack
+    hidden_dim: 64
+    latent_dim: 64
+    n_steps: 4
+    deep_supervision: false
+    deep_supervision_weight: 0.0
+  - name: untied_matched
+    label: untied_matched
+    hidden_dim: 64
+    latent_dim: 64
+    n_steps: 4
+    deep_supervision: false
+    deep_supervision_weight: 0.0
+  - name: ff_matched
+    label: ff_matched
+    hidden_dim: 64
+    latent_dim: 64
+    n_steps: 4
+
+deltas:
+  - [trm_nods, untied_matched] # CLEAN: weight tying at fixed capacity + depth
+  - [trm_nods, untied_stack]   # confounded: tying + ~4× capacity (kept for completeness)
+  - [untied_matched, ff_matched] # depth at fixed capacity (deep untied vs shallow MLP)
+  - [trm_nods, ff_matched]     # the loop alone vs param-matched control
+  - [trm_ds, trm_nods]         # deep supervision alone
+
+train:
+  epochs: 100
+  lr: 1e-3
+  weight_decay: 1e-4
+  batch_size: 256
+  device: cpu
+
+seeds: [0, 1, 2, 3, 4]
+results_dir: results
