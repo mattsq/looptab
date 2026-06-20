@@ -218,20 +218,58 @@ by registering it, not by editing the training loop.
 
 ## 11. Project status / next milestone
 
-**M0 — current.** Deliver, end-to-end:
-- Generators for Task 0 + Task A (tested, deterministic).
-- A TRM-style recurrent refinement model.
-- A param-matched feedforward control (§4a).
-- A training loop with optional deep supervision.
-- An eval that reports `Δ(recurrent − control)` over ≥ 5 seeds on Task A for `k ∈ {2,3,4}`.
+**M0 — DONE.** Harness landed, real run executed, result recorded below. The
+end-to-end machinery is in place and tested (26 tests, ruff check + format clean):
+- Generators for Task 0 + Task A — spec-faithful and determinism-tested
+  (`src/looptab/data/generators.py`, `tests/test_generators.py`).
+- TRM-style recurrent refinement model with optional per-step readouts
+  (`src/looptab/models/trm.py`).
+- Param-matched feedforward control (§4a), param count matched analytically to ~0.6%
+  (`src/looptab/models/controls.py`).
+- Training loop with deep supervision as a **per-arm** weight, not a global flag
+  (`src/looptab/train/loop.py`).
+- Config-driven runner with **named arms** + a **single-config sweep** over a task
+  parameter, emitting `Δ` between any pair of arms with variance bands, plus a curve
+  CSV (and a PNG if matplotlib is installed) (`src/looptab/run.py`,
+  `configs/experiments/m0_parity_sweep.yaml`).
 
-**Definition of done for M0:** we can produce the `k`-vs-accuracy curve for *both* models,
-with variance bands, from a single config.
+**Key design choice (avoids the §4/§8 confound):** deep supervision is its own arm.
+The canonical M0 experiment runs three arms — `trm_ds` (loop + DS), `trm_nods`
+(loop, no DS), `ff_matched` (control) — so we report `Δ(trm_nods − ff_matched)`
+(the loop alone) and `Δ(trm_ds − trm_nods)` (deep supervision alone) separately.
+Each outer seed also draws a **new `task_seed`** (train/test still share it within a
+seed, per §3) so the variance band reflects function-level variation, not just init+rows.
+
+**Definition of done for M0:** produce the `k`-vs-accuracy curve for both models,
+with variance bands, from a single config — done via `m0_parity_sweep.yaml`. Tracked
+summary: `results/m0_parity_sweep_20260620T012344_curve.{csv,png}`.
+
+**M0 result (parity, d=20, n_steps=4, 5 seeds, 100 epochs; ~9.9k params per arm).**
+
+| k | trm_ds (loop+DS) | trm_nods (loop) | ff_matched (control) | Δ(loop − control) | Δ(DS − loop) |
+|---|------------------|-----------------|----------------------|-------------------|--------------|
+| 2 | 1.000 ± .000 | 1.000 ± .000 | 1.000 ± .000 | +0.000 | +0.000 |
+| 3 | 0.978 ± .050 | 1.000 ± .000 | 1.000 ± .000 | +0.000 | −0.022 |
+| 4 | 1.000 ± .000 | 1.000 ± .000 | 0.763 ± .246 | **+0.237 ± .246** | −0.000 |
+
+**Reading (reported plainly per §8).** The weight-tied recurrent loop is the active
+ingredient: at the hardest rung (k=4) `trm_nods` solves parity on every seed while the
+param-matched feedforward control collapses to ~chance on 2 of 5 seeds (high-variance
+failure — the seed-sensitivity §5.2 warns about; the loop's edge is *robustness*, not a
+new capacity ceiling). **Deep supervision is NOT the active ingredient here:** Δ(DS − loop)
+is ≈0 at k=2/4 and slightly *negative* at k=3 — so the loop's win is not silently credited
+to DS. k≤3 is too easy to separate the arms (all ≈1.0). Caveat: a single run on one task;
+the untied-stack control (§4b, M2) is needed before concluding "tied recurrence" beats
+"mere depth."
+
+**Known gap deferred to M1:** the multi-output (Task B) path is not wired — `num_classes`
+is fixed at 2 and TRM has no per-cell head yet. `task: iterated` should not be run until
+that head lands.
 
 _Then:_
-- **M1** — Task B + the depth-extrapolation harness (§3).
-- **M2** — add the depth/compute-matched untied control (§4b) + the deep-supervision
-  ablation (§8).
+- **M1** — Task B + a per-cell output head + the depth-extrapolation harness (§3).
+- **M2** — add the depth/compute-matched untied control (§4b). (The deep-supervision
+  ablation from §8 already ships in M0 as a separate arm.)
 - **M3** — revisit the hierarchy (Task C) *iff* M0–M2 justify it.
 
 ## 12. Key references (for grounding a cold agent)

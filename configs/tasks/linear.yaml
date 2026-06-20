@@ -1,0 +1,8 @@
+name: linear
+params:
+  d: 20
+n_train: 2000
+n_test: 500
+task_seed: 42
+train_sample_seed: 1
+test_sample_seed: 2

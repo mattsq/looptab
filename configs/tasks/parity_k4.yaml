@@ -1,0 +1,9 @@
+name: parity
+params:
+  d: 20
+  k: 4
+n_train: 4000
+n_test: 1000
+task_seed: 42
+train_sample_seed: 1
+test_sample_seed: 2

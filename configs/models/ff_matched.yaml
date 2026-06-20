@@ -1,0 +1,5 @@
+name: ff_matched
+hidden_dim: 64
+latent_dim: 64
+n_steps: 4
+deep_supervision: false
