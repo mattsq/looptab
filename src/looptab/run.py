@@ -256,6 +256,7 @@ def _aggregate_extrapolation(
     labels: list[str],
     T_values: list[int],
     R_values: list[int],
+    delta_pairs: Optional[list[list[str]]] = None,
 ) -> dict:
     agg = {}
     for T in T_values:
@@ -265,11 +266,14 @@ def _aggregate_extrapolation(
         agg[T]["baseline_std"] = _std(baselines)
         for R in R_values:
             agg[T][R] = {}
+            per_seed_acc = {}  # lbl -> per-seed accuracies, kept so cells can be paired-tested
             for lbl in labels:
                 accs = [seed_data[T][0][(lbl, R)]["accuracy"] for seed_data in all_seed_extrap]
+                per_seed_acc[lbl] = accs
                 stats = {
                     "accuracy_mean": float(np.mean(accs)),
                     "accuracy_std": _std(accs),
+                    "accuracy_per_seed": accs,
                 }
                 if "exact_match" in all_seed_extrap[0][T][0][(lbl, R)]:
                     ems = [
@@ -278,6 +282,18 @@ def _aggregate_extrapolation(
                     stats["exact_match_mean"] = float(np.mean(ems))
                     stats["exact_match_std"] = _std(ems)
                 agg[T][R][lbl] = stats
+            # Paired Δ + sign test per (T, R') cell, so the extrapolation diagonal (R'=T) —
+            # which carries the milestone headline (e.g. the M3b short-horizon stepDS win) —
+            # gets the SAME paired significance every other Δ in the run gets, not eyeballed
+            # bands. (Review fix M2: per-seed extrapolation data is retained for this.)
+            if delta_pairs:
+                cell_deltas = {}
+                for a, b in delta_pairs:
+                    if a in per_seed_acc and b in per_seed_acc:
+                        cell_deltas[f"{a}-{b}"] = delta_report(
+                            per_seed_acc[a], per_seed_acc[b], label="accuracy"
+                        )
+                agg[T][R]["_deltas"] = cell_deltas
     return agg
 
 
@@ -413,6 +429,7 @@ def main():
                 labels,
                 cfg.extrapolation.T_values,
                 cfg.extrapolation.R_values,
+                delta_pairs=cfg.resolved_deltas(),
             )
             print("\n=== Depth Extrapolation Summary ===")
             for T in cfg.extrapolation.T_values:
@@ -458,6 +475,11 @@ def main():
     }
     if extrap_results is not None:
         record["extrapolation"] = extrap_results
+    # Compute the budget audit BEFORE the JSON dump so the confound-guard table is embedded in
+    # the canonical run record (§5.7), not only the side-car CSV (review fix m1).
+    audit = budget_audit(points, labels, cfg) if cfg.budget_reference is not None else None
+    if audit is not None:
+        record["budget_audit"] = audit
 
     json_path = out_dir / f"{tag}_{stamp}.json"
     with open(json_path, "w") as f:
@@ -557,9 +579,8 @@ def main():
     print(f"Deltas  : {deltas_csv_path}")
 
     # Budget-parity audit (M3a confound guard): write the realized-param table and flag any
-    # matched arm that drifted out of tolerance. Only runs when a reference arm is declared.
-    if cfg.budget_reference is not None:
-        audit = budget_audit(points, labels, cfg)
+    # matched arm that drifted out of tolerance. `audit` was computed above for the run record.
+    if audit is not None:
         params_csv_path = out_dir / f"{tag}_{stamp}_params.csv"
         with open(params_csv_path, "w", newline="") as f:
             w = csv.writer(f)
@@ -652,6 +673,33 @@ def main():
                                 ]
                             )
         print(f"Extrap  : {extrap_csv_path}")
+
+        # Paired Δ + sign test per (T_test, R') cell — so the extrapolation diagonal carries
+        # the same significance call as every other Δ in the run (review fix M2).
+        extrap_deltas_path = out_dir / f"{tag}_{stamp}_extrapolation_deltas.csv"
+        with open(extrap_deltas_path, "w", newline="") as f:
+            w = csv.writer(f)
+            w.writerow(
+                ["T_test", "R_test", "delta", "delta_mean", "delta_std",
+                 "sign_pos", "sign_neg", "sign_p"]
+            )
+            for T in cfg.extrapolation.T_values:
+                for R in cfg.extrapolation.R_values:
+                    for pair, rep in extrap_results[T][R].get("_deltas", {}).items():
+                        st = rep.get("sign_test", {})
+                        w.writerow(
+                            [
+                                T,
+                                R,
+                                pair,
+                                rep["delta_mean"],
+                                rep["delta_std"],
+                                st.get("n_pos", ""),
+                                st.get("n_neg", ""),
+                                st.get("p_value", ""),
+                            ]
+                        )
+        print(f"ExtrapΔ : {extrap_deltas_path}")
 
         _maybe_plot_extrapolation(
             extrap_results,

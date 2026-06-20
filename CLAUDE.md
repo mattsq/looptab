@@ -140,6 +140,9 @@ confound them.
 1. **Control contract** (§4): no recurrent result ships without its matched control(s).
 2. **Seeds & variance:** ≥ 5 seeds per config; report mean ± std (or the full
    distribution). No single-seed claims — tabular/small-model results are seed-sensitive.
+   *Caveat for the paired sign test:* the two-sided exact binomial cannot reach p<0.05 with
+   fewer than **6** seeds (5/5 → p=0.0625). Use ≥ 8 seeds when a significant sign-test call is
+   the point; M3a/M3b use 10. The 5-seed floor is for variance bands, not significance.
 3. **Determinism:** data is a pure function of `(config, seed)`; seed every RNG; pin
    dependency versions.
 4. **No network in the task path:** the canonical suite must run with zero downloads.
@@ -250,11 +253,13 @@ behaviour-changing conclusions, and the next pointer. Append detail to LOG.md, n
   trap that flipped M2's first-round conclusion. `untied_stack` is a labelled ceiling only.
 - **Deep supervision is HORIZON-DEPENDENT, not inert (M3b overturns the prior null at short
   rollout).** Final-state DS (every step ↔ s_T) stays neutral-to-negative everywhere
-  (M0/M1/M2/M2-confirm + M3b Δ(finalDS−nods)=−0.017, p=.002). **But step-aligned DS (step i ↔
-  sᵢ) is a large WIN at short horizon** — under a T~1..8 curriculum it hits T=4 acc 0.838 / EM
-  0.285 vs nods 0.676 / 0.046 (p=.002). The sign FLIPS with depth: Δ(stepDS−nods) ≈ +0.16 at
-  T=4 but −0.064 at the T=8 reference. So "DS is inert" was an artifact of mis-specified
-  (final-state) DS; step-alignment matters, but only where the rollout is short.
+  (M0/M1/M2/M2-confirm + M3b Δ(finalDS−nods)=−0.017 at the T=8 reference, p=.002). **But
+  step-aligned DS (step i ↔ sᵢ) is a large WIN at short horizon** — under a T~1..8 curriculum,
+  on the R′=T diagonal, T=4 acc 0.838 / EM 0.285 vs nods 0.676 / 0.046 (paired Δ=+0.162, 10/0
+  seeds, sign-test p=.002). The sign of Δ(stepDS−nods) FLIPS with depth: **+0.162 at T=4** vs
+  **−0.064 at the T=8 reference** (0/10, p=.002 each — two distinct, oppositely-signed paired
+  tests). So "DS is inert" was an artifact of mis-specified (final-state) DS; step-alignment
+  matters, but only where the rollout is short.
 - **Tying beats a *fair untied* stack on Task B at SHALLOW depth only** (Δ(loop −
   untied_matched) > 0, p=.002, in all M2-confirm cells *and* every M3a T=4 cell) — **but the
   edge does NOT scale with depth; it vanishes by T≥8 (M3a)**. The M2 framing "tied recurrence

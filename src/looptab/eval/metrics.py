@@ -74,8 +74,9 @@ def sign_test(delta_per_seed: list[float]) -> dict:
 
     Counts how many seeds favour the recurrent arm (Δ>0) vs the control (Δ<0); ties
     (Δ==0) are dropped, as the sign test prescribes. Reports an exact two-sided binomial
-    p-value under H0: P(Δ>0)=0.5. Distribution-free — appropriate for ≥5 small-sample
-    seeds where normality is dubious.
+    p-value under H0: P(Δ>0)=0.5. Distribution-free — appropriate for small-sample seeds where
+    normality is dubious. NOTE: with < 6 non-tied seeds the test cannot reach p<0.05 (a perfect
+    5/5 split gives p=0.0625); use >= 8 seeds when significance is the point (CLAUDE.md §5.2).
     """
     d = np.asarray(delta_per_seed, dtype=float)
     n_pos = int((d > 0).sum())

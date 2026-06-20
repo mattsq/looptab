@@ -293,11 +293,15 @@ per-arm `train_accuracy` diagnostic, paired sign test on every Δ, depth-budget 
 **Budget parity (the confound guard) — HELD for the depth-attribution arms.** The loop
 (reference) and `ff_matched` are weight-tied / T-independent, so their param counts are
 **exactly constant across all T** (loop 13792 @w16, 15080 @w20; ff within 0.7%). The audit
-flagged **8 cells** where `untied_matched` drifts past ±2% (ratios 0.93–1.04) — this is the
-**expected high-T width-quantization finding**, not a blocker: with T blocks sharing one
-width, integer-width steps get coarse and the matched stack is forced into narrow/degenerate
-blocks (w′→7–8 at T=16). It is surfaced, not hidden; the headline Δ(loop − ff_matched) is on
-two *exactly* budget-matched arms, so depth attribution there is clean.
+flagged **8 cells** where `untied_matched` drifts past ±2% (ratios 0.93–1.04; **worst −6.6%**
+at T=16/w=20) — this is the **expected high-T width-quantization finding**, not a blocker: with
+T blocks sharing one width, integer-width steps get coarse and the matched stack is forced into
+narrow/degenerate blocks (w′→7–8 at T=16). The breach is **one-directional** — at high T the
+stack lands *under* budget (fewer params), so if anything it handicaps `untied_matched`, which
+only *strengthens* the "loop edge vanishes by T≥8" reading (the loop fails to beat even an
+under-budget untied stack). It is surfaced, not hidden; and the headline Δ(loop − ff_matched) is
+on two *exactly* budget-matched arms (≤0.7% apart, T-independent), so depth attribution is clean
+on that pair regardless.
 
 **Per-arm test accuracy collapses to baseline at T ≥ 8 for EVERY arm** (baseline ≈ 0.50–0.55):
 
@@ -364,8 +368,10 @@ curves are directly comparable to M1's collapse. Five arms, 10 seeds, 100 epochs
 final-step loss) — all curriculum-trained — plus `ff_matched` / `untied_matched` grounding.
 New substrate: `make_iterated(return_trajectory=True)`, `TrajectoryDataset`,
 `CurriculumConfig`, `ModelConfig.ds_mode`, `train_curriculum`. 66 tests, ruff clean. Tracked:
-`results/m3b_stepDS_curriculum_20260620T113805_{curve,deltas,extrapolation}.csv` +
-`..._extrapolation.png`.
+`results/m3b_stepDS_curriculum_20260620T130400_{curve,deltas,extrapolation,extrapolation_deltas}.csv`
++ `..._extrapolation.png`. (Re-run after an adversarial review added per-cell paired sign tests
+on the extrapolation diagonal — `_extrapolation_deltas.csv`; the training is deterministic, so
+every accuracy reproduces the first run bit-for-bit, now with significance attached.)
 
 **Reference (T=8) per-arm acc, 10 seeds:** trm_nods **0.646** > trm_finalDS 0.629 >
 untied_matched 0.592 > trm_stepDS 0.582 > ff_matched 0.543 (baseline 0.507). Paired Δ
@@ -388,14 +394,16 @@ short horizon:**
 **Reading (per §8 — the honesty clause cuts both ways).**
 - **Step-aligned DS is NOT inert — it is the first clear DS WIN in the whole project, but only
   at SHORT rollout.** At T=4 / R′=4, `trm_stepDS` hits **0.838 acc (EM 0.285)** vs `trm_nods`
-  0.676 (EM 0.046) and `trm_finalDS` 0.628 — +0.16 token-acc / **+0.24 whole-row**, variance
-  bands non-overlapping across 10 seeds. The mechanism fires exactly as designed: trained to
-  emit sᵢ at step i, the loop nails the state after a few steps. **This overturns the M0–M3a
-  "DS is neutral-to-negative" conclusion at short horizons** — that null was partly an artifact
-  of *mis-specified* (final-state) DS, the M3b hypothesis. So DS's effect is real and large,
-  not inert.
-- **The sign of the step-aligned DS effect FLIPS with horizon.** Δ(stepDS − nods) is ≈ **+0.16
-  at T=4** but **−0.064 at T=8** (and stepDS sits at baseline by T≥12). Step-aligned supervision
+  0.676 (EM 0.046) and `trm_finalDS` 0.628. The paired diagonal Δ is properly sign-tested (not
+  just eyeballed bands): **Δ(stepDS − nods) = +0.162 ± 0.023, 10/0 seeds, p=.002**; Δ(stepDS −
+  finalDS) = +0.210 ± 0.026, 10/0, p=.002 (per-cell tests in `..._extrapolation_deltas.csv`).
+  The mechanism fires exactly as designed: trained to emit sᵢ at step i, the loop nails the
+  state after a few steps. **This overturns the M0–M3a "DS is neutral-to-negative" conclusion
+  at short horizons** — that null was partly an artifact of *mis-specified* (final-state) DS,
+  the M3b hypothesis. So DS's effect is real and large, not inert.
+- **The sign of the step-aligned DS effect FLIPS with horizon.** Δ(stepDS − nods) is **+0.162
+  at T=4** (10/0, p=.002) but **−0.064 at T=8** (0/10, p=.002) — two distinct, oppositely-signed
+  paired tests (and stepDS sits at baseline by T≥12). Step-aligned supervision
   trades *deep-final* accuracy for *shallow-rollout* fidelity: pinning each step to sᵢ helps
   short rollouts but, at the deep T=8 readout, the arm that optimizes *only* the final state
   (`nods`) wins. There is no single "DS helps/hurts" verdict — it is horizon-dependent.

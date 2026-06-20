@@ -58,15 +58,15 @@ def train(
 
 
 def _forward_steps(model: nn.Module, X: torch.Tensor, n_steps: int):
-    """Call a model, passing ``n_steps`` to recurrent/untied arms, omitting it for plain MLPs.
+    """Call a model with an explicit unroll depth, uniformly across arms.
 
-    Lets the curriculum trainer drive every arm through one code path: the loop and untied
-    stacks unroll to the sampled depth, while ``ff_matched`` (no depth notion) ignores it.
+    Every model in this repo accepts ``n_steps`` (the recurrent/untied arms unroll to it;
+    ``FFMatched`` accepts and ignores it for interface parity), so we pass it directly. We do
+    NOT swallow a ``TypeError`` here: a future model whose ``forward`` lacks ``n_steps`` should
+    fail loudly rather than be silently retried as ``model(X)`` and mis-unrolled to its default
+    depth — which under step-aligned DS would surface as a confusing readout-count mismatch.
     """
-    try:
-        return model(X, n_steps=n_steps)
-    except TypeError:
-        return model(X)
+    return model(X, n_steps=n_steps)
 
 
 def train_curriculum(
