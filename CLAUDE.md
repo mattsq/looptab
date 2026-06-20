@@ -252,28 +252,42 @@ behaviour-changing conclusions, and the next pointer. Append detail to LOG.md, n
   Δ(trm_ds − trm_nods) ∈ [−0.02, +0.01]. **BUT** all of those pin every loop step to the
   *final* state; step-aligned DS (step i ↔ CA state sᵢ) is **untested** — see M3b. Do not
   conclude "DS is inert" until that runs.
-- **Tying beats a *fair untied* stack on Task B, robustly** (Δ(loop − untied_matched) > 0,
-  lower band > 0, in all 6 M2-confirm cells). Mechanism: tied recurrence buys depth *and*
-  width from one budget; the untied stack must split the budget into narrow blocks.
-- **The loop does NOT beat its §4a control `ff_matched` on Task B** (wins 1/6 by noise,
-  loses on wide CA). On Task A it's the mirror: beats `ff_matched` (+0.237) but only ties
-  `untied_matched`. So on neither task does the loop beat *both* controls → the literal §9
-  gate is unmet. The loop's defensible property is "never the worst param-matched arm on
-  either task" (robustness), not dominance. The gate as literally worded may be
-  unsatisfiable by a generalist judged against single-axis specialists — flag for M3a.
+- **Tying beats a *fair untied* stack on Task B at SHALLOW depth only** (Δ(loop −
+  untied_matched) > 0, p=.002, in all M2-confirm cells *and* every M3a T=4 cell) — **but the
+  edge does NOT scale with depth; it vanishes by T≥8 (M3a)**. The M2 framing "tied recurrence
+  buys depth *and* width from one budget" is now **softened**: only the *width* half holds;
+  the *depth* half is **unsupported**.
+- **At Task B depth T≥8 the s₀→s_T target is unlearnable for EVERY arm** (M3a: test AND train
+  collapse to baseline; even the 16× `untied_stack` ceiling fits only ~0.78 train / ~0.52
+  test). An optimization/learnability wall, not a depth-capacity separation — so M3a could not
+  test the depth claim where it mattered. Read the high-T null as "deep CA is unlearnable
+  one-shot at this scale," NOT "tying gives no depth benefit." This wall is exactly what M3b's
+  step-aligned DS + T-curriculum targets.
+- **Deep supervision is neutral-to-negative in every run so far (M0/M1/M2/M2-confirm + M3a is
+  final-state only).** Δ(trm_ds − trm_nods) ∈ [−0.02, +0.01]. Step-aligned DS (step i ↔ CA
+  state sᵢ) is **untested** — see M3b. Do not conclude "DS is inert" until that runs.
+- **The loop does NOT beat its §4a control `ff_matched` on Task B** at any depth (M2-confirm
+  wins 1/6 by noise; M3a ≤0 at every T, significantly negative at T=4/T=8). On Task A it's the
+  mirror: beats `ff_matched` (+0.237) but only ties `untied_matched`. So on neither task does
+  the loop beat *both* controls → the literal §9 gate is unmet. The loop's defensible property
+  is "never the worst param-matched arm" (robustness), not dominance. The gate as literally
+  worded may be unsatisfiable by a generalist judged against single-axis specialists.
 - **Loop extrapolation fails as trained (M1):** over-unrolling R′>R decays toward baseline;
   all arms collapse at OOD depth T>T_train. Whether a curriculum + step-aligned DS fixes
   this is the M3b question.
-- Each leg still rests on few configs: Task A on one `d`; Task B depth only probed at T=4.
+- Each leg still rests on few configs: Task A on one `d`; Task B depth now swept (M3a) but
+  unlearnable past T=4 one-shot.
 
 ### (c) Next milestone
 
-**M3a (depth-at-fixed-budget sweep) + M3b (step-aligned DS + T-curriculum)** — IN PROGRESS
-on branch `claude/m3-depth-budget-stepds-b9jiou`. M3a tests whether the loop's edge *grows
-with required depth* (sweep T∈{4,8,12,16} at a single fixed param budget, rules 30/110,
-w∈{16,20}); M3b tests whether step-aligned deep supervision + a T-curriculum lets the loop
-learn a *transferable step operator* (the M1 extrapolation null's two stacked levers).
-**M3/Task C (H/L hierarchy) remains gated (§9) regardless of M3a/M3b outcomes.**
+**M3b (step-aligned DS + T-curriculum on Task B)** — the active next item on branch
+`claude/m3-depth-budget-stepds-b9jiou`. **M3a is DONE** (LOG.md): the depth-at-budget sweep
+*falsified* the "loop edge grows with depth" prediction and exposed an optimization wall at
+T≥8 (all arms collapse, train acc too). M3b directly targets that wall: extend the iterated
+generator to return the full trajectory [s₁…s_T], add a step-aligned DS mode (loop step i ↔
+sᵢ, requires n_steps==T), train across a T-curriculum, then re-run the depth-extrapolation
+harness. Question: can the loop learn a *transferable step operator* (M1's null + M3a's wall
+are the two stacked levers)? **M3/Task C (H/L hierarchy) remains gated (§9) regardless.**
 
 ## 12. Key references (for grounding a cold agent)
 
