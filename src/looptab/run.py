@@ -21,10 +21,10 @@ import torch
 import yaml
 
 from .config import ExperimentConfig, ModelConfig
-from .data.dataset import make_loaders, make_splits
+from .data.dataset import make_loaders, make_splits, make_trajectory_dataset
 from .eval.metrics import accuracy, delta_report, exact_match, majority_baseline
 from .registry import get_model
-from .train.loop import train
+from .train.loop import train, train_curriculum
 
 
 def _git_sha() -> str:
@@ -39,13 +39,16 @@ def _build_model(
     in_features: int,
     num_classes: int,
     out_features: Optional[int] = None,
+    n_steps: Optional[int] = None,
 ):
+    # `n_steps` overrides the arm's static depth when the experiment couples depth to a
+    # swept task param (M3a `couple_n_steps_to_param`); otherwise the per-arm value stands.
     kwargs = dict(
         in_features=in_features,
         num_classes=num_classes,
         hidden_dim=arm.hidden_dim,
         latent_dim=arm.latent_dim,
-        n_steps=arm.n_steps,
+        n_steps=arm.n_steps if n_steps is None else n_steps,
         out_features=out_features,
     )
     # The TRM loop and both untied-stack controls (§4b) emit per-step readouts, so deep
@@ -84,6 +87,29 @@ def run_point(cfg: ExperimentConfig, task_params: dict, seed: int) -> tuple[dict
     multi_output = train_ds.y.ndim > 1
     out_features = int(train_ds.y.shape[-1]) if multi_output else None
 
+    # M3a: optionally couple every arm's unroll depth to a swept task param (e.g. T), so
+    # one config sweeps depth with the loop's n_steps tracking the CA step count.
+    coupled_steps = None
+    if cfg.couple_n_steps_to_param is not None:
+        coupled_steps = int(task_params[cfg.couple_n_steps_to_param])
+
+    # M3b: a curriculum trains across a range of CA depths instead of one fixed T. Build the
+    # trajectory training set once at T_max; every arm is unrolled to a per-batch depth and
+    # (for the loop) supervised step-aligned against the intermediate states. Models are built
+    # at depth T_max — the deepest unroll they need and the reference eval depth.
+    curriculum = cfg.curriculum
+    traj_loader = None
+    if curriculum is not None:
+        coupled_steps = curriculum.T_max
+        traj_ds = make_trajectory_dataset(
+            task_cfg=task_params,
+            task_seed=this_task_seed,
+            sample_seed=task_cfg.train_sample_seed + seed * 100,
+            n=task_cfg.n_train,
+            T_max=curriculum.T_max,
+        )
+        traj_loader, _ = make_loaders(traj_ds, traj_ds, cfg.train.batch_size)
+
     device = cfg.train.device
     results = {}
     models = {}
@@ -91,18 +117,37 @@ def run_point(cfg: ExperimentConfig, task_params: dict, seed: int) -> tuple[dict
         # C3: reseed immediately before each arm so model init and the dataloader
         # shuffle stream are identical across arms and independent of arm order.
         torch.manual_seed(seed)
-        m = _build_model(arm, in_features, num_classes, out_features)
-        train(
-            m,
-            train_loader,
-            epochs=cfg.train.epochs,
-            lr=cfg.train.lr,
-            weight_decay=cfg.train.weight_decay,
-            deep_supervision_weight=arm.deep_supervision_weight,
-            device=device,
-        )
+        m = _build_model(arm, in_features, num_classes, out_features, n_steps=coupled_steps)
+        if curriculum is not None:
+            train_curriculum(
+                m,
+                traj_loader,
+                T_min=curriculum.T_min,
+                T_max=curriculum.T_max,
+                ds_mode=arm.ds_mode,
+                deep_supervision_weight=arm.deep_supervision_weight,
+                epochs=cfg.train.epochs,
+                lr=cfg.train.lr,
+                weight_decay=cfg.train.weight_decay,
+                device=device,
+                seed=seed,
+            )
+        else:
+            train(
+                m,
+                train_loader,
+                epochs=cfg.train.epochs,
+                lr=cfg.train.lr,
+                weight_decay=cfg.train.weight_decay,
+                deep_supervision_weight=arm.deep_supervision_weight,
+                device=device,
+            )
         metrics = {
             "accuracy": accuracy(m, test_loader, device),
+            # Train accuracy is the M3a optimization-vs-capacity diagnostic: a loop that
+            # fails at high T with *low train acc too* is an optimization failure (Phase 2's
+            # step-aligned DS may help), not a capacity verdict against the loop.
+            "train_accuracy": accuracy(m, train_loader, device),
             "n_params": m.count_params(),
         }
         if multi_output:
@@ -129,6 +174,10 @@ def _aggregate(per_seed: list[dict], labels: list[str]) -> dict:
             "accuracy_per_seed": accs,
             "n_params": per_seed[0][lbl]["n_params"],
         }
+        if "train_accuracy" in per_seed[0][lbl]:
+            tr = [s[lbl]["train_accuracy"] for s in per_seed]
+            stats["train_accuracy_mean"] = float(np.mean(tr))
+            stats["train_accuracy_std"] = _std(tr)
         if "exact_match" in per_seed[0][lbl]:
             ems = [s[lbl]["exact_match"] for s in per_seed]
             stats["exact_match_mean"] = float(np.mean(ems))
@@ -207,6 +256,7 @@ def _aggregate_extrapolation(
     labels: list[str],
     T_values: list[int],
     R_values: list[int],
+    delta_pairs: Optional[list[list[str]]] = None,
 ) -> dict:
     agg = {}
     for T in T_values:
@@ -216,11 +266,14 @@ def _aggregate_extrapolation(
         agg[T]["baseline_std"] = _std(baselines)
         for R in R_values:
             agg[T][R] = {}
+            per_seed_acc = {}  # lbl -> per-seed accuracies, kept so cells can be paired-tested
             for lbl in labels:
                 accs = [seed_data[T][0][(lbl, R)]["accuracy"] for seed_data in all_seed_extrap]
+                per_seed_acc[lbl] = accs
                 stats = {
                     "accuracy_mean": float(np.mean(accs)),
                     "accuracy_std": _std(accs),
+                    "accuracy_per_seed": accs,
                 }
                 if "exact_match" in all_seed_extrap[0][T][0][(lbl, R)]:
                     ems = [
@@ -229,7 +282,63 @@ def _aggregate_extrapolation(
                     stats["exact_match_mean"] = float(np.mean(ems))
                     stats["exact_match_std"] = _std(ems)
                 agg[T][R][lbl] = stats
+            # Paired Δ + sign test per (T, R') cell, so the extrapolation diagonal (R'=T) —
+            # which carries the milestone headline (e.g. the M3b short-horizon stepDS win) —
+            # gets the SAME paired significance every other Δ in the run gets, not eyeballed
+            # bands. (Review fix M2: per-seed extrapolation data is retained for this.)
+            if delta_pairs:
+                cell_deltas = {}
+                for a, b in delta_pairs:
+                    if a in per_seed_acc and b in per_seed_acc:
+                        cell_deltas[f"{a}-{b}"] = delta_report(
+                            per_seed_acc[a], per_seed_acc[b], label="accuracy"
+                        )
+                agg[T][R]["_deltas"] = cell_deltas
     return agg
+
+
+def budget_audit(points: list[dict], labels: list[str], cfg: ExperimentConfig) -> dict:
+    """Verify every param-matched arm stays within `budget_tol` of the reference, per cell.
+
+    The M3a confound guard (LOG.md / CLAUDE.md §11): a depth sweep only attributes its Δ to
+    *depth* if the parameter budget is held fixed across every arm AND every T. The reference
+    arm (the loop) defines the budget; arms listed in `budget_ceiling` (e.g. the ~n_steps×
+    `untied_stack`) are deliberately non-matched and exempt. Returns per-cell rows plus a
+    `breaches` list — arms that broke tolerance without being a declared ceiling. A breach on
+    the loop/ff_matched (the depth-attribution arms) is a blocker; a breach on `untied_matched`
+    is the expected width-quantization finding (narrow blocks at high T), surfaced not hidden.
+    """
+    ref = cfg.budget_reference
+    tol = cfg.budget_tol
+    ceiling = set(cfg.budget_ceiling)
+    rows = []
+    breaches = []
+    for p in points:
+        ref_params = p["agg"][ref]["n_params"]
+        for lbl in labels:
+            n = p["agg"][lbl]["n_params"]
+            ratio = n / ref_params if ref_params else float("nan")
+            if lbl == ref:
+                role = "reference"
+            elif lbl in ceiling:
+                role = "ceiling"
+            else:
+                role = "matched"
+            within = role == "ceiling" or abs(ratio - 1.0) <= tol
+            rows.append(
+                {
+                    "config": p["label"],
+                    "arm": lbl,
+                    "n_params": n,
+                    "ref_params": ref_params,
+                    "ratio": ratio,
+                    "role": role,
+                    "within_tol": within,
+                }
+            )
+            if role == "matched" and not within:
+                breaches.append((p["label"], lbl, ratio))
+    return {"rows": rows, "breaches": breaches, "tol": tol, "reference": ref}
 
 
 def main():
@@ -320,6 +429,7 @@ def main():
                 labels,
                 cfg.extrapolation.T_values,
                 cfg.extrapolation.R_values,
+                delta_pairs=cfg.resolved_deltas(),
             )
             print("\n=== Depth Extrapolation Summary ===")
             for T in cfg.extrapolation.T_values:
@@ -365,6 +475,11 @@ def main():
     }
     if extrap_results is not None:
         record["extrapolation"] = extrap_results
+    # Compute the budget audit BEFORE the JSON dump so the confound-guard table is embedded in
+    # the canonical run record (§5.7), not only the side-car CSV (review fix m1).
+    audit = budget_audit(points, labels, cfg) if cfg.budget_reference is not None else None
+    if audit is not None:
+        record["budget_audit"] = audit
 
     json_path = out_dir / f"{tag}_{stamp}.json"
     with open(json_path, "w") as f:
@@ -400,6 +515,17 @@ def main():
                         a["n_params"],
                     ]
                 )
+                if "train_accuracy_mean" in a:
+                    w.writerow(
+                        [
+                            p["label"],
+                            lbl,
+                            "train_accuracy",
+                            a["train_accuracy_mean"],
+                            a["train_accuracy_std"],
+                            a["n_params"],
+                        ]
+                    )
                 if "exact_match_mean" in a:
                     w.writerow(
                         [
@@ -417,10 +543,23 @@ def main():
     deltas_csv_path = out_dir / f"{tag}_{stamp}_deltas.csv"
     with open(deltas_csv_path, "w", newline="") as f:
         w = csv.writer(f)
-        w.writerow(["config", "delta", "metric", "delta_mean", "delta_std", "n_seeds"])
+        w.writerow(
+            [
+                "config",
+                "delta",
+                "metric",
+                "delta_mean",
+                "delta_std",
+                "n_seeds",
+                "sign_pos",
+                "sign_neg",
+                "sign_p",
+            ]
+        )
         for p in points:
             for pair, reps in p["deltas"].items():
                 for metric, rep in reps.items():
+                    st = rep.get("sign_test", {})
                     w.writerow(
                         [
                             p["label"],
@@ -429,16 +568,68 @@ def main():
                             rep["delta_mean"],
                             rep["delta_std"],
                             rep["n_seeds"],
+                            st.get("n_pos", ""),
+                            st.get("n_neg", ""),
+                            st.get("p_value", ""),
                         ]
                     )
 
     print(f"\nResults : {json_path}")
     print(f"Curve   : {csv_path}")
     print(f"Deltas  : {deltas_csv_path}")
+
+    # Budget-parity audit (M3a confound guard): write the realized-param table and flag any
+    # matched arm that drifted out of tolerance. `audit` was computed above for the run record.
+    if audit is not None:
+        params_csv_path = out_dir / f"{tag}_{stamp}_params.csv"
+        with open(params_csv_path, "w", newline="") as f:
+            w = csv.writer(f)
+            w.writerow(["config", "arm", "n_params", "ref_params", "ratio", "role", "within_tol"])
+            for r in audit["rows"]:
+                w.writerow(
+                    [
+                        r["config"],
+                        r["arm"],
+                        r["n_params"],
+                        r["ref_params"],
+                        f"{r['ratio']:.4f}",
+                        r["role"],
+                        r["within_tol"],
+                    ]
+                )
+        record["budget_audit"] = audit
+        print(f"Params  : {params_csv_path}")
+        tol_pct = audit["tol"] * 100
+        if audit["breaches"]:
+            print(
+                f"  ⚠ BUDGET PARITY: {len(audit['breaches'])} matched-arm cell(s) "
+                f"exceeded ±{tol_pct:.0f}% vs '{audit['reference']}':"
+            )
+            for cell, lbl, ratio in audit["breaches"]:
+                print(f"      [{cell}] {lbl}: ratio {ratio:.4f}")
+            print(
+                "    NOTE: a breach on the loop/ff_matched is a depth-attribution blocker; "
+                "a breach on untied_matched is the expected high-T width-quantization "
+                "finding (narrow blocks) — see LOG.md."
+            )
+        else:
+            print(f"  ✓ BUDGET PARITY: all matched arms within ±{tol_pct:.0f}% per cell.")
     # The line-plot only makes sense for a 1-D numeric sweep; a grid is summarised by
     # the CSVs above.
     if cfg.sweep is not None:
         _maybe_plot(points, labels, cfg.sweep.param, out_dir / f"{tag}_{stamp}_curve.png")
+
+    # M3a: when depth is coupled to a swept param, draw accuracy-vs-depth and Δ-vs-depth
+    # curves faceted by the remaining grid axes (rule, w) — the depth-budget deliverable.
+    if cfg.couple_n_steps_to_param is not None:
+        _maybe_plot_depth_budget(
+            points,
+            labels,
+            cfg.couple_n_steps_to_param,
+            cfg.resolved_deltas(),
+            out_dir / f"{tag}_{stamp}_depth_curve.png",
+            out_dir / f"{tag}_{stamp}_depth_deltas.png",
+        )
 
     if extrap_results is not None:
         extrap_csv_path = out_dir / f"{tag}_{stamp}_extrapolation.csv"
@@ -483,6 +674,33 @@ def main():
                             )
         print(f"Extrap  : {extrap_csv_path}")
 
+        # Paired Δ + sign test per (T_test, R') cell — so the extrapolation diagonal carries
+        # the same significance call as every other Δ in the run (review fix M2).
+        extrap_deltas_path = out_dir / f"{tag}_{stamp}_extrapolation_deltas.csv"
+        with open(extrap_deltas_path, "w", newline="") as f:
+            w = csv.writer(f)
+            w.writerow(
+                ["T_test", "R_test", "delta", "delta_mean", "delta_std",
+                 "sign_pos", "sign_neg", "sign_p"]
+            )
+            for T in cfg.extrapolation.T_values:
+                for R in cfg.extrapolation.R_values:
+                    for pair, rep in extrap_results[T][R].get("_deltas", {}).items():
+                        st = rep.get("sign_test", {})
+                        w.writerow(
+                            [
+                                T,
+                                R,
+                                pair,
+                                rep["delta_mean"],
+                                rep["delta_std"],
+                                st.get("n_pos", ""),
+                                st.get("n_neg", ""),
+                                st.get("p_value", ""),
+                            ]
+                        )
+        print(f"ExtrapΔ : {extrap_deltas_path}")
+
         _maybe_plot_extrapolation(
             extrap_results,
             labels,
@@ -521,6 +739,93 @@ def _maybe_plot(points, labels, sweep_param, out_path):
     fig.savefig(out_path, dpi=120)
     plt.close(fig)
     print(f"Plot    : {out_path}")
+
+
+def _group_by_other_axes(points, coupled_param):
+    """Group axis points by every grid key except the coupled one (e.g. by (rule, w)).
+
+    Returns an ordered dict {group_label: [(coupled_value, point), ...] sorted by value}.
+    Used by the M3a depth-budget plot: one facet per (rule, w), the coupled param (T) on x.
+    """
+    groups: dict = {}
+    for p in points:
+        ov = p["overrides"]
+        if coupled_param not in ov:
+            continue
+        other = {k: v for k, v in ov.items() if k != coupled_param}
+        glabel = ", ".join(f"{k}={other[k]}" for k in sorted(other)) or "all"
+        groups.setdefault(glabel, []).append((ov[coupled_param], p))
+    for g in groups.values():
+        g.sort(key=lambda t: t[0])
+    return groups
+
+
+def _maybe_plot_depth_budget(points, labels, coupled_param, delta_pairs, out_curve, out_deltas):
+    """M3a deliverable: accuracy-vs-T and Δ-vs-T curves, one facet per (rule, w) group."""
+    try:
+        import matplotlib
+
+        matplotlib.use("Agg")
+        import matplotlib.pyplot as plt
+    except Exception:
+        print("Depth Plot: skipped (matplotlib not installed; CSVs hold the curves)")
+        return
+
+    groups = _group_by_other_axes(points, coupled_param)
+    if not groups:
+        return
+    glabels = list(groups.keys())
+
+    # --- Figure 1: per-arm test accuracy vs the coupled param (T), faceted by group. ---
+    fig, axes = plt.subplots(1, len(glabels), figsize=(5 * len(glabels), 4.2), squeeze=False)
+    for j, gl in enumerate(glabels):
+        ax = axes[0][j]
+        xs = [v for v, _ in groups[gl]]
+        for lbl in labels:
+            means = np.array([p["agg"][lbl]["accuracy_mean"] for _, p in groups[gl]])
+            stds = np.array([p["agg"][lbl]["accuracy_std"] for _, p in groups[gl]])
+            ax.plot(xs, means, marker="o", label=lbl)
+            ax.fill_between(xs, means - stds, means + stds, alpha=0.2)
+        base = np.array([p["agg"]["baseline"]["mean"] for _, p in groups[gl]])
+        ax.plot(xs, base, color="gray", linestyle="--", label="majority baseline")
+        ax.set_title(gl)
+        ax.set_xlabel(coupled_param)
+        ax.set_ylabel("test accuracy")
+        ax.set_xticks(xs)
+        ax.legend(fontsize=8)
+    fig.suptitle("M3a: test accuracy vs depth at fixed budget")
+    fig.tight_layout()
+    fig.savefig(out_curve, dpi=120)
+    plt.close(fig)
+    print(f"Depth Plot: {out_curve}")
+
+    # --- Figure 2: headline Δ(recurrent − control) vs the coupled param, faceted by group. ---
+    fig, axes = plt.subplots(1, len(glabels), figsize=(5 * len(glabels), 4.2), squeeze=False)
+    for j, gl in enumerate(glabels):
+        ax = axes[0][j]
+        xs = [v for v, _ in groups[gl]]
+        for a, b in delta_pairs:
+            key = f"{a}-{b}"
+            means, stds = [], []
+            for _, p in groups[gl]:
+                rep = p["deltas"].get(key, {}).get("accuracy")
+                means.append(rep["delta_mean"] if rep else np.nan)
+                stds.append(rep["delta_std"] if rep else 0.0)
+            means = np.array(means)
+            stds = np.array(stds)
+            ax.plot(xs, means, marker="o", label=f"Δ({a}−{b})")
+            ax.fill_between(xs, means - stds, means + stds, alpha=0.2)
+        ax.axhline(0.0, color="black", linewidth=0.8)
+        ax.set_title(gl)
+        ax.set_xlabel(coupled_param)
+        ax.set_ylabel("Δ test accuracy (loop − control)")
+        ax.set_xticks(xs)
+        ax.legend(fontsize=8)
+    fig.suptitle("M3a: Δ(loop − control) vs depth at fixed budget")
+    fig.tight_layout()
+    fig.savefig(out_deltas, dpi=120)
+    plt.close(fig)
+    print(f"Δ Plot   : {out_deltas}")
 
 
 def _maybe_plot_extrapolation(extrap_results, labels, R_values, T_values, out_path):

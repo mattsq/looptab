@@ -3,7 +3,7 @@
 import pytest
 
 from looptab.config import ExperimentConfig
-from looptab.run import run_point
+from looptab.run import budget_audit, run_point
 
 
 def _cfg(**over):
@@ -266,6 +266,183 @@ def test_untied_stack_routed_as_fixed_depth_in_extrapolation():
     assert (
         extrap_out[("untied_stack", 3)]["accuracy"] == extrap_out[("untied_stack", 5)]["accuracy"]
     )
+
+
+def _iter_cfg(**over):
+    """A small iterated-CA experiment with the four M3a arms (loop + 3 controls)."""
+    base = dict(
+        task=dict(
+            name="iterated",
+            params={"w": 8, "rule": 30, "distractors": 2},
+            n_train=300,
+            n_test=200,
+            task_seed=42,
+            train_sample_seed=1,
+            test_sample_seed=2,
+        ),
+        arms=[
+            dict(
+                name="trm",
+                label="trm_nods",
+                hidden_dim=24,
+                latent_dim=24,
+                n_steps=4,
+                deep_supervision=False,
+                deep_supervision_weight=0.0,
+            ),
+            dict(name="ff_matched", label="ff_matched", hidden_dim=24, latent_dim=24, n_steps=4),
+            dict(
+                name="untied_matched",
+                label="untied_matched",
+                hidden_dim=24,
+                latent_dim=24,
+                n_steps=4,
+                deep_supervision=False,
+                deep_supervision_weight=0.0,
+            ),
+            dict(
+                name="untied_stack",
+                label="untied_stack",
+                hidden_dim=24,
+                latent_dim=24,
+                n_steps=4,
+                deep_supervision=False,
+                deep_supervision_weight=0.0,
+            ),
+        ],
+        train=dict(epochs=2, lr=1e-3, batch_size=128, device="cpu"),
+        seeds=[0, 1],
+    )
+    base.update(over)
+    return ExperimentConfig(**base)
+
+
+def test_couple_n_steps_sets_model_depth_to_T():
+    """M3a: with `couple_n_steps_to_param: T`, each arm's unroll depth tracks the swept T,
+    overriding its static n_steps. The loop unrolls T; the untied arms grow to T blocks."""
+    cfg = _iter_cfg(
+        grid=dict(params={"T": [3, 6]}),
+        couple_n_steps_to_param="T",
+    )
+    for _, overrides in cfg.axis_points():
+        params = {**cfg.task.params, **overrides}
+        _, models, _ = run_point(cfg, params, seed=0)
+        T = overrides["T"]
+        # Loop: n_steps coupled to T despite arm config saying 4.
+        assert models["trm_nods"].n_steps == T
+        # Untied stack: one independent block per step => T blocks.
+        assert len(models["untied_stack"].update_nets) == T
+        assert len(models["untied_matched"].inner.update_nets) == T
+
+
+def test_couple_n_steps_absent_uses_static_n_steps():
+    """Without coupling, depth stays at the per-arm n_steps (no silent override)."""
+    cfg = _iter_cfg(grid=dict(params={"T": [3]}))
+    params = {**cfg.task.params, "T": 3}
+    _, models, _ = run_point(cfg, params, seed=0)
+    assert models["trm_nods"].n_steps == 4  # the arm's static value, not T
+
+
+def test_train_accuracy_reported():
+    """M3a diagnostic: train accuracy is captured per arm alongside test accuracy."""
+    cfg = _iter_cfg(grid=dict(params={"T": [3]}), couple_n_steps_to_param="T")
+    out, _, _ = run_point(cfg, {**cfg.task.params, "T": 3}, seed=0)
+    for lbl in out:
+        assert "train_accuracy" in out[lbl]
+        assert 0.0 <= out[lbl]["train_accuracy"] <= 1.0
+
+
+def _fake_points(ref_params, arm_params_by_cell):
+    """Build the minimal `points` structure budget_audit consumes."""
+    points = []
+    for cell, arms in arm_params_by_cell.items():
+        agg = {lbl: {"n_params": n} for lbl, n in arms.items()}
+        points.append({"label": cell, "agg": agg, "overrides": {}})
+    return points
+
+
+def test_budget_audit_passes_within_tol_and_exempts_ceiling():
+    cfg = _iter_cfg(
+        budget_reference="trm_nods",
+        budget_ceiling=["untied_stack"],
+        budget_tol=0.02,
+    )
+    points = _fake_points(
+        None,
+        {
+            "T=4": {
+                "trm_nods": 1000,
+                "ff_matched": 1010,  # +1% ok
+                "untied_matched": 990,  # -1% ok
+                "untied_stack": 4000,  # 4x but exempt
+            }
+        },
+    )
+    labels = ["trm_nods", "ff_matched", "untied_matched", "untied_stack"]
+    audit = budget_audit(points, labels, cfg)
+    assert audit["breaches"] == []
+    roles = {r["arm"]: r["role"] for r in audit["rows"]}
+    assert roles["trm_nods"] == "reference"
+    assert roles["untied_stack"] == "ceiling"
+
+
+def test_budget_audit_flags_matched_breach_only():
+    """A matched arm out of tolerance is flagged; the ceiling never is, however large."""
+    cfg = _iter_cfg(
+        budget_reference="trm_nods",
+        budget_ceiling=["untied_stack"],
+        budget_tol=0.02,
+    )
+    points = _fake_points(
+        None,
+        {
+            "T=16": {
+                "trm_nods": 1000,
+                "ff_matched": 1000,
+                "untied_matched": 930,  # -7% => breach (expected high-T quantization finding)
+                "untied_stack": 16000,  # 16x but exempt
+            }
+        },
+    )
+    labels = ["trm_nods", "ff_matched", "untied_matched", "untied_stack"]
+    audit = budget_audit(points, labels, cfg)
+    assert [b[1] for b in audit["breaches"]] == ["untied_matched"]
+
+
+def test_run_point_curriculum_trains_all_arms():
+    """M3b: with a curriculum, run_point trains every arm across a depth range and still
+    reports test/train accuracy and exact-match. The step-aligned loop is just another arm."""
+    cfg = _iter_cfg(
+        curriculum=dict(param="T", T_min=1, T_max=4),
+        couple_n_steps_to_param="T",
+    )
+    cfg.task.params = {"w": 8, "T": 4, "rule": 30, "distractors": 2}
+    # Make the loop arm step-aligned with DS on; keep one final-state contrast arm.
+    cfg.arms[0].deep_supervision = True
+    cfg.arms[0].deep_supervision_weight = 1.0
+    cfg.arms[0].ds_mode = "step_aligned"
+    cfg.arms[0].label = "trm_stepDS"
+    out, models, baseline = run_point(cfg, cfg.task.params, seed=0)
+    assert set(out.keys()) == {"trm_stepDS", "ff_matched", "untied_matched", "untied_stack"}
+    for lbl in out:
+        assert "accuracy" in out[lbl] and "train_accuracy" in out[lbl]
+        assert "exact_match" in out[lbl]
+    # The step-aligned loop is built to unroll T_max (the reference eval depth).
+    assert models["trm_stepDS"].n_steps == 4
+
+
+def test_run_point_curriculum_deterministic():
+    cfg = _iter_cfg(
+        curriculum=dict(param="T", T_min=1, T_max=4),
+        couple_n_steps_to_param="T",
+    )
+    cfg.task.params = {"w": 8, "T": 4, "rule": 30, "distractors": 2}
+    cfg.arms[0].ds_mode = "step_aligned"
+    cfg.arms[0].deep_supervision = True
+    a, _, _ = run_point(cfg, cfg.task.params, seed=0)
+    b, _, _ = run_point(cfg, cfg.task.params, seed=0)
+    for lbl in a:
+        assert a[lbl]["accuracy"] == b[lbl]["accuracy"]
 
 
 def test_extrapolation_harness_determinism():

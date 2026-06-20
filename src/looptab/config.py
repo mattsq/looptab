@@ -41,6 +41,13 @@ class ModelConfig(BaseModel):
     # from the loop: a TRM arm with DS off isolates the loop alone.
     deep_supervision: bool = True
     deep_supervision_weight: float = 1.0
+    # `ds_mode` selects what the per-step readouts are supervised against (M3b):
+    #   "final"        — every step is pinned to the final state s_T (the M0–M3a default;
+    #                    this is the DS that has been neutral-to-negative everywhere).
+    #   "step_aligned" — loop step i is supervised against the intermediate CA state s_i
+    #                    (requires a trajectory target and n_steps == T per batch). This is
+    #                    the version that *should* fire if the loop learns a step operator.
+    ds_mode: Literal["final", "step_aligned"] = "final"
 
     def resolved_label(self) -> str:
         return self.label or self.name
@@ -93,6 +100,21 @@ class ExtrapolationConfig(BaseModel):
     R_values: list[int]
 
 
+class CurriculumConfig(BaseModel):
+    """Train across a range of CA depths instead of a single fixed T (M3b).
+
+    Each batch samples a depth ``T ~ Uniform{T_min..T_max}``; the model is unrolled to T and
+    supervised against the trajectory up to s_T. Seeing the step operator applied at varying
+    depths is what should let a step-aligned loop learn a *transferable* operator (the M1
+    extrapolation null + M3a optimization wall are the two stacked levers this targets). The
+    trajectory dataset is generated once at length ``T_max``; per-batch depths slice into it.
+    """
+
+    param: str = "T"  # the task depth parameter the curriculum sweeps
+    T_min: int = 1
+    T_max: int = 8
+
+
 class ExperimentConfig(BaseModel):
     task: TaskConfig
     arms: list[ModelConfig]
@@ -100,11 +122,28 @@ class ExperimentConfig(BaseModel):
     sweep: Optional[SweepConfig] = None
     grid: Optional[GridConfig] = None
     extrapolation: Optional[ExtrapolationConfig] = None
+    curriculum: Optional[CurriculumConfig] = None
     # Pairs of arm labels to diff: [[recurrent, control], ...]. If omitted, every
     # non-last arm is diffed against the last arm (assumed to be the control).
     deltas: Optional[list[list[str]]] = None
     seeds: list[int] = Field(default_factory=lambda: [0, 1, 2, 3, 4])
     results_dir: str = "results"
+
+    # --- M3a: depth-at-fixed-budget sweep (CLAUDE.md §11 / LOG.md) -------------------
+    # When set (e.g. "T"), every recurrent/untied arm's unroll depth is set to the swept
+    # task value `task_params[param]` instead of its static `n_steps`. This is what makes
+    # "match the loop's n_steps to the task's T" a config knob: as we sweep T, the loop
+    # unrolls T steps and the untied stack grows to T blocks, all from one config. Without
+    # it, depth would be pinned at the per-arm n_steps and the depth sweep would be a no-op.
+    couple_n_steps_to_param: Optional[str] = None
+    # Budget-parity audit (the M3a confound guard). `budget_reference` is the arm label
+    # whose param count defines the fixed budget (the loop). Every other arm except those
+    # in `budget_ceiling` must land within `budget_tol` of it, *per cell*; the runner logs
+    # realized counts and flags any breach. `budget_ceiling` lists deliberately
+    # non-param-matched arms (e.g. the ~n_steps× `untied_stack`) exempt from the check.
+    budget_reference: Optional[str] = None
+    budget_ceiling: list[str] = Field(default_factory=list)
+    budget_tol: float = 0.02
 
     @model_validator(mode="after")
     def _check_axes(self) -> "ExperimentConfig":

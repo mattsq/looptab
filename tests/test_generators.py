@@ -88,3 +88,39 @@ def test_iterated_T0_identity():
     """T=0 => output equals input (no steps applied)."""
     X, y = make_iterated(n=30, w=6, T=0, task_seed=0, sample_seed=0)
     np.testing.assert_array_equal(X, y)
+
+
+def test_iterated_trajectory_shape_and_consistency():
+    """M3b: the trajectory is (n, T, w) and its last frame is the canonical s_T target."""
+    X, y, traj = make_iterated(
+        n=40, w=7, T=5, task_seed=1, sample_seed=2, rule=30, return_trajectory=True
+    )
+    assert traj.shape == (40, 5, 7)
+    assert X.shape == (40, 7)  # no distractors here, so X is just s0
+    # Consistency check against the canonical single-target output (per the M3b spec).
+    np.testing.assert_array_equal(traj[:, -1, :], y)
+
+
+def test_iterated_trajectory_is_step_chain():
+    """Each trajectory frame is one CA step from the previous (s_{i} = ca_step(s_{i-1}))."""
+    _, _, traj = make_iterated(
+        n=25, w=8, T=4, task_seed=3, sample_seed=4, rule=110, return_trajectory=True
+    )
+    for i in range(1, traj.shape[1]):
+        np.testing.assert_array_equal(traj[:, i, :], ca_step(traj[:, i - 1, :], 110))
+
+
+def test_iterated_trajectory_determinism():
+    a = make_iterated(n=30, w=6, T=3, task_seed=7, sample_seed=8, return_trajectory=True)
+    b = make_iterated(n=30, w=6, T=3, task_seed=7, sample_seed=8, return_trajectory=True)
+    for x, y in zip(a, b):
+        np.testing.assert_array_equal(x, y)
+
+
+def test_iterated_trajectory_first_frame_is_one_step():
+    """First trajectory frame s_1 is one CA step from s0 (the input's CA part)."""
+    X, _, traj = make_iterated(
+        n=20, w=9, T=2, task_seed=0, sample_seed=0, rule=90, return_trajectory=True
+    )
+    s0 = X[:, :9].astype(np.int64)
+    np.testing.assert_array_equal(traj[:, 0, :], ca_step(s0, 90))
