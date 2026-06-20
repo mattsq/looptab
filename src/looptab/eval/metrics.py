@@ -7,12 +7,14 @@ from torch.utils.data import DataLoader
 
 
 @torch.no_grad()
-def _predict(model: nn.Module, loader: DataLoader, device: str) -> tuple[np.ndarray, np.ndarray]:
+def _predict(
+    model: nn.Module, loader: DataLoader, device: str, **kwargs
+) -> tuple[np.ndarray, np.ndarray]:
     model.eval()
     preds, targets = [], []
     for X, y in loader:
         X = X.to(device)
-        logits, _ = model(X)
+        logits, _ = model(X, **kwargs)
         if logits.ndim == 2:
             pred = logits.argmax(dim=-1).cpu().numpy()
         else:
@@ -23,18 +25,32 @@ def _predict(model: nn.Module, loader: DataLoader, device: str) -> tuple[np.ndar
     return np.concatenate(preds), np.concatenate(targets)
 
 
-def accuracy(model: nn.Module, loader: DataLoader, device: str = "cpu") -> float:
+def accuracy(model: nn.Module, loader: DataLoader, device: str = "cpu", **kwargs) -> float:
     """Token-level (per-bit) accuracy."""
-    preds, targets = _predict(model, loader, device)
+    preds, targets = _predict(model, loader, device, **kwargs)
     return float((preds == targets).mean())
 
 
-def exact_match(model: nn.Module, loader: DataLoader, device: str = "cpu") -> float:
+def exact_match(model: nn.Module, loader: DataLoader, device: str = "cpu", **kwargs) -> float:
     """Exact-match (whole-row correct). Only meaningful for multi-output targets."""
-    preds, targets = _predict(model, loader, device)
+    preds, targets = _predict(model, loader, device, **kwargs)
     if targets.ndim == 1:
         return float((preds == targets).mean())  # same as accuracy for single-output
     return float((preds == targets).all(axis=-1).mean())
+
+
+def majority_baseline(loader: DataLoader) -> float:
+    """Compute token-level majority class baseline accuracy."""
+    targets = []
+    for _, y in loader:
+        targets.append(y.numpy())
+    if not targets:
+        return 0.0
+    targets = np.concatenate(targets)
+    _, counts = np.unique(targets, return_counts=True)
+    if len(counts) == 0:
+        return 0.0
+    return float(np.max(counts) / targets.size)
 
 
 def delta_report(

@@ -7,8 +7,9 @@ name = "looptab"
 version = "0.1.0"
 requires-python = ">=3.11"
 dependencies = [
-    "torch>=2.2",
-    "numpy>=1.26",
+    # Pinned to torch 2.2.x and numpy 1.x to support macOS x86_64 wheel compatibility on Intel CPUs
+    "torch>=2.2,<2.3",
+    "numpy>=1.26,<2.0",
     "pydantic>=2.0",
     "pyyaml>=6.0",
 ]
