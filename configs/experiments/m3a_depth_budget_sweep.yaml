@@ -1,0 +1,92 @@
+# M3a — depth-at-fixed-budget sweep (Task B / iterated CA).
+#
+# THE CLAIM under test (from the M2 synthesis): tied recurrence is the parameter-efficient
+# way to buy depth AND width from one budget. That predicts the loop's advantage should
+# GROW with required depth, because untying only becomes unaffordable when many steps are
+# needed. Everything so far ran at the shallow end (T=4) — exactly where tying's edge is
+# smallest. Here we sweep depth T ∈ {4, 8, 12, 16} at a SINGLE fixed parameter budget and
+# couple the loop's unroll depth to T (`couple_n_steps_to_param: T`): as T grows, the loop
+# unrolls T steps and the untied stack grows to T blocks, all from one config.
+#
+# Confound guard (the whole point): one fixed param budget across every arm AND every T.
+#   - trm_nods (loop) is weight-tied, so its param count is INDEPENDENT of T → constant,
+#     and it is the budget reference.
+#   - ff_matched (§4a shallow MLP) is matched to that budget and independent of T → constant.
+#   - untied_matched (§4b) shrinks its per-block width to stay in budget as the block count
+#     grows to T — the intended mechanism. At high T integer-width quantization forces narrow
+#     blocks, so it may drift past ±2%: the runner flags this as the expected finding, not a
+#     blocker (a loop/ff_matched breach WOULD be a blocker — see budget_audit).
+#   - untied_stack (~T× params) is a NON-param-matched ceiling reference only (budget_ceiling).
+#
+# Rules: 30 (chaotic) and 110 (Turing-complete). Rule 90 is SKIPPED — its T-step composition
+# is linear over GF(2), not a fair depth stress. Widths w ∈ {16, 20} so width genuinely
+# matters and the light cone (radius T) wraps the periodic boundary within the T range.
+# ≥10 seeds: the effect is expected to live in high-T variance.
+
+task:
+  name: iterated
+  params:
+    distractors: 4  # static uninformative bits (held fixed)
+  n_train: 4000
+  n_test: 1000
+  task_seed: 42
+  train_sample_seed: 1
+  test_sample_seed: 2
+
+grid:
+  params:
+    rule: [30, 110]
+    w: [16, 20]
+    T: [4, 8, 12, 16]
+
+# Couple every arm's unroll depth to the swept T (overrides each arm's static n_steps).
+couple_n_steps_to_param: T
+
+arms:
+  - name: trm
+    label: trm_nods       # the loop, final-step loss only (DS is Phase 2's axis)
+    hidden_dim: 64
+    latent_dim: 64
+    n_steps: 4            # ignored — coupled to T
+    deep_supervision: false
+    deep_supervision_weight: 0.0
+  - name: ff_matched
+    label: ff_matched     # §4a param-matched shallow MLP
+    hidden_dim: 64
+    latent_dim: 64
+    n_steps: 4
+  - name: untied_matched
+    label: untied_matched # §4b deep-narrow, width-shrunk to the loop's budget
+    hidden_dim: 64
+    latent_dim: 64
+    n_steps: 4            # ignored — block count coupled to T
+    deep_supervision: false
+    deep_supervision_weight: 0.0
+  - name: untied_stack
+    label: untied_stack   # CEILING ONLY — ~T× params, NOT param-matched
+    hidden_dim: 64
+    latent_dim: 64
+    n_steps: 4            # ignored — block count coupled to T
+    deep_supervision: false
+    deep_supervision_weight: 0.0
+
+deltas:
+  - [trm_nods, ff_matched]       # headline: loop vs §4a shallow (does tying+depth beat width?)
+  - [trm_nods, untied_matched]   # headline: tying at fixed budget+depth (loop vs deep-narrow)
+  - [untied_matched, ff_matched] # depth at fixed capacity (deep-narrow vs shallow)
+  - [trm_nods, untied_stack]     # confounded ceiling (tying + ~T× capacity) — context only
+
+# Budget-parity audit: the loop is the budget reference; untied_stack is the exempt ceiling.
+budget_reference: trm_nods
+budget_ceiling: [untied_stack]
+budget_tol: 0.02
+
+train:
+  epochs: 100
+  lr: 1e-3
+  weight_decay: 1e-4
+  batch_size: 256
+  device: cpu
+
+seeds: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
+results_dir: results

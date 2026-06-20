@@ -53,6 +53,40 @@ def majority_baseline(loader: DataLoader) -> float:
     return float(np.max(counts) / targets.size)
 
 
+def _binom_two_sided_p(k: int, n: int) -> float:
+    """Two-sided exact binomial p-value for k successes in n trials at p=0.5.
+
+    Dependency-free (no scipy): sum the binomial pmf over all outcomes at least as
+    extreme as k. Used for the paired sign test below.
+    """
+    if n == 0:
+        return 1.0
+    from math import comb
+
+    pmf = [comb(n, i) / (2.0**n) for i in range(n + 1)]
+    obs = pmf[k]
+    # Tolerance guards float wobble when symmetric outcomes should count as "as extreme".
+    return float(min(1.0, sum(p for p in pmf if p <= obs + 1e-12)))
+
+
+def sign_test(delta_per_seed: list[float]) -> dict:
+    """Paired sign test on per-seed Δs (CLAUDE.md §2/§5.2 — a Δ needs a significance call).
+
+    Counts how many seeds favour the recurrent arm (Δ>0) vs the control (Δ<0); ties
+    (Δ==0) are dropped, as the sign test prescribes. Reports an exact two-sided binomial
+    p-value under H0: P(Δ>0)=0.5. Distribution-free — appropriate for ≥5 small-sample
+    seeds where normality is dubious.
+    """
+    d = np.asarray(delta_per_seed, dtype=float)
+    n_pos = int((d > 0).sum())
+    n_neg = int((d < 0).sum())
+    n_zero = int((d == 0).sum())
+    n_eff = n_pos + n_neg
+    k = max(n_pos, n_neg)
+    p = _binom_two_sided_p(k, n_eff)
+    return {"n_pos": n_pos, "n_neg": n_neg, "n_zero": n_zero, "n_eff": n_eff, "p_value": p}
+
+
 def delta_report(
     recurrent_scores: list[float],
     control_scores: list[float],
@@ -60,7 +94,7 @@ def delta_report(
 ) -> dict:
     """
     Compute Δ = recurrent − control over multiple seeds.
-    Returns mean, sample std (ddof=1), and per-seed values.
+    Returns mean, sample std (ddof=1), per-seed values, and a paired sign test.
     """
     r = np.array(recurrent_scores)
     c = np.array(control_scores)
@@ -79,6 +113,7 @@ def delta_report(
         "recurrent_per_seed": r.tolist(),
         "control_per_seed": c.tolist(),
         "delta_per_seed": delta.tolist(),
+        "sign_test": sign_test(delta.tolist()),
         "label": label,
         "n_seeds": len(r),
     }

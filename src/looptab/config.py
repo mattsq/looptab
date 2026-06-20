@@ -106,6 +106,22 @@ class ExperimentConfig(BaseModel):
     seeds: list[int] = Field(default_factory=lambda: [0, 1, 2, 3, 4])
     results_dir: str = "results"
 
+    # --- M3a: depth-at-fixed-budget sweep (CLAUDE.md §11 / LOG.md) -------------------
+    # When set (e.g. "T"), every recurrent/untied arm's unroll depth is set to the swept
+    # task value `task_params[param]` instead of its static `n_steps`. This is what makes
+    # "match the loop's n_steps to the task's T" a config knob: as we sweep T, the loop
+    # unrolls T steps and the untied stack grows to T blocks, all from one config. Without
+    # it, depth would be pinned at the per-arm n_steps and the depth sweep would be a no-op.
+    couple_n_steps_to_param: Optional[str] = None
+    # Budget-parity audit (the M3a confound guard). `budget_reference` is the arm label
+    # whose param count defines the fixed budget (the loop). Every other arm except those
+    # in `budget_ceiling` must land within `budget_tol` of it, *per cell*; the runner logs
+    # realized counts and flags any breach. `budget_ceiling` lists deliberately
+    # non-param-matched arms (e.g. the ~n_steps× `untied_stack`) exempt from the check.
+    budget_reference: Optional[str] = None
+    budget_ceiling: list[str] = Field(default_factory=list)
+    budget_tol: float = 0.02
+
     @model_validator(mode="after")
     def _check_axes(self) -> "ExperimentConfig":
         # `sweep` (1-D curve) and `grid` (N-D replication) are mutually exclusive: both
