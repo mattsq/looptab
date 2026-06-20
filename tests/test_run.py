@@ -114,6 +114,85 @@ def test_resolved_deltas_default():
     ]
 
 
+def _untied_arm(cfg):
+    return cfg.arms[0].model_copy(
+        update={
+            "name": "untied_stack",
+            "label": "untied_stack",
+            "deep_supervision": False,
+            "deep_supervision_weight": 0.0,
+        }
+    )
+
+
+def test_run_point_with_untied_stack_arm():
+    """M2: the untied-stack control (§4b) is a first-class arm the runner trains."""
+    cfg = _cfg()
+    cfg.arms.append(_untied_arm(cfg))
+    out, models, _ = run_point(cfg, cfg.task.params, seed=0)
+    assert "untied_stack" in out
+    assert out["untied_stack"]["accuracy"] >= 0.0
+    # §4b: depth/compute-matched, not param-matched — it has more params than the loop.
+    assert out["untied_stack"]["n_params"] > out["trm_nods"]["n_params"]
+
+
+def _untied_matched_arm(cfg):
+    return cfg.arms[0].model_copy(
+        update={
+            "name": "untied_matched",
+            "label": "untied_matched",
+            "deep_supervision": False,
+            "deep_supervision_weight": 0.0,
+        }
+    )
+
+
+def test_untied_matched_arm_is_param_matched_in_runner():
+    """The clean control reports a param count close to the loop's (not ~4×)."""
+    cfg = _cfg()
+    cfg.arms.append(_untied_matched_arm(cfg))
+    out, _, _ = run_point(cfg, cfg.task.params, seed=0)
+    ratio = out["untied_matched"]["n_params"] / out["trm_nods"]["n_params"]
+    assert 0.8 <= ratio <= 1.2, f"untied_matched/loop param ratio = {ratio:.3f}"
+
+
+def test_untied_arms_deterministic():
+    """§5.3: both untied controls reproduce bit-for-bit at a fixed seed."""
+    cfg = _cfg()
+    cfg.arms.append(_untied_arm(cfg))
+    cfg.arms.append(_untied_matched_arm(cfg))
+    a, _, _ = run_point(cfg, cfg.task.params, seed=0)
+    b, _, _ = run_point(cfg, cfg.task.params, seed=0)
+    for lbl in ("untied_stack", "untied_matched"):
+        assert a[lbl]["accuracy"] == b[lbl]["accuracy"]
+
+
+def test_untied_stack_routed_as_fixed_depth_in_extrapolation():
+    """The untied stack has fixed depth, so the extrapolation harness must evaluate it
+    once and hold it flat across R' (like ff_matched), never over-unrolling it."""
+    cfg = _cfg()
+    cfg.task.name = "iterated"
+    cfg.task.params = {"w": 8, "T": 2, "rule": 90, "distractors": 2}
+    cfg.arms.append(_untied_arm(cfg))
+    _, models, _ = run_point(cfg, cfg.task.params, seed=0)
+
+    from looptab.run import run_extrapolation_point
+
+    extrap_out, _ = run_extrapolation_point(
+        cfg,
+        cfg.task.params,
+        seed=0,
+        models=models,
+        T_test=2,
+        R_test_values=[3, 5],
+        device="cpu",
+    )
+    # Fixed-depth arm: identical accuracy across all R' (evaluated once, copied).
+    assert (
+        extrap_out[("untied_stack", 3)]["accuracy"] == extrap_out[("untied_stack", 5)]["accuracy"]
+    )
+
+
 def test_extrapolation_harness_determinism():
     """Verify that run_extrapolation_point at T_test=T_train produces identical
     metrics as the main run_point loop, confirming seed alignment."""

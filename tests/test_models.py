@@ -3,7 +3,7 @@
 import pytest
 import torch
 
-from looptab.models.controls import FFMatched
+from looptab.models.controls import FFMatched, UntiedStack, UntiedStackMatched
 from looptab.models.trm import TRM
 
 
@@ -101,6 +101,139 @@ def test_ff_multi_output_shape():
     logits, extra = m(X)
     assert logits.shape == (5, 8, 2)
     assert extra is None
+
+
+def test_untied_stack_output_shape():
+    m = UntiedStack(
+        in_features=16,
+        num_classes=2,
+        hidden_dim=32,
+        latent_dim=32,
+        n_steps=3,
+        deep_supervision=True,
+    )
+    X = torch.randn(8, 16)
+    logits, all_logits = m(X)
+    assert logits.shape == (8, 2)
+    assert len(all_logits) == 3
+    for step_logits in all_logits:
+        assert step_logits.shape == (8, 2)
+
+
+def test_untied_stack_no_deep_supervision():
+    m = UntiedStack(
+        in_features=16,
+        num_classes=2,
+        hidden_dim=32,
+        latent_dim=32,
+        n_steps=3,
+        deep_supervision=False,
+    )
+    X = torch.randn(4, 16)
+    logits, all_logits = m(X)
+    assert logits.shape == (4, 2)
+    assert all_logits is None
+
+
+def test_untied_stack_multi_output_shape():
+    m = UntiedStack(
+        in_features=16,
+        num_classes=2,
+        hidden_dim=32,
+        latent_dim=32,
+        n_steps=3,
+        deep_supervision=True,
+        out_features=8,
+    )
+    X = torch.randn(5, 16)
+    logits, all_logits = m(X)
+    assert logits.shape == (5, 8, 2)
+    assert len(all_logits) == 3
+    for step_logits in all_logits:
+        assert step_logits.shape == (5, 8, 2)
+
+
+def test_untied_stack_is_untied():
+    """Each block must have independent weights (the whole point of §4b)."""
+    m = UntiedStack(in_features=16, num_classes=2, hidden_dim=32, latent_dim=32, n_steps=3)
+    assert len(m.update_nets) == 3
+    assert len(m.readouts) == 3
+    # Distinct parameter tensors per block (no tying / sharing).
+    first = m.update_nets[0][0].weight
+    for blk in m.update_nets[1:]:
+        assert blk[0].weight is not first
+
+
+def test_untied_stack_clamps_overunroll():
+    """An untied stack has fixed depth: asking for more steps clamps to n_steps."""
+    m = UntiedStack(
+        in_features=16,
+        num_classes=2,
+        hidden_dim=32,
+        latent_dim=32,
+        n_steps=3,
+        deep_supervision=True,
+    )
+    X = torch.randn(5, 16)
+    _, all_logits = m(X, n_steps=10)
+    assert len(all_logits) == 3  # cannot unroll past the available blocks
+
+
+def test_untied_stack_has_more_params_than_trm():
+    """§4b is depth/compute-matched, NOT param-matched: ~n_steps× TRM's block params.
+    Assert close to n_steps× (not merely >2×) so a half-tied regression is caught."""
+    kw = dict(in_features=20, num_classes=2, hidden_dim=64, latent_dim=64, n_steps=4)
+    trm = TRM(**kw)
+    untied = UntiedStack(**kw)
+    ratio = untied.count_params() / trm.count_params()
+    assert 3.5 <= ratio <= 4.0, f"untied/TRM ratio = {ratio:.3f} (expect ~n_steps=4)"
+
+
+def test_untied_matched_is_param_matched():
+    """The clean control: width-shrunk untied stack with total params ≈ TRM's (§8)."""
+    for out_features in (None, 9):
+        kw = dict(
+            in_features=20 if out_features is None else 13,
+            num_classes=2,
+            hidden_dim=64,
+            latent_dim=64,
+            n_steps=4,
+            out_features=out_features,
+        )
+        trm = TRM(**kw)
+        matched = UntiedStackMatched(**kw)
+        ratio = matched.count_params() / trm.count_params()
+        assert 0.8 <= ratio <= 1.2, f"untied_matched/TRM ratio = {ratio:.3f} (out={out_features})"
+        # It is genuinely untied (more blocks than the loop) but narrower than the full
+        # untied stack, so its width is below the reference 64.
+        assert matched.matched_width < 64
+
+
+def test_untied_matched_output_shape():
+    m = UntiedStackMatched(
+        in_features=16,
+        num_classes=2,
+        hidden_dim=32,
+        latent_dim=32,
+        n_steps=3,
+        deep_supervision=True,
+        out_features=8,
+    )
+    X = torch.randn(5, 16)
+    logits, all_logits = m(X)
+    assert logits.shape == (5, 8, 2)
+    assert len(all_logits) == 3
+    for step_logits in all_logits:
+        assert step_logits.shape == (5, 8, 2)
+
+
+def test_untied_matched_clamps_overunroll():
+    """Fixed-depth like the plain untied stack: over-unrolling clamps to n_steps."""
+    m = UntiedStackMatched(in_features=16, num_classes=2, hidden_dim=32, latent_dim=32, n_steps=3)
+    X = torch.randn(4, 16)
+    logits, all_logits = m(X, n_steps=9)
+    assert logits.shape == (4, 2)
+    assert len(all_logits) == 3
 
 
 def test_param_counts_roughly_matched():

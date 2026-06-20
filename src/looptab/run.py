@@ -48,7 +48,9 @@ def _build_model(
         n_steps=arm.n_steps,
         out_features=out_features,
     )
-    if arm.name == "trm":
+    # The TRM loop and both untied-stack controls (§4b) emit per-step readouts, so deep
+    # supervision can be ablated on the same axis for each.
+    if arm.name in ("trm", "untied_stack", "untied_matched"):
         kwargs["deep_supervision"] = arm.deep_supervision
     return get_model(arm.name, **kwargs)
 

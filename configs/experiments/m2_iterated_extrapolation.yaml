@@ -1,0 +1,86 @@
+# M2 on Task B: add the depth/compute-matched untied control (§4b) to the iterated-CA
+# experiment, mirroring m1_iterated_extrapolation.yaml with a fourth arm.
+#
+# Five arms (one knob per Δ, §5.6):
+#   trm_ds         - TRM loop WITH deep supervision
+#   trm_nods       - TRM loop WITHOUT deep supervision (isolates the loop alone)
+#   untied_stack   - same block stacked n_steps× WITHOUT weight tying, no DS (§4b);
+#                    depth/compute-matched but ~n_steps× TRM's params (capacity NOT held)
+#   untied_matched - the same untied stack width-shrunk so total params ≈ TRM's, no DS;
+#                    the CLEAN tying control — capacity AND depth fixed, only tying varies
+#   ff_matched     - param-matched feedforward control (§4a)
+#
+# THE clean M2 Δ is Δ(trm_nods − untied_matched): weight tying at a *fixed parameter
+# budget* and fixed depth. In the depth-extrapolation sweep both untied arms have a
+# *fixed* depth (one weight set per block), so — like ff_matched — they cannot be
+# unrolled past n_steps and are evaluated once per T_test and held flat across R'. Only
+# the TRM loop is over-unrolled.
+
+task:
+  name: iterated
+  params:
+    w: 9            # cellular automaton state width
+    T: 4            # train CA steps
+    rule: 30        # CA rule (30 = chaotic rule)
+    distractors: 4  # distractor noise bits
+  n_train: 4000
+  n_test: 1000
+  task_seed: 42
+  train_sample_seed: 1
+  test_sample_seed: 2
+
+arms:
+  - name: trm
+    label: trm_ds
+    hidden_dim: 64
+    latent_dim: 64
+    n_steps: 4
+    deep_supervision: true
+    deep_supervision_weight: 1.0
+  - name: trm
+    label: trm_nods
+    hidden_dim: 64
+    latent_dim: 64
+    n_steps: 4
+    deep_supervision: false
+    deep_supervision_weight: 0.0
+  - name: untied_stack
+    label: untied_stack
+    hidden_dim: 64
+    latent_dim: 64
+    n_steps: 4
+    deep_supervision: false
+    deep_supervision_weight: 0.0
+  - name: untied_matched
+    label: untied_matched
+    hidden_dim: 64
+    latent_dim: 64
+    n_steps: 4
+    deep_supervision: false
+    deep_supervision_weight: 0.0
+  - name: ff_matched
+    label: ff_matched
+    hidden_dim: 64
+    latent_dim: 64
+    n_steps: 4
+
+deltas:
+  - [trm_nods, untied_matched] # CLEAN M2: weight tying at fixed capacity + depth
+  - [trm_nods, untied_stack]   # confounded: tying + ~4× capacity (kept for completeness)
+  - [untied_matched, ff_matched] # depth at fixed capacity (deep untied vs shallow MLP)
+  - [trm_nods, ff_matched]     # the loop alone vs param-matched control (M1 delta)
+  - [trm_ds, trm_nods]         # deep supervision alone
+
+train:
+  epochs: 100
+  lr: 1e-3
+  weight_decay: 1e-4
+  batch_size: 256
+  device: cpu
+
+extrapolation:
+  T_values: [4, 6, 8, 10]
+  R_values: [4, 6, 8, 10, 12]
+
+seeds: [0, 1, 2, 3, 4]
+results_dir: results
