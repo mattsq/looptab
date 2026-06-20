@@ -1,0 +1,4 @@
+sweep_param,sweep_value,arm,metric,mean,std,n_params
+,,trm_ds,accuracy,0.9827999999999999,0.00268328157299975,9922
+,,trm_nods,accuracy,0.9803999999999998,0.004560701700396555,9922
+,,ff_matched,accuracy,0.9724,0.005176871642217918,9858
