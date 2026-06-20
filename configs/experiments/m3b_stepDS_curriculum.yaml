@@ -1,0 +1,108 @@
+# M3b — step-aligned deep supervision + T-curriculum (Task B / iterated CA).
+#
+# WHY. M1's extrapolation collapsed (over-unrolling decays to baseline; OOD depth T>T_train
+# fails for every arm) and M3a exposed an optimization wall (s0->s_T unlearnable one-shot at
+# T>=8 for all arms, train acc too). Both nulls share a suspected cause: the loop is asked to
+# learn the whole T-step map at once, and DS pins *every* step to the FINAL state. M3b stacks
+# the two levers the prior milestones named: (i) a depth CURRICULUM (train T ~ {1..8} so the
+# operator is seen applied at varying depths) and (ii) STEP-ALIGNED DS (loop step i supervised
+# against the intermediate CA state s_i, not the final one). If the loop can learn a
+# *transferable step operator*, step-aligned DS should fire and extrapolation to T_test>T_train
+# should improve markedly over M1's collapse.
+#
+# Task config = M1's exactly (rule 30, w=9, distractors=4) so the extrapolation curves are
+# directly comparable to M1's null. Only the training regime changes (curriculum + step DS).
+#
+# Arms (the DS attribution is first-class — three loop variants + two grounding controls):
+#   trm_stepDS  - loop + STEP-ALIGNED DS (step i <- s_i), curriculum.   <- the hypothesis
+#   trm_finalDS - loop + FINAL-state DS (every step <- s_T), curriculum. <- the OLD DS (M0-M3a)
+#   trm_nods    - loop, final-step loss only, curriculum.                <- isolates the loop
+#   ff_matched      - §4a shallow MLP, curriculum (final loss; depthless => grounding only)
+#   untied_matched  - §4b deep-narrow, curriculum (final loss; fixed depth => grounding)
+# Headline Δs: (stepDS - nods) = step-aligned DS effect; (stepDS - finalDS) = alignment vs the
+# old DS; (finalDS - nods) = the old DS effect. The two controls ground the absolute numbers.
+#
+# Then the depth-extrapolation harness: train across T<=8, test at T_test in {4,8,12,16} while
+# over-unrolling R' in {4,8,12,16}. T_test in {12,16} is OOD (beyond the curriculum's T_max=8).
+
+task:
+  name: iterated
+  params:
+    w: 9            # cellular automaton state width (= M1)
+    T: 8            # reference eval depth (= curriculum T_max); curriculum overrides per batch
+    rule: 30        # chaotic rule (= M1)
+    distractors: 4  # static uninformative bits (= M1)
+  n_train: 4000
+  n_test: 1000
+  task_seed: 42
+  train_sample_seed: 1
+  test_sample_seed: 2
+
+# Train across a depth curriculum: each batch samples T ~ Uniform{1..8}, unrolls to T, and
+# supervises against the trajectory up to s_T.
+curriculum:
+  param: T
+  T_min: 1
+  T_max: 8
+
+# Build every arm at depth T_max (the deepest unroll / reference eval depth).
+couple_n_steps_to_param: T
+
+arms:
+  - name: trm
+    label: trm_stepDS      # the hypothesis: step-aligned DS over the curriculum
+    hidden_dim: 64
+    latent_dim: 64
+    n_steps: 8             # = T_max; per-batch depth set by the curriculum
+    deep_supervision: true
+    deep_supervision_weight: 1.0
+    ds_mode: step_aligned
+  - name: trm
+    label: trm_finalDS     # the OLD DS (every step pinned to s_T) — was inert M0-M3a
+    hidden_dim: 64
+    latent_dim: 64
+    n_steps: 8
+    deep_supervision: true
+    deep_supervision_weight: 1.0
+    ds_mode: final
+  - name: trm
+    label: trm_nods        # loop, final-step loss only — isolates the loop under curriculum
+    hidden_dim: 64
+    latent_dim: 64
+    n_steps: 8
+    deep_supervision: false
+    deep_supervision_weight: 0.0
+    ds_mode: final
+  - name: ff_matched
+    label: ff_matched      # §4a grounding (depthless; ill-posed under variable T — expected weak)
+    hidden_dim: 64
+    latent_dim: 64
+    n_steps: 8
+  - name: untied_matched
+    label: untied_matched  # §4b grounding (fixed depth; cannot extrapolate past T_max)
+    hidden_dim: 64
+    latent_dim: 64
+    n_steps: 8
+    deep_supervision: false
+    deep_supervision_weight: 0.0
+
+deltas:
+  - [trm_stepDS, trm_nods]      # HEADLINE: step-aligned DS effect (is alignment the missing piece?)
+  - [trm_stepDS, trm_finalDS]   # step-alignment vs the old final-state DS
+  - [trm_finalDS, trm_nods]     # the old DS effect (re-measured under the curriculum)
+  - [trm_stepDS, ff_matched]    # loop+stepDS vs §4a grounding
+  - [trm_stepDS, untied_matched]# loop+stepDS vs §4b grounding
+
+train:
+  epochs: 100
+  lr: 1e-3
+  weight_decay: 1e-4
+  batch_size: 256
+  device: cpu
+
+extrapolation:
+  T_values: [4, 8, 12, 16]   # 8 = curriculum top (in-dist); 12,16 = OOD extrapolation
+  R_values: [4, 8, 12, 16]   # over-unroll R' >= R to recover longer computations
+
+seeds: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
+results_dir: results

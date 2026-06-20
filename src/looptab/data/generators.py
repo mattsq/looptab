@@ -49,16 +49,31 @@ def make_iterated(
     sample_seed: int,
     rule: int = 90,
     distractors: int = 0,
+    return_trajectory: bool = False,
 ):
-    """Task B: predict T steps of elementary CA rule from initial state."""
+    """Task B: predict T steps of elementary CA rule from initial state.
+
+    Default return is ``(X, s_T)`` — the input (s0 + optional distractors) and the state
+    after T steps. With ``return_trajectory=True`` also return the full intermediate
+    trajectory ``[s1, …, s_T]`` of shape ``(n, T, w)`` as a third element, for step-aligned
+    deep supervision (M3b: loop step i ↔ CA state s_i). The trajectory's last frame is, by
+    construction, identical to the canonical single-target ``s_T`` (asserted in tests).
+    """
     row_rng = np.random.default_rng(sample_seed)
     s0 = row_rng.integers(0, 2, size=(n, w))
     s = s0.copy()
+    traj = [] if return_trajectory else None
     for _ in range(T):
         s = ca_step(s, rule)
+        if return_trajectory:
+            traj.append(s.copy())
     X = s0
     if distractors > 0:
         fn_rng = np.random.default_rng(task_seed)
-        noise = fn_rng.integers(0, 2, size=(n, distractors))
+        noise = fn_rng.integers(0, 2, size=(n, distractors))  # static, uninformative
         X = np.concatenate([s0, noise], axis=-1)
+    if return_trajectory:
+        # Stack to (n, T, w); the last frame equals the canonical s_T target.
+        trajectory = np.stack(traj, axis=1).astype(np.int64) if T > 0 else s0[:, :0, :]
+        return X.astype(np.float32), s.astype(np.int64), trajectory
     return X.astype(np.float32), s.astype(np.int64)

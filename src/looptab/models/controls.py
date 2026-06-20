@@ -73,7 +73,10 @@ class FFMatched(nn.Module):
         )
         self._actual_params = sum(p.numel() for p in self.parameters())
 
-    def forward(self, X: torch.Tensor) -> tuple[torch.Tensor, None]:
+    def forward(self, X: torch.Tensor, n_steps: Optional[int] = None) -> tuple[torch.Tensor, None]:
+        # `n_steps` is accepted (and ignored) for interface parity with the recurrent arms:
+        # a feedforward control has no unroll depth, so the curriculum trainer / extrapolation
+        # harness can call every arm uniformly. It returns no per-step readouts.
         logits = self.net(X)
         if self.out_features is not None:
             B = X.shape[0]

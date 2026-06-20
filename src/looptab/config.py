@@ -41,6 +41,13 @@ class ModelConfig(BaseModel):
     # from the loop: a TRM arm with DS off isolates the loop alone.
     deep_supervision: bool = True
     deep_supervision_weight: float = 1.0
+    # `ds_mode` selects what the per-step readouts are supervised against (M3b):
+    #   "final"        — every step is pinned to the final state s_T (the M0–M3a default;
+    #                    this is the DS that has been neutral-to-negative everywhere).
+    #   "step_aligned" — loop step i is supervised against the intermediate CA state s_i
+    #                    (requires a trajectory target and n_steps == T per batch). This is
+    #                    the version that *should* fire if the loop learns a step operator.
+    ds_mode: Literal["final", "step_aligned"] = "final"
 
     def resolved_label(self) -> str:
         return self.label or self.name
@@ -93,6 +100,21 @@ class ExtrapolationConfig(BaseModel):
     R_values: list[int]
 
 
+class CurriculumConfig(BaseModel):
+    """Train across a range of CA depths instead of a single fixed T (M3b).
+
+    Each batch samples a depth ``T ~ Uniform{T_min..T_max}``; the model is unrolled to T and
+    supervised against the trajectory up to s_T. Seeing the step operator applied at varying
+    depths is what should let a step-aligned loop learn a *transferable* operator (the M1
+    extrapolation null + M3a optimization wall are the two stacked levers this targets). The
+    trajectory dataset is generated once at length ``T_max``; per-batch depths slice into it.
+    """
+
+    param: str = "T"  # the task depth parameter the curriculum sweeps
+    T_min: int = 1
+    T_max: int = 8
+
+
 class ExperimentConfig(BaseModel):
     task: TaskConfig
     arms: list[ModelConfig]
@@ -100,6 +122,7 @@ class ExperimentConfig(BaseModel):
     sweep: Optional[SweepConfig] = None
     grid: Optional[GridConfig] = None
     extrapolation: Optional[ExtrapolationConfig] = None
+    curriculum: Optional[CurriculumConfig] = None
     # Pairs of arm labels to diff: [[recurrent, control], ...]. If omitted, every
     # non-last arm is diffed against the last arm (assumed to be the control).
     deltas: Optional[list[list[str]]] = None

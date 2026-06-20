@@ -409,6 +409,42 @@ def test_budget_audit_flags_matched_breach_only():
     assert [b[1] for b in audit["breaches"]] == ["untied_matched"]
 
 
+def test_run_point_curriculum_trains_all_arms():
+    """M3b: with a curriculum, run_point trains every arm across a depth range and still
+    reports test/train accuracy and exact-match. The step-aligned loop is just another arm."""
+    cfg = _iter_cfg(
+        curriculum=dict(param="T", T_min=1, T_max=4),
+        couple_n_steps_to_param="T",
+    )
+    cfg.task.params = {"w": 8, "T": 4, "rule": 30, "distractors": 2}
+    # Make the loop arm step-aligned with DS on; keep one final-state contrast arm.
+    cfg.arms[0].deep_supervision = True
+    cfg.arms[0].deep_supervision_weight = 1.0
+    cfg.arms[0].ds_mode = "step_aligned"
+    cfg.arms[0].label = "trm_stepDS"
+    out, models, baseline = run_point(cfg, cfg.task.params, seed=0)
+    assert set(out.keys()) == {"trm_stepDS", "ff_matched", "untied_matched", "untied_stack"}
+    for lbl in out:
+        assert "accuracy" in out[lbl] and "train_accuracy" in out[lbl]
+        assert "exact_match" in out[lbl]
+    # The step-aligned loop is built to unroll T_max (the reference eval depth).
+    assert models["trm_stepDS"].n_steps == 4
+
+
+def test_run_point_curriculum_deterministic():
+    cfg = _iter_cfg(
+        curriculum=dict(param="T", T_min=1, T_max=4),
+        couple_n_steps_to_param="T",
+    )
+    cfg.task.params = {"w": 8, "T": 4, "rule": 30, "distractors": 2}
+    cfg.arms[0].ds_mode = "step_aligned"
+    cfg.arms[0].deep_supervision = True
+    a, _, _ = run_point(cfg, cfg.task.params, seed=0)
+    b, _, _ = run_point(cfg, cfg.task.params, seed=0)
+    for lbl in a:
+        assert a[lbl]["accuracy"] == b[lbl]["accuracy"]
+
+
 def test_extrapolation_harness_determinism():
     """Verify that run_extrapolation_point at T_test=T_train produces identical
     metrics as the main run_point loop, confirming seed alignment."""

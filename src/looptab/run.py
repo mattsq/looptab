@@ -21,10 +21,10 @@ import torch
 import yaml
 
 from .config import ExperimentConfig, ModelConfig
-from .data.dataset import make_loaders, make_splits
+from .data.dataset import make_loaders, make_splits, make_trajectory_dataset
 from .eval.metrics import accuracy, delta_report, exact_match, majority_baseline
 from .registry import get_model
-from .train.loop import train
+from .train.loop import train, train_curriculum
 
 
 def _git_sha() -> str:
@@ -93,6 +93,23 @@ def run_point(cfg: ExperimentConfig, task_params: dict, seed: int) -> tuple[dict
     if cfg.couple_n_steps_to_param is not None:
         coupled_steps = int(task_params[cfg.couple_n_steps_to_param])
 
+    # M3b: a curriculum trains across a range of CA depths instead of one fixed T. Build the
+    # trajectory training set once at T_max; every arm is unrolled to a per-batch depth and
+    # (for the loop) supervised step-aligned against the intermediate states. Models are built
+    # at depth T_max — the deepest unroll they need and the reference eval depth.
+    curriculum = cfg.curriculum
+    traj_loader = None
+    if curriculum is not None:
+        coupled_steps = curriculum.T_max
+        traj_ds = make_trajectory_dataset(
+            task_cfg=task_params,
+            task_seed=this_task_seed,
+            sample_seed=task_cfg.train_sample_seed + seed * 100,
+            n=task_cfg.n_train,
+            T_max=curriculum.T_max,
+        )
+        traj_loader, _ = make_loaders(traj_ds, traj_ds, cfg.train.batch_size)
+
     device = cfg.train.device
     results = {}
     models = {}
@@ -101,15 +118,30 @@ def run_point(cfg: ExperimentConfig, task_params: dict, seed: int) -> tuple[dict
         # shuffle stream are identical across arms and independent of arm order.
         torch.manual_seed(seed)
         m = _build_model(arm, in_features, num_classes, out_features, n_steps=coupled_steps)
-        train(
-            m,
-            train_loader,
-            epochs=cfg.train.epochs,
-            lr=cfg.train.lr,
-            weight_decay=cfg.train.weight_decay,
-            deep_supervision_weight=arm.deep_supervision_weight,
-            device=device,
-        )
+        if curriculum is not None:
+            train_curriculum(
+                m,
+                traj_loader,
+                T_min=curriculum.T_min,
+                T_max=curriculum.T_max,
+                ds_mode=arm.ds_mode,
+                deep_supervision_weight=arm.deep_supervision_weight,
+                epochs=cfg.train.epochs,
+                lr=cfg.train.lr,
+                weight_decay=cfg.train.weight_decay,
+                device=device,
+                seed=seed,
+            )
+        else:
+            train(
+                m,
+                train_loader,
+                epochs=cfg.train.epochs,
+                lr=cfg.train.lr,
+                weight_decay=cfg.train.weight_decay,
+                deep_supervision_weight=arm.deep_supervision_weight,
+                device=device,
+            )
         metrics = {
             "accuracy": accuracy(m, test_loader, device),
             # Train accuracy is the M3a optimization-vs-capacity diagnostic: a loop that
