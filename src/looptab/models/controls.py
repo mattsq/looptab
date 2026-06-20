@@ -10,8 +10,12 @@ import torch
 import torch.nn as nn
 
 
-def _count_trm_params(in_features, num_classes, hidden_dim, latent_dim, n_steps, out_features=None):
-    """Compute TRM param count so we can match it in the feedforward control."""
+def _count_trm_params(in_features, num_classes, hidden_dim, latent_dim, out_features=None):
+    """Compute TRM param count so we can match it in a control.
+
+    TRM is weight-tied, so its parameter count is independent of `n_steps` (the same
+    block is reused every step); step count is deliberately not an argument here.
+    """
     answer_dim = out_features * num_classes if out_features is not None else num_classes
     update_in = in_features + latent_dim + answer_dim
     update_params = (update_in * hidden_dim + hidden_dim) + (hidden_dim * latent_dim + latent_dim)
@@ -42,9 +46,7 @@ class FFMatched(nn.Module):
         self.num_classes = num_classes
         self.out_features = out_features
 
-        target = _count_trm_params(
-            in_features, num_classes, hidden_dim, latent_dim, n_steps, out_features
-        )
+        target = _count_trm_params(in_features, num_classes, hidden_dim, latent_dim, out_features)
 
         # Build a wide-enough 2-layer MLP with a chosen width w such that
         # params(in -> w -> w -> out_dim) ≈ target. Solve approximately.
@@ -172,3 +174,66 @@ class UntiedStack(nn.Module):
 
     def count_params(self) -> int:
         return sum(p.numel() for p in self.parameters() if p.requires_grad)
+
+
+class UntiedStackMatched(nn.Module):
+    """
+    Param-matched untied stack — the *clean* weight-tying control (§4b / §8).
+
+    The plain ``UntiedStack`` is depth/compute-matched but **not** param-matched: untying
+    a weight-tied loop necessarily multiplies the block params by ~``n_steps`` (~4× here),
+    so Δ(TRM − UntiedStack) co-varies *tying* with *capacity*. This variant width-shrinks
+    every block (``hidden = latent = w``) so the stack's **total** params ≈ the TRM loop's,
+    exactly as ``FFMatched`` solves a width to the same budget. It therefore holds both
+    capacity *and* depth fixed and varies **only** weight tying — so Δ(TRM − UntiedStackMatched)
+    isolates whether weight-tied recurrence helps at a *fixed parameter budget*.
+
+    Implemented by delegating to a width-``w`` ``UntiedStack``; ``w`` is chosen by the same
+    nearest-match search ``FFMatched`` uses, against the TRM target from ``_count_trm_params``.
+    """
+
+    def __init__(
+        self,
+        in_features: int,
+        num_classes: int,
+        hidden_dim: int = 64,
+        latent_dim: int = 64,
+        n_steps: int = 4,
+        deep_supervision: bool = True,
+        out_features: Optional[int] = None,
+    ):
+        super().__init__()
+        target = _count_trm_params(in_features, num_classes, hidden_dim, latent_dim, out_features)
+        answer_dim = out_features * num_classes if out_features is not None else num_classes
+
+        # Total params of `n_steps` untied blocks at width w (hidden = latent = w), plus
+        # one z0 of size w. Each block = update_net (2 linears) + readout (1 linear).
+        def stack_params(w):
+            update = ((in_features + w + answer_dim) * w + w) + (w * w + w)
+            readout = w * answer_dim + answer_dim
+            return n_steps * (update + readout) + w  # + z0
+
+        w = 1
+        while stack_params(w) < target:
+            w += 1
+        if abs(stack_params(w - 1) - target) < abs(stack_params(w) - target):
+            w = max(1, w - 1)
+        self.matched_width = w
+
+        self.inner = UntiedStack(
+            in_features,
+            num_classes,
+            hidden_dim=w,
+            latent_dim=w,
+            n_steps=n_steps,
+            deep_supervision=deep_supervision,
+            out_features=out_features,
+        )
+
+    def forward(
+        self, X: torch.Tensor, n_steps: Optional[int] = None
+    ) -> tuple[torch.Tensor, Optional[list[torch.Tensor]]]:
+        return self.inner(X, n_steps=n_steps)
+
+    def count_params(self) -> int:
+        return self.inner.count_params()

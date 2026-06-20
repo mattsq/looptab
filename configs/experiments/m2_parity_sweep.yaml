@@ -2,16 +2,19 @@
 # sweep, so we can ask whether the loop's M0 edge is weight-tied *recurrence* or
 # merely *depth*. Re-runs the M0 k-vs-accuracy curve with a fourth arm.
 #
-# Four arms (one knob per Δ, §5.6):
-#   trm_ds       - TRM loop WITH deep supervision
-#   trm_nods     - TRM loop WITHOUT deep supervision (isolates the loop alone)
-#   untied_stack - same block stacked n_steps× WITHOUT weight tying, no DS (§4b)
-#   ff_matched   - param-matched feedforward control (§4a)
+# Five arms (one knob per Δ, §5.6):
+#   trm_ds         - TRM loop WITH deep supervision
+#   trm_nods       - TRM loop WITHOUT deep supervision (isolates the loop alone)
+#   untied_stack   - same block stacked n_steps× WITHOUT weight tying, no DS (§4b);
+#                    depth/compute-matched but ~n_steps× TRM's params (capacity NOT held)
+#   untied_matched - the same untied stack width-shrunk so total params ≈ TRM's, no DS;
+#                    the CLEAN tying control — capacity AND depth fixed, only tying varies
+#   ff_matched     - param-matched feedforward control (§4a)
 #
-# THE M2 Δ is Δ(trm_nods − untied_stack): weight-tied recurrence vs mere depth, with
-# everything else (per-step compute, no DS) held fixed. The untied stack is NOT
-# param-matched (it has ~n_steps× TRM's params); ff_matched remains the §4a capacity
-# control, so the two controls answer different questions and both ship.
+# THE clean M2 Δ is Δ(trm_nods − untied_matched): weight tying at a *fixed parameter
+# budget* and fixed depth. Δ(trm_nods − untied_stack) is the confounded version (tying +
+# ~4× capacity) kept for completeness; Δ(untied_matched − ff_matched) isolates depth at
+# fixed capacity (deep untied vs shallow MLP, same budget).
 
 task:
   name: parity
@@ -49,6 +52,13 @@ arms:
     n_steps: 4
     deep_supervision: false
     deep_supervision_weight: 0.0
+  - name: untied_matched
+    label: untied_matched
+    hidden_dim: 64
+    latent_dim: 64
+    n_steps: 4
+    deep_supervision: false
+    deep_supervision_weight: 0.0
   - name: ff_matched
     label: ff_matched
     hidden_dim: 64
@@ -56,9 +66,10 @@ arms:
     n_steps: 4
 
 deltas:
-  - [trm_nods, untied_stack]   # M2 core: weight-tied recurrence vs mere depth
+  - [trm_nods, untied_matched] # CLEAN M2: weight tying at fixed capacity + depth
+  - [trm_nods, untied_stack]   # confounded: tying + ~4× capacity (kept for completeness)
+  - [untied_matched, ff_matched] # depth at fixed capacity (deep untied vs shallow MLP)
   - [trm_nods, ff_matched]     # the loop alone vs param-matched control (M0 delta)
-  - [untied_stack, ff_matched] # mere depth vs raw capacity
   - [trm_ds, trm_nods]         # deep supervision alone
 
 train:
