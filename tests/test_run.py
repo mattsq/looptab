@@ -1,6 +1,5 @@
 """Tests for the run harness: arms, sweep, Δ reporting, and determinism."""
 
-
 from looptab.config import ExperimentConfig
 from looptab.run import run_point
 
@@ -17,10 +16,24 @@ def _cfg(**over):
             test_sample_seed=2,
         ),
         arms=[
-            dict(name="trm", label="trm_ds", hidden_dim=16, latent_dim=16, n_steps=3,
-                 deep_supervision=True, deep_supervision_weight=1.0),
-            dict(name="trm", label="trm_nods", hidden_dim=16, latent_dim=16, n_steps=3,
-                 deep_supervision=False, deep_supervision_weight=0.0),
+            dict(
+                name="trm",
+                label="trm_ds",
+                hidden_dim=16,
+                latent_dim=16,
+                n_steps=3,
+                deep_supervision=True,
+                deep_supervision_weight=1.0,
+            ),
+            dict(
+                name="trm",
+                label="trm_nods",
+                hidden_dim=16,
+                latent_dim=16,
+                n_steps=3,
+                deep_supervision=False,
+                deep_supervision_weight=0.0,
+            ),
             dict(name="ff_matched", label="ff_matched", hidden_dim=16, latent_dim=16, n_steps=3),
         ],
         train=dict(epochs=3, lr=1e-3, batch_size=128, device="cpu"),
@@ -35,7 +48,15 @@ def test_run_point_returns_all_arms():
     out = run_point(cfg, cfg.task.params, seed=0)
     assert set(out.keys()) == {"trm_ds", "trm_nods", "ff_matched"}
     for v in out.values():
-        assert "accuracy" in v and "exact_match" in v and "n_params" in v
+        assert "accuracy" in v and "n_params" in v
+
+
+def test_exact_match_suppressed_for_single_output():
+    """Parity is single-output: exact_match == accuracy, so it isn't reported."""
+    cfg = _cfg()
+    out = run_point(cfg, cfg.task.params, seed=0)
+    for v in out.values():
+        assert "exact_match" not in v
 
 
 def test_run_point_deterministic():
@@ -45,7 +66,6 @@ def test_run_point_deterministic():
     b = run_point(cfg, cfg.task.params, seed=0)
     for lbl in a:
         assert a[lbl]["accuracy"] == b[lbl]["accuracy"]
-        assert a[lbl]["exact_match"] == b[lbl]["exact_match"]
 
 
 def test_arm_init_independent_of_order():

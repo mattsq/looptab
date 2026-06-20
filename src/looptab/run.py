@@ -69,6 +69,11 @@ def run_point(cfg: ExperimentConfig, task_params: dict, seed: int) -> dict:
     in_features = int(X_sample.shape[0])
     num_classes = 2  # binary per-bit; multi-output (Task B) head is M1
 
+    # Exact-match is only a distinct metric for multi-output targets (§3). For
+    # single-output tasks it equals accuracy, so we don't report it (avoids a
+    # redundant CSV row that reads like an independent signal).
+    multi_output = train_ds.y.ndim > 1
+
     device = cfg.train.device
     results = {}
     for arm in cfg.arms:
@@ -85,12 +90,16 @@ def run_point(cfg: ExperimentConfig, task_params: dict, seed: int) -> dict:
             deep_supervision_weight=arm.deep_supervision_weight,
             device=device,
         )
-        results[arm.resolved_label()] = {
-            "accuracy": accuracy(m, test_loader, device),
-            "exact_match": exact_match(m, test_loader, device),
-            "n_params": m.count_params(),
-        }
+        metrics = {"accuracy": accuracy(m, test_loader, device), "n_params": m.count_params()}
+        if multi_output:
+            metrics["exact_match"] = exact_match(m, test_loader, device)
+        results[arm.resolved_label()] = metrics
     return results
+
+
+def _std(xs: list[float]) -> float:
+    """Sample std (ddof=1); falls back to 0 for a single seed."""
+    return float(np.std(xs, ddof=1)) if len(xs) > 1 else 0.0
 
 
 def _aggregate(per_seed: list[dict], labels: list[str]) -> dict:
@@ -98,15 +107,17 @@ def _aggregate(per_seed: list[dict], labels: list[str]) -> dict:
     out = {}
     for lbl in labels:
         accs = [s[lbl]["accuracy"] for s in per_seed]
-        ems = [s[lbl]["exact_match"] for s in per_seed]
-        out[lbl] = {
+        stats = {
             "accuracy_mean": float(np.mean(accs)),
-            "accuracy_std": float(np.std(accs)),
-            "exact_match_mean": float(np.mean(ems)),
-            "exact_match_std": float(np.std(ems)),
+            "accuracy_std": _std(accs),
             "accuracy_per_seed": accs,
             "n_params": per_seed[0][lbl]["n_params"],
         }
+        if "exact_match" in per_seed[0][lbl]:
+            ems = [s[lbl]["exact_match"] for s in per_seed]
+            stats["exact_match_mean"] = float(np.mean(ems))
+            stats["exact_match_std"] = _std(ems)
+        out[lbl] = stats
     return out
 
 
@@ -162,13 +173,15 @@ def main():
             deltas[f"{a}-{b}"] = rep
             print(f"  Δ({a} − {b}) = {rep['delta_mean']:+.4f} ± {rep['delta_std']:.4f}")
 
-        points.append({
-            "sweep_param": sweep_param,
-            "sweep_value": sv,
-            "agg": agg,
-            "deltas": deltas,
-            "seeds": per_seed,
-        })
+        points.append(
+            {
+                "sweep_param": sweep_param,
+                "sweep_value": sv,
+                "agg": agg,
+                "deltas": deltas,
+                "seeds": per_seed,
+            }
+        )
 
     # --- write run record + the curve artifacts (CSV is the k-vs-accuracy curve) ---
     out_dir = Path(cfg.results_dir)
@@ -194,10 +207,29 @@ def main():
         for p in points:
             for lbl in labels:
                 a = p["agg"][lbl]
-                w.writerow([p["sweep_param"], p["sweep_value"], lbl, "accuracy",
-                            a["accuracy_mean"], a["accuracy_std"], a["n_params"]])
-                w.writerow([p["sweep_param"], p["sweep_value"], lbl, "exact_match",
-                            a["exact_match_mean"], a["exact_match_std"], a["n_params"]])
+                w.writerow(
+                    [
+                        p["sweep_param"],
+                        p["sweep_value"],
+                        lbl,
+                        "accuracy",
+                        a["accuracy_mean"],
+                        a["accuracy_std"],
+                        a["n_params"],
+                    ]
+                )
+                if "exact_match_mean" in a:
+                    w.writerow(
+                        [
+                            p["sweep_param"],
+                            p["sweep_value"],
+                            lbl,
+                            "exact_match",
+                            a["exact_match_mean"],
+                            a["exact_match_std"],
+                            a["n_params"],
+                        ]
+                    )
 
     print(f"\nResults : {json_path}")
     print(f"Curve   : {csv_path}")
@@ -209,6 +241,7 @@ def _maybe_plot(points, labels, sweep_param, out_path):
     """Render the curve with variance bands if matplotlib is available; else skip."""
     try:
         import matplotlib
+
         matplotlib.use("Agg")
         import matplotlib.pyplot as plt
     except Exception:

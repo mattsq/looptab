@@ -1,6 +1,5 @@
 """Evaluation metrics and the Δ(recurrent − control) comparison."""
 
-
 import numpy as np
 import torch
 import torch.nn as nn
@@ -45,18 +44,22 @@ def delta_report(
 ) -> dict:
     """
     Compute Δ = recurrent − control over multiple seeds.
-    Returns mean, std, and per-seed values.
+    Returns mean, sample std (ddof=1), and per-seed values.
     """
     r = np.array(recurrent_scores)
     c = np.array(control_scores)
     delta = r - c
+
+    def _std(x):
+        return float(np.std(x, ddof=1)) if len(x) > 1 else 0.0
+
     return {
         "recurrent_mean": float(r.mean()),
-        "recurrent_std": float(r.std()),
+        "recurrent_std": _std(r),
         "control_mean": float(c.mean()),
-        "control_std": float(c.std()),
+        "control_std": _std(c),
         "delta_mean": float(delta.mean()),
-        "delta_std": float(delta.std()),
+        "delta_std": _std(delta),
         "recurrent_per_seed": r.tolist(),
         "control_per_seed": c.tolist(),
         "delta_per_seed": delta.tolist(),

@@ -4,7 +4,6 @@
 (b) UntiedStack: same block stacked N times without weight tying (M2).
 """
 
-
 import torch
 import torch.nn as nn
 

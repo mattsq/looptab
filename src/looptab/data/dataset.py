@@ -33,6 +33,7 @@ def make_splits(
     n_test: int,
 ) -> tuple["TabularDataset", "TabularDataset"]:
     """Return (train_ds, test_ds) sharing task_seed but using different sample_seeds."""
+
     def _build(sample_seed, n):
         if task == "linear":
             X, y = make_linear(n=n, task_seed=task_seed, sample_seed=sample_seed, **task_cfg)

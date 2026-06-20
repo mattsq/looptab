@@ -9,8 +9,14 @@ from looptab.models.trm import TRM
 
 @pytest.fixture
 def trm():
-    return TRM(in_features=16, num_classes=2, hidden_dim=32, latent_dim=32,
-               n_steps=3, deep_supervision=True)
+    return TRM(
+        in_features=16,
+        num_classes=2,
+        hidden_dim=32,
+        latent_dim=32,
+        n_steps=3,
+        deep_supervision=True,
+    )
 
 
 @pytest.fixture
@@ -28,8 +34,14 @@ def test_trm_output_shape(trm):
 
 
 def test_trm_no_deep_supervision():
-    m = TRM(in_features=16, num_classes=2, hidden_dim=32, latent_dim=32,
-            n_steps=3, deep_supervision=False)
+    m = TRM(
+        in_features=16,
+        num_classes=2,
+        hidden_dim=32,
+        latent_dim=32,
+        n_steps=3,
+        deep_supervision=False,
+    )
     X = torch.randn(4, 16)
     logits, all_logits = m(X)
     assert logits.shape == (4, 2)
