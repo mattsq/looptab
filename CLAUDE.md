@@ -248,46 +248,52 @@ behaviour-changing conclusions, and the next pointer. Append detail to LOG.md, n
 - **Always use `untied_matched`, not `untied_stack`, as the §4b control.** `untied_stack`
   has ~4× the loop's params; a "clean" Δ against it confounds tying with capacity — a §8
   trap that flipped M2's first-round conclusion. `untied_stack` is a labelled ceiling only.
-- **Deep supervision is neutral-to-negative in every run so far (M0/M1/M2/M2-confirm),**
-  Δ(trm_ds − trm_nods) ∈ [−0.02, +0.01]. **BUT** all of those pin every loop step to the
-  *final* state; step-aligned DS (step i ↔ CA state sᵢ) is **untested** — see M3b. Do not
-  conclude "DS is inert" until that runs.
+- **Deep supervision is HORIZON-DEPENDENT, not inert (M3b overturns the prior null at short
+  rollout).** Final-state DS (every step ↔ s_T) stays neutral-to-negative everywhere
+  (M0/M1/M2/M2-confirm + M3b Δ(finalDS−nods)=−0.017, p=.002). **But step-aligned DS (step i ↔
+  sᵢ) is a large WIN at short horizon** — under a T~1..8 curriculum it hits T=4 acc 0.838 / EM
+  0.285 vs nods 0.676 / 0.046 (p=.002). The sign FLIPS with depth: Δ(stepDS−nods) ≈ +0.16 at
+  T=4 but −0.064 at the T=8 reference. So "DS is inert" was an artifact of mis-specified
+  (final-state) DS; step-alignment matters, but only where the rollout is short.
 - **Tying beats a *fair untied* stack on Task B at SHALLOW depth only** (Δ(loop −
   untied_matched) > 0, p=.002, in all M2-confirm cells *and* every M3a T=4 cell) — **but the
   edge does NOT scale with depth; it vanishes by T≥8 (M3a)**. The M2 framing "tied recurrence
   buys depth *and* width from one budget" is now **softened**: only the *width* half holds;
   the *depth* half is **unsupported**.
-- **At Task B depth T≥8 the s₀→s_T target is unlearnable for EVERY arm** (M3a: test AND train
-  collapse to baseline; even the 16× `untied_stack` ceiling fits only ~0.78 train / ~0.52
-  test). An optimization/learnability wall, not a depth-capacity separation — so M3a could not
-  test the depth claim where it mattered. Read the high-T null as "deep CA is unlearnable
-  one-shot at this scale," NOT "tying gives no depth benefit." This wall is exactly what M3b's
-  step-aligned DS + T-curriculum targets.
-- **Deep supervision is neutral-to-negative in every run so far (M0/M1/M2/M2-confirm + M3a is
-  final-state only).** Δ(trm_ds − trm_nods) ∈ [−0.02, +0.01]. Step-aligned DS (step i ↔ CA
-  state sᵢ) is **untested** — see M3b. Do not conclude "DS is inert" until that runs.
+- **At Task B depth T≥8 the s₀→s_T target is unlearnable one-shot for EVERY arm** (M3a: test
+  AND train collapse to baseline; even the 16× `untied_stack` ceiling fits only ~0.78 train /
+  ~0.52 test). An optimization/learnability wall, not a depth-capacity separation. A T~1..8
+  curriculum (M3b) does lift the in-range reference (T=8 nods 0.65 vs M3a's ~0.52 one-shot) but
+  does not crack the wall past the trained horizon.
 - **The loop does NOT beat its §4a control `ff_matched` on Task B** at any depth (M2-confirm
   wins 1/6 by noise; M3a ≤0 at every T, significantly negative at T=4/T=8). On Task A it's the
   mirror: beats `ff_matched` (+0.237) but only ties `untied_matched`. So on neither task does
   the loop beat *both* controls → the literal §9 gate is unmet. The loop's defensible property
   is "never the worst param-matched arm" (robustness), not dominance. The gate as literally
   worded may be unsatisfiable by a generalist judged against single-axis specialists.
-- **Loop extrapolation fails as trained (M1):** over-unrolling R′>R decays toward baseline;
-  all arms collapse at OOD depth T>T_train. Whether a curriculum + step-aligned DS fixes
-  this is the M3b question.
-- Each leg still rests on few configs: Task A on one `d`; Task B depth now swept (M3a) but
-  unlearnable past T=4 one-shot.
+- **No transferable step operator; the loop does NOT extrapolate in depth (M1 + M3b).**
+  Over-unrolling R′>R decays to baseline, and OOD depth T>T_train collapses to baseline for
+  every arm. M3b applied the two named levers (T-curriculum + step-aligned DS) and the OOD
+  collapse (T≥12) STILL holds — a stronger, cleaner null than M1's. Within the curriculum
+  there's only weak compositional signal (R′=T tracks for T≤8, tops out ~0.58).
+- Each leg still rests on few configs: Task A on one `d`; Task B depth swept (M3a) but
+  unlearnable past T=4 one-shot; M3b on one rule (30) / one width (9).
 
 ### (c) Next milestone
 
-**M3b (step-aligned DS + T-curriculum on Task B)** — the active next item on branch
-`claude/m3-depth-budget-stepds-b9jiou`. **M3a is DONE** (LOG.md): the depth-at-budget sweep
-*falsified* the "loop edge grows with depth" prediction and exposed an optimization wall at
-T≥8 (all arms collapse, train acc too). M3b directly targets that wall: extend the iterated
-generator to return the full trajectory [s₁…s_T], add a step-aligned DS mode (loop step i ↔
-sᵢ, requires n_steps==T), train across a T-curriculum, then re-run the depth-extrapolation
-harness. Question: can the loop learn a *transferable step operator* (M1's null + M3a's wall
-are the two stacked levers)? **M3/Task C (H/L hierarchy) remains gated (§9) regardless.**
+**M3a and M3b are both DONE** (full narratives in LOG.md). M3a falsified "loop edge grows
+with depth" (it vanishes by T≥8; deep CA is unlearnable one-shot for all arms). M3b applied
+the T-curriculum + step-aligned DS levers: it found step-aligned DS is a *real* short-horizon
+win (DS was mis-specified, not inert) but did **not** yield a transferable operator — OOD
+depth still collapses, M1's null reproduced and hardened.
+
+**No milestone is currently in flight.** The §9 gate is still unmet (no task where the loop
+beats *both* controls), so **M3/Task C (H/L hierarchy) stays gated**. Open levers for whoever
+picks this up next, in rough priority: (i) **replicate the Task A (parity) leg across `d` /
+sparsity** — still the single biggest single-config gap; (ii) **broaden M3b** to more rules /
+widths and try a *fixed-point or halting* objective (PonderNet/ACT) or an annealed curriculum
+against the depth-extrapolation null; (iii) only then re-judge the loop against the full
+param-matched control set. Earn the hierarchy later, not now.
 
 ## 12. Key references (for grounding a cold agent)
 
