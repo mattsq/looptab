@@ -1,7 +1,0 @@
-sweep_param,sweep_value,arm,metric,mean,std,n_params
-,,trm_ds,accuracy,1.0,0.0,11216
-,,trm_ds,exact_match,1.0,0.0,11216
-,,trm_nods,accuracy,1.0,0.0,11216
-,,trm_nods,exact_match,1.0,0.0,11216
-,,ff_matched,accuracy,1.0,0.0,11240
-,,ff_matched,exact_match,1.0,0.0,11240
