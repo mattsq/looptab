@@ -477,6 +477,11 @@ def _maybe_plot(points, labels, sweep_param, out_path):
         stds = np.array([p["agg"][lbl]["accuracy_std"] for p in points])
         ax.plot(xs, means, marker="o", label=lbl)
         ax.fill_between(xs, means - stds, means + stds, alpha=0.2)
+    # Draw the majority-class baseline so a degenerate sweep point is obvious at a
+    # glance (parity with the extrapolation plot, which already shows it).
+    if "baseline" in points[0]["agg"]:
+        base = np.array([p["agg"]["baseline"]["mean"] for p in points])
+        ax.plot(xs, base, color="gray", linestyle="--", label="majority baseline")
     ax.set_xlabel(sweep_param)
     ax.set_ylabel("test accuracy")
     ax.legend()

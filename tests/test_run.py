@@ -125,6 +125,10 @@ def test_extrapolation_harness_determinism():
 
     from looptab.run import run_extrapolation_point
 
+    # R_test MUST equal the arms' trained n_steps (3, from _cfg) for the accuracy
+    # equality below to hold: run_point evaluates at the default n_steps, so the
+    # extrapolation pass only reproduces it when unrolled to the same depth. This
+    # isolates the seed/data-alignment property, not an unroll-invariance one.
     extrap_out, baseline = run_extrapolation_point(
         cfg,
         cfg.task.params,

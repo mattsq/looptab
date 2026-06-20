@@ -268,11 +268,50 @@ the untied-stack control (§4b, M2) is needed before concluding "tied recurrence
 - Majority baseline metric (`majority_baseline` in `src/looptab/eval/metrics.py`) implemented to capture the frequency of the most common class to detect task degeneracy early.
 - Config-driven depth-extrapolation runner (`src/looptab/run.py` and `configs/experiments/m1_iterated_extrapolation.yaml`) executing sweeps over test CA steps $T_{test} \in [4, 6, 8, 10]$ and test unrolling steps $R_{test} \in [4, 6, 8, 10, 12]$, writing JSON and CSV outputs.
 
-**M1 result (iterated CA rule 30, w=9, distractors=4, n_steps=4, 5 seeds, 100 epochs; ~11.5k params per arm).**
-A non-degenerate configuration (chaotic `rule: 30`, odd width `w: 9`) keeps the target class balanced (majority baseline ~0.503).
-- **At training configuration ($T_{test}=4, R'=4$):** All models train successfully: `trm_nods` accuracy is 0.973 ± 0.009 (exact match: 0.839 ± 0.056), `ff_matched` is 0.971 ± 0.008 (exact match: 0.793 ± 0.057), and `trm_ds` is 0.959 ± 0.007 (exact match: 0.760 ± 0.028).
-- **Over-unrolling ($R' > 4$) at $T_{test}=4$:** Running the recurrent models for more steps than trained on degrades performance back to chance (e.g. `trm_nods` drops to 0.524 at $R'=8$), indicating the loop does not stabilize on a step operator or attractor.
-- **Out-of-distribution depth-extrapolation ($T_{test} > 4$):** All models completely collapse to the majority baseline (~0.50) accuracy at longer time horizons (e.g. $T_{test}=6, 8, 10$) regardless of test unroll steps $R'$. No model (recurrent or feedforward) learns a generalizable algorithm.
+**M1 result (iterated CA rule 30, w=9, distractors=4, n_steps=4, 5 seeds, 100 epochs; ~11.5k
+params per arm).** Non-degenerate config (chaotic `rule: 30`, odd width `w: 9`); majority
+baseline 0.503 ± 0.004, so the target is balanced. Tracked summary:
+`results/m1_iterated_extrapolation_20260620T023255_curve.csv` (per-arm) and
+`..._extrapolation.csv` (the depth sweep).
+
+Per-arm accuracy at the training config ($T_{test}=4, R'=4$):
+
+| arm | accuracy | exact-match |
+|-----|----------|-------------|
+| trm_nods (loop) | 0.972 ± .009 | 0.828 ± .060 |
+| ff_matched (control) | 0.971 ± .008 | 0.793 ± .057 |
+| trm_ds (loop+DS) | 0.959 ± .007 | 0.760 ± .028 |
+
+**The Δ (per §2 — this is the result, not the per-arm numbers):**
+
+| Δ (paired, 5 seeds) | accuracy | exact-match |
+|---|---|---|
+| Δ(loop − control) = trm_nods − ff_matched | **+0.001 ± 0.014** | +0.036 |
+| Δ(DS − loop) = trm_ds − trm_nods | −0.013 ± 0.010 | −0.068 |
+| Δ(loop+DS − control) = trm_ds − ff_matched | −0.012 ± 0.010 | −0.032 |
+
+**Reading (per §8).** On Task B the weight-tied loop gives **no token-accuracy advantage**
+over the param-matched control: Δ(loop − control) = +0.001 ± 0.014 — a clean null, the
+opposite of M0/parity where the loop's edge was robustness. Deep supervision is mildly
+*negative* here (−0.013). The one non-null hint is exact-match: trm_nods leads the control
+by ~+0.036 whole-row (the loop may help compose the per-cell outputs), but seed variance
+(±0.05–0.06 per arm) swamps it — not a claim, a thing to watch when M2 adds the untied stack.
+
+Extrapolation behaviour:
+- **Over-unrolling ($R' > 4$) at $T_{test}=4$:** unrolling the recurrent arms beyond their
+  trained depth degrades them back toward baseline (e.g. `trm_nods` → 0.525 at $R'=8$): the
+  loop does not settle on a stable step operator / fixed point.
+- **OOD depth ($T_{test} > 4$):** every arm — recurrent *and* feedforward — collapses to the
+  majority baseline (~0.50) at $T_{test} \in \{6,8,10\}$ for all $R'$.
+
+**Caveat — scope of the negative result.** This says the loop *as trained here* did not learn
+a transferable step operator; it does **not** settle the §3 "loops ≈ algorithm steps" thesis.
+Two protocol choices stack the deck against extrapolation and are the obvious next levers:
+(i) training at a single fixed depth (`T=4`, `R=4`) rather than across a $T$-curriculum, and
+(ii) deep supervision pinning *every* loop step to the *final* $T{=}4$ state rather than
+supervising step $i$ against the intermediate CA state $s_i$. `trm_nods` (final-step loss only)
+also fails, so the null is not purely a DS artifact — but a step-aligned curriculum is the
+cleaner test and remains unrun.
 
 
 _Then:_
