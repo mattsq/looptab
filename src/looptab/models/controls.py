@@ -4,11 +4,11 @@
 (b) UntiedStack: same block stacked N times without weight tying (M2).
 """
 
+from typing import Optional
+
 import torch
 import torch.nn as nn
 
-
-from typing import Optional
 
 def _count_trm_params(in_features, num_classes, hidden_dim, latent_dim, n_steps, out_features=None):
     """Compute TRM param count so we can match it in the feedforward control."""
@@ -41,8 +41,10 @@ class FFMatched(nn.Module):
         super().__init__()
         self.num_classes = num_classes
         self.out_features = out_features
-        
-        target = _count_trm_params(in_features, num_classes, hidden_dim, latent_dim, n_steps, out_features)
+
+        target = _count_trm_params(
+            in_features, num_classes, hidden_dim, latent_dim, n_steps, out_features
+        )
 
         # Build a wide-enough 2-layer MLP with a chosen width w such that
         # params(in -> w -> w -> out_dim) ≈ target. Solve approximately.

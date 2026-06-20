@@ -106,13 +106,39 @@ def test_ff_multi_output_shape():
 def test_param_counts_roughly_matched():
     in_f, nc, hd, ld, ns = 20, 2, 64, 64, 4
     # Single-output case
-    trm = TRM(in_features=in_f, num_classes=nc, hidden_dim=hd, latent_dim=ld, n_steps=ns)
-    ff = FFMatched(in_features=in_f, num_classes=nc, hidden_dim=hd, latent_dim=ld, n_steps=ns)
+    trm = TRM(
+        in_features=in_f,
+        num_classes=nc,
+        hidden_dim=hd,
+        latent_dim=ld,
+        n_steps=ns,
+    )
+    ff = FFMatched(
+        in_features=in_f,
+        num_classes=nc,
+        hidden_dim=hd,
+        latent_dim=ld,
+        n_steps=ns,
+    )
     ratio = ff.count_params() / trm.count_params()
     assert 0.8 <= ratio <= 1.2, f"FF/TRM param ratio (single) = {ratio:.3f}"
 
     # Multi-output case
-    trm_mo = TRM(in_features=in_f, num_classes=nc, hidden_dim=hd, latent_dim=ld, n_steps=ns, out_features=10)
-    ff_mo = FFMatched(in_features=in_f, num_classes=nc, hidden_dim=hd, latent_dim=ld, n_steps=ns, out_features=10)
+    trm_mo = TRM(
+        in_features=in_f,
+        num_classes=nc,
+        hidden_dim=hd,
+        latent_dim=ld,
+        n_steps=ns,
+        out_features=10,
+    )
+    ff_mo = FFMatched(
+        in_features=in_f,
+        num_classes=nc,
+        hidden_dim=hd,
+        latent_dim=ld,
+        n_steps=ns,
+        out_features=10,
+    )
     ratio_mo = ff_mo.count_params() / trm_mo.count_params()
     assert 0.8 <= ratio_mo <= 1.2, f"FF/TRM param ratio (multi) = {ratio_mo:.3f}"

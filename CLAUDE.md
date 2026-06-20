@@ -262,13 +262,18 @@ to DS. k≤3 is too easy to separate the arms (all ≈1.0). Caveat: a single run
 the untied-stack control (§4b, M2) is needed before concluding "tied recurrence" beats
 "mere depth."
 
-**M1 — DONE.** Task B wired, per-cell output head landed, and depth-extrapolation harness fully implemented (30 tests, all passing):
+**M1 — DONE.** Task B wired, per-cell output head landed, majority baseline integrated, and depth-extrapolation harness fully implemented and verified (31 tests, all passing):
 - Multi-output support in `TRM` (`src/looptab/models/trm.py`) and `FFMatched` (`src/looptab/models/controls.py`) via the `out_features` parameter representing CA cell width $w$.
 - Evaluation metrics (`accuracy` and `exact_match` in `src/looptab/eval/metrics.py`) updated to support unroll step override parameter `n_steps` passing to the forward pass.
+- Majority baseline metric (`majority_baseline` in `src/looptab/eval/metrics.py`) implemented to capture the frequency of the most common class to detect task degeneracy early.
 - Config-driven depth-extrapolation runner (`src/looptab/run.py` and `configs/experiments/m1_iterated_extrapolation.yaml`) executing sweeps over test CA steps $T_{test} \in [4, 6, 8, 10]$ and test unrolling steps $R_{test} \in [4, 6, 8, 10, 12]$, writing JSON and CSV outputs.
 
-**M1 result (iterated CA rule 90, w=8, distractors=4, n_steps=4, 5 seeds, 100 epochs).**
-Because width 8 rule-90 (XOR neighbor updates) is a linear cellular automaton, all models (including the param-matched MLP control) converged to 100% accuracy and generalised perfectly up to $T_{test}=10$ steps. No divergence in accuracy was observed between the recurrent arms and control.
+**M1 result (iterated CA rule 30, w=9, distractors=4, n_steps=4, 5 seeds, 100 epochs; ~11.5k params per arm).**
+A non-degenerate configuration (chaotic `rule: 30`, odd width `w: 9`) keeps the target class balanced (majority baseline ~0.503).
+- **At training configuration ($T_{test}=4, R'=4$):** All models train successfully: `trm_nods` accuracy is 0.973 ± 0.009 (exact match: 0.839 ± 0.056), `ff_matched` is 0.971 ± 0.008 (exact match: 0.793 ± 0.057), and `trm_ds` is 0.959 ± 0.007 (exact match: 0.760 ± 0.028).
+- **Over-unrolling ($R' > 4$) at $T_{test}=4$:** Running the recurrent models for more steps than trained on degrades performance back to chance (e.g. `trm_nods` drops to 0.524 at $R'=8$), indicating the loop does not stabilize on a step operator or attractor.
+- **Out-of-distribution depth-extrapolation ($T_{test} > 4$):** All models completely collapse to the majority baseline (~0.50) accuracy at longer time horizons (e.g. $T_{test}=6, 8, 10$) regardless of test unroll steps $R'$. No model (recurrent or feedforward) learns a generalizable algorithm.
+
 
 _Then:_
 - **M2** — add the depth/compute-matched untied control (§4b).

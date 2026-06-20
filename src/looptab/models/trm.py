@@ -51,8 +51,11 @@ class TRM(nn.Module):
         B = X.shape[0]
         steps = n_steps if n_steps is not None else self.n_steps
         z = self.z0.unsqueeze(0).expand(B, -1)  # (B, latent_dim)
-        
-        answer_dim = self.out_features * self.num_classes if self.out_features is not None else self.num_classes
+
+        if self.out_features is not None:
+            answer_dim = self.out_features * self.num_classes
+        else:
+            answer_dim = self.num_classes
         a = torch.zeros(B, answer_dim, device=X.device)  # answer state
 
         all_logits = [] if self.deep_supervision else None

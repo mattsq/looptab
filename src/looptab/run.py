@@ -14,6 +14,7 @@ import json
 import subprocess
 import time
 from pathlib import Path
+from typing import Optional
 
 import numpy as np
 import torch
@@ -21,7 +22,7 @@ import yaml
 
 from .config import ExperimentConfig, ModelConfig
 from .data.dataset import make_loaders, make_splits
-from .eval.metrics import accuracy, delta_report, exact_match
+from .eval.metrics import accuracy, delta_report, exact_match, majority_baseline
 from .registry import get_model
 from .train.loop import train
 
@@ -33,10 +34,12 @@ def _git_sha() -> str:
         return "unknown"
 
 
-from typing import Optional
-
-
-def _build_model(arm: ModelConfig, in_features: int, num_classes: int, out_features: Optional[int] = None):
+def _build_model(
+    arm: ModelConfig,
+    in_features: int,
+    num_classes: int,
+    out_features: Optional[int] = None,
+):
     kwargs = dict(
         in_features=in_features,
         num_classes=num_classes,
@@ -50,7 +53,7 @@ def _build_model(arm: ModelConfig, in_features: int, num_classes: int, out_featu
     return get_model(arm.name, **kwargs)
 
 
-def run_point(cfg: ExperimentConfig, task_params: dict, seed: int) -> tuple[dict, dict]:
+def run_point(cfg: ExperimentConfig, task_params: dict, seed: int) -> tuple[dict, dict, float]:
     """Train every arm for one (sweep-value, seed) point. Returns (results, models)."""
     task_cfg = cfg.task
 
@@ -96,12 +99,16 @@ def run_point(cfg: ExperimentConfig, task_params: dict, seed: int) -> tuple[dict
             deep_supervision_weight=arm.deep_supervision_weight,
             device=device,
         )
-        metrics = {"accuracy": accuracy(m, test_loader, device), "n_params": m.count_params()}
+        metrics = {
+            "accuracy": accuracy(m, test_loader, device),
+            "n_params": m.count_params(),
+        }
         if multi_output:
             metrics["exact_match"] = exact_match(m, test_loader, device)
         results[arm.resolved_label()] = metrics
         models[arm.resolved_label()] = m
-    return results, models
+
+    return results, models, majority_baseline(test_loader)
 
 
 def _std(xs: list[float]) -> float:
@@ -125,6 +132,14 @@ def _aggregate(per_seed: list[dict], labels: list[str]) -> dict:
             stats["exact_match_mean"] = float(np.mean(ems))
             stats["exact_match_std"] = _std(ems)
         out[lbl] = stats
+
+    if "baseline" in per_seed[0]:
+        baselines = [s["baseline"] for s in per_seed]
+        out["baseline"] = {
+            "mean": float(np.mean(baselines)),
+            "std": _std(baselines),
+            "per_seed": baselines,
+        }
     return out
 
 
@@ -136,7 +151,7 @@ def run_extrapolation_point(
     T_test: int,
     R_test_values: list[int],
     device: str,
-) -> dict:
+) -> tuple[dict, float]:
     """Evaluate trained models on a task with CA step length T_test, varying R_test."""
     task_cfg = cfg.task
     this_task_seed = task_cfg.task_seed + seed
@@ -182,25 +197,33 @@ def run_extrapolation_point(
             for R in R_test_values:
                 point_results[(lbl, R)] = metrics
 
-    return point_results
+    return point_results, majority_baseline(test_loader)
 
 
 def _aggregate_extrapolation(
-    all_seed_extrap: list[dict], labels: list[str], T_values: list[int], R_values: list[int]
+    all_seed_extrap: list[tuple[dict, float]],
+    labels: list[str],
+    T_values: list[int],
+    R_values: list[int],
 ) -> dict:
     agg = {}
     for T in T_values:
         agg[T] = {}
+        baselines = [seed_data[T][1] for seed_data in all_seed_extrap]
+        agg[T]["baseline_mean"] = float(np.mean(baselines))
+        agg[T]["baseline_std"] = _std(baselines)
         for R in R_values:
             agg[T][R] = {}
             for lbl in labels:
-                accs = [seed_data[T][(lbl, R)]["accuracy"] for seed_data in all_seed_extrap]
+                accs = [seed_data[T][0][(lbl, R)]["accuracy"] for seed_data in all_seed_extrap]
                 stats = {
                     "accuracy_mean": float(np.mean(accs)),
                     "accuracy_std": _std(accs),
                 }
-                if "exact_match" in all_seed_extrap[0][T][(lbl, R)]:
-                    ems = [seed_data[T][(lbl, R)]["exact_match"] for seed_data in all_seed_extrap]
+                if "exact_match" in all_seed_extrap[0][T][0][(lbl, R)]:
+                    ems = [
+                        seed_data[T][0][(lbl, R)]["exact_match"] for seed_data in all_seed_extrap
+                    ]
                     stats["exact_match_mean"] = float(np.mean(ems))
                     stats["exact_match_std"] = _std(ems)
                 agg[T][R][lbl] = stats
@@ -241,11 +264,11 @@ def main():
         per_seed = []
         all_seed_extrap = []
         for seed in seeds:
-            r, models = run_point(cfg, task_params, seed)
-            r_rec = {"seed": seed, **r}
+            r, models, baseline = run_point(cfg, task_params, seed)
+            r_rec = {"seed": seed, "baseline": baseline, **r}
             per_seed.append(r_rec)
             summary = "  ".join(f"{lbl}={r[lbl]['accuracy']:.3f}" for lbl in labels)
-            print(f"  [seed={seed}] {summary}")
+            print(f"  [seed={seed}] {summary} (baseline={baseline:.3f})")
 
             # Run extrapolation for this seed if configured
             if cfg.extrapolation is not None:
@@ -263,6 +286,10 @@ def main():
                 all_seed_extrap.append(seed_extrap)
 
         agg = _aggregate(per_seed, labels)
+        print(
+            f"  {'majority_baseline':>16}: "
+            f"acc {agg['baseline']['mean']:.4f} ± {agg['baseline']['std']:.4f}"
+        )
         for lbl in labels:
             a = agg[lbl]
             print(f"  {lbl:>16}: acc {a['accuracy_mean']:.4f} ± {a['accuracy_std']:.4f}")
@@ -280,11 +307,16 @@ def main():
         # Aggregate extrapolation results across seeds
         if cfg.extrapolation is not None:
             extrap_results = _aggregate_extrapolation(
-                all_seed_extrap, labels, cfg.extrapolation.T_values, cfg.extrapolation.R_values
+                all_seed_extrap,
+                labels,
+                cfg.extrapolation.T_values,
+                cfg.extrapolation.R_values,
             )
             print("\n=== Depth Extrapolation Summary ===")
             for T in cfg.extrapolation.T_values:
-                print(f"  Task T={T}:")
+                base_mean = extrap_results[T]["baseline_mean"]
+                base_std = extrap_results[T]["baseline_std"]
+                print(f"  Task T={T} (baseline: {base_mean:.3f}±{base_std:.3f}):")
                 for R in cfg.extrapolation.R_values:
                     arm_summaries = []
                     for lbl in labels:
@@ -308,7 +340,7 @@ def main():
             }
         )
 
-    # --- write run record + the curve artifacts (CSV is the k-vs-accuracy curve) ---
+    # --- write run record + the curve artifacts ---
     out_dir = Path(cfg.results_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     stamp = time.strftime("%Y%m%dT%H%M%S")
@@ -333,6 +365,18 @@ def main():
         w = csv.writer(f)
         w.writerow(["sweep_param", "sweep_value", "arm", "metric", "mean", "std", "n_params"])
         for p in points:
+            # Save baseline entry to the curve CSV
+            w.writerow(
+                [
+                    p["sweep_param"],
+                    p["sweep_value"],
+                    "baseline",
+                    "accuracy",
+                    p["agg"]["baseline"]["mean"],
+                    p["agg"]["baseline"]["std"],
+                    0,
+                ]
+            )
             for lbl in labels:
                 a = p["agg"][lbl]
                 w.writerow(
@@ -370,12 +414,41 @@ def main():
             w = csv.writer(f)
             w.writerow(["T_test", "R_test", "arm", "metric", "mean", "std"])
             for T in cfg.extrapolation.T_values:
+                # Write baseline row for this T_test
+                w.writerow(
+                    [
+                        T,
+                        0,
+                        "baseline",
+                        "accuracy",
+                        extrap_results[T]["baseline_mean"],
+                        extrap_results[T]["baseline_std"],
+                    ]
+                )
                 for R in cfg.extrapolation.R_values:
                     for lbl in labels:
                         stats = extrap_results[T][R][lbl]
-                        w.writerow([T, R, lbl, "accuracy", stats["accuracy_mean"], stats["accuracy_std"]])
+                        w.writerow(
+                            [
+                                T,
+                                R,
+                                lbl,
+                                "accuracy",
+                                stats["accuracy_mean"],
+                                stats["accuracy_std"],
+                            ]
+                        )
                         if "exact_match_mean" in stats:
-                            w.writerow([T, R, lbl, "exact_match", stats["exact_match_mean"], stats["exact_match_std"]])
+                            w.writerow(
+                                [
+                                    T,
+                                    R,
+                                    lbl,
+                                    "exact_match",
+                                    stats["exact_match_mean"],
+                                    stats["exact_match_std"],
+                                ]
+                            )
         print(f"Extrap  : {extrap_csv_path}")
 
         _maybe_plot_extrapolation(
@@ -441,6 +514,14 @@ def _maybe_plot_extrapolation(extrap_results, labels, R_values, T_values, out_pa
             stds = np.array(stds)
             ax.plot(R_values, means, marker="o", label=lbl)
             ax.fill_between(R_values, means - stds, means + stds, alpha=0.2)
+
+        # Plot majority baseline as a horizontal line
+        ax.axhline(
+            extrap_results[T]["baseline_mean"],
+            color="gray",
+            linestyle="--",
+            label="majority baseline",
+        )
         ax.set_title(f"Evaluation on T={T} steps of CA")
         ax.set_ylabel("Accuracy")
         ax.set_xlabel("Test Unroll Steps (R')")

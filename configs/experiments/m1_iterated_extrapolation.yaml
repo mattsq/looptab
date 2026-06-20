@@ -8,9 +8,9 @@
 task:
   name: iterated
   params:
-    w: 8            # cellular automaton state width
+    w: 9            # cellular automaton state width
     T: 4            # train CA steps
-    rule: 90        # CA rule (90 = XOR neighbors)
+    rule: 30        # CA rule (30 = chaotic rule)
     distractors: 4  # distractor noise bits
   n_train: 4000
   n_test: 1000

@@ -7,7 +7,9 @@ from torch.utils.data import DataLoader
 
 
 @torch.no_grad()
-def _predict(model: nn.Module, loader: DataLoader, device: str, **kwargs) -> tuple[np.ndarray, np.ndarray]:
+def _predict(
+    model: nn.Module, loader: DataLoader, device: str, **kwargs
+) -> tuple[np.ndarray, np.ndarray]:
     model.eval()
     preds, targets = [], []
     for X, y in loader:
@@ -35,6 +37,20 @@ def exact_match(model: nn.Module, loader: DataLoader, device: str = "cpu", **kwa
     if targets.ndim == 1:
         return float((preds == targets).mean())  # same as accuracy for single-output
     return float((preds == targets).all(axis=-1).mean())
+
+
+def majority_baseline(loader: DataLoader) -> float:
+    """Compute token-level majority class baseline accuracy."""
+    targets = []
+    for _, y in loader:
+        targets.append(y.numpy())
+    if not targets:
+        return 0.0
+    targets = np.concatenate(targets)
+    _, counts = np.unique(targets, return_counts=True)
+    if len(counts) == 0:
+        return 0.0
+    return float(np.max(counts) / targets.size)
 
 
 def delta_report(
