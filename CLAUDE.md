@@ -314,9 +314,76 @@ also fails, so the null is not purely a DS artifact — but a step-aligned curri
 cleaner test and remains unrun.
 
 
+**M2 — DONE.** The depth/compute-matched untied-stack control (§4b) landed and was run on
+both Task A and Task B. This is the control M0/M1 flagged as *the* missing piece before
+crediting anything to "tied recurrence." It overturns the tentative M0 framing.
+- `UntiedStack` (`src/looptab/models/controls.py`): the TRM block stacked `n_steps`× with a
+  **separate** `update_net` + `readout` per step — identical per-step compute/depth to TRM,
+  the *only* axis changed is weight tying. Supports deep supervision (per-step readouts) so DS
+  stays ablatable on the same axis, and supports multi-output (Task B). It is **not**
+  param-matched by design (~`n_steps`× the loop's block params); `FFMatched` remains the §4a
+  capacity control, so the two controls answer different questions and both ship.
+- Registered as `untied_stack`; `_build_model` passes `deep_supervision` to it; the
+  extrapolation harness routes it as a **fixed-depth** arm (like `ff_matched`: evaluated once,
+  held flat across `R'`) since an untied stack cannot be unrolled past `n_steps`.
+- Configs `configs/experiments/m2_parity_sweep.yaml` (Task A) and
+  `m2_iterated_extrapolation.yaml` (Task B) add the `untied_stack` arm and the canonical M2
+  Δ. 8 new tests (shapes, untied-ness, over-unroll clamp, param-count > loop, runner wiring,
+  fixed-depth extrapolation routing); 39 tests total, ruff clean.
+
+**The canonical M2 Δ is Δ(loop − untied_stack)** — weight-tied recurrence vs *mere depth*,
+everything else (per-step compute, no DS) held fixed. `Δ(untied_stack − ff_matched)` then asks
+whether that depth beats raw param-matched capacity.
+
+**M2 result — Task A (parity, d=20, n_steps=4, 5 seeds, 100 epochs).** Tracked summary:
+`results/m2_parity_sweep_20260620T032055_curve.{csv,png}` (loop ~9.9k params, untied ~39.5k).
+
+| k | trm_nods (loop) | untied_stack (depth) | ff_matched (control) | Δ(loop − untied) | Δ(untied − control) |
+|---|-----------------|----------------------|----------------------|------------------|---------------------|
+| 2 | 1.000 ± .000 | 1.000 ± .000 | 1.000 ± .000 | +0.000 | +0.000 |
+| 3 | 1.000 ± .000 | 1.000 ± .000 | 1.000 ± .000 | +0.000 | +0.000 |
+| 4 | 1.000 ± .000 | 1.000 ± .000 | 0.763 ± .246 | **+0.000** | **+0.237 ± .246** |
+
+**M2 result — Task B (iterated CA rule 30, w=9, distractors=4, n_steps=4, 5 seeds, 100
+epochs).** Majority baseline 0.503 ± .004. Tracked summary:
+`results/m2_iterated_extrapolation_20260620T032447_curve.csv` (and `..._extrapolation.csv`;
+loop ~11.5k params, untied ~46k).
+
+| arm | accuracy | exact-match |
+|-----|----------|-------------|
+| trm_nods (loop) | 0.972 ± .009 | 0.828 ± .060 |
+| untied_stack (depth) | **0.999 ± .001** | **0.994 ± .008** |
+| ff_matched (control) | 0.971 ± .008 | 0.793 ± .057 |
+
+| Δ (paired, 5 seeds) | accuracy | exact-match |
+|---|---|---|
+| Δ(loop − untied_stack) | **−0.027 ± 0.009** | −0.166 |
+| Δ(untied_stack − control) | **+0.029 ± 0.009** | +0.201 |
+| Δ(loop − control) | +0.001 ± 0.014 | +0.036 |
+
+**Reading (per §2/§8 — this is the result).** *Weight-tied recurrence does not beat a
+depth-matched untied stack on either canonical task:* it **ties** on parity and **loses** on
+CA. So the loop's apparent M0 edge at k=4 was a **depth/iteration** effect, not weight tying —
+the untied stack matches it exactly (both 1.000) while the *param-matched shallow* control is
+the one that collapses (0.763). On Task B the untied stack is strictly **better** than the
+loop (Δ = −0.027 ± 0.009; exact-match 0.994 vs 0.828, nearly solving the task), i.e. tying
+*costs* accuracy when the same depth is available untied. Tying's only demonstrated benefit is
+parameter efficiency (it matches the untied stack's parity accuracy at ~¼ the params), not
+capability. Extrapolation is unchanged from M1: over-unrolling the loop past `R=4` still
+degrades it toward baseline, and all arms collapse to the majority baseline at OOD depth
+`T>4`; the untied stack, being fixed-depth, is robust at `T=4` but cannot extrapolate by
+construction.
+
+**Consequence for M3 (§9).** §9 gates the H/L hierarchy on the single loop *beating its
+control on Task A AND Task B*. After M2 it does **neither** — it ties the depth control on A
+and loses on B. **The hierarchy is therefore NOT earned.** The justified next moves are the
+levers M1 named (step-aligned `T`-curriculum / intermediate-state supervision on Task B) and
+asking why untied depth wins — not building Task C.
+
 _Then:_
-- **M2** — add the depth/compute-matched untied control (§4b).
-- **M3** — revisit the hierarchy (Task C) *iff* M0–M2 justify it.
+- **M3** — **gated OFF by the M2 result** (§9): do not build the H/L hierarchy (Task C) until
+  the single loop beats the untied-stack control on Task A *and* Task B. Pursue the curriculum
+  levers from M1 first.
 
 ## 12. Key references (for grounding a cold agent)
 

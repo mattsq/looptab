@@ -80,3 +80,95 @@ class FFMatched(nn.Module):
 
     def count_params(self) -> int:
         return sum(p.numel() for p in self.parameters() if p.requires_grad)
+
+
+class UntiedStack(nn.Module):
+    """
+    Depth/compute-matched untied control (CLAUDE.md §4b).
+
+    The TRM block stacked ``n_steps`` times *without* weight tying: each step gets
+    its own ``update_net`` and ``readout``, but the per-step computation is identical
+    to TRM (same shapes, same FLOPs, same depth). The only axis that differs from the
+    TRM recurrent core is the weight tying — so Δ(TRM − UntiedStack) isolates whether
+    weight-tied *recurrence* helps beyond mere depth (§8: "recurrence is algorithmic"
+    vs "recurrence is dressed-up depth").
+
+    This is deliberately **not** param-matched: it has ~``n_steps``× TRM's update/readout
+    parameters by construction. The param-matched control is ``FFMatched`` (§4a); the two
+    controls answer different questions and ship together. Deep supervision is supported
+    (per-step readouts) so it can be ablated on the same axis as TRM, but the canonical
+    M2 Δ compares the no-DS arms so only the tying axis varies.
+    """
+
+    def __init__(
+        self,
+        in_features: int,
+        num_classes: int,
+        hidden_dim: int = 64,
+        latent_dim: int = 64,
+        n_steps: int = 4,
+        deep_supervision: bool = True,
+        out_features: Optional[int] = None,
+    ):
+        super().__init__()
+        self.n_steps = n_steps
+        self.deep_supervision = deep_supervision
+        self.num_classes = num_classes
+        self.out_features = out_features
+
+        answer_dim = out_features * num_classes if out_features is not None else num_classes
+        self.answer_dim = answer_dim
+
+        # One independent block per step (untied). Each block mirrors TRM's update_net
+        # + readout exactly, so depth and per-step compute match the recurrent core.
+        self.update_nets = nn.ModuleList(
+            nn.Sequential(
+                nn.Linear(in_features + latent_dim + answer_dim, hidden_dim),
+                nn.GELU(),
+                nn.Linear(hidden_dim, latent_dim),
+            )
+            for _ in range(n_steps)
+        )
+        self.readouts = nn.ModuleList(nn.Linear(latent_dim, answer_dim) for _ in range(n_steps))
+
+        # Initial latent (a single learned init, as in TRM).
+        self.z0 = nn.Parameter(torch.zeros(latent_dim))
+
+    def forward(
+        self, X: torch.Tensor, n_steps: Optional[int] = None
+    ) -> tuple[torch.Tensor, Optional[list[torch.Tensor]]]:
+        """
+        Returns:
+            logits: (B, num_classes) or (B, out_features, num_classes) final-block logits
+            all_logits: list of per-block logits if deep_supervision, else None
+
+        ``n_steps`` is accepted for interface parity with TRM, but the untied stack has
+        a *fixed* depth (one weight set per block): it cannot be unrolled past
+        ``self.n_steps``. We therefore clamp to the available blocks — over-unrolling is
+        simply not defined for an untied stack, which is exactly why it's the depth
+        control rather than a recurrence.
+        """
+        B = X.shape[0]
+        steps = self.n_steps if n_steps is None else min(n_steps, self.n_steps)
+        z = self.z0.unsqueeze(0).expand(B, -1)  # (B, latent_dim)
+        a = torch.zeros(B, self.answer_dim, device=X.device)  # answer state
+
+        all_logits = [] if self.deep_supervision else None
+
+        for i in range(steps):
+            inp = torch.cat([X, z, a], dim=-1)
+            z = self.update_nets[i](inp)
+            a = self.readouts[i](z)
+            if self.deep_supervision:
+                if self.out_features is not None:
+                    all_logits.append(a.view(B, self.out_features, self.num_classes))
+                else:
+                    all_logits.append(a)
+
+        if self.out_features is not None:
+            a = a.view(B, self.out_features, self.num_classes)
+
+        return a, all_logits
+
+    def count_params(self) -> int:
+        return sum(p.numel() for p in self.parameters() if p.requires_grad)
