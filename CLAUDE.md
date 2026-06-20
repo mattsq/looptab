@@ -430,37 +430,45 @@ reproduces the M2 numbers bit-consistently (loop 0.972, untied_matched 0.821, ff
   ~+0.6, and small at w=13 where every arm's whole-row score is low — but token-acc tying Δ stays
   clearly positive.) **This is the requested confirmation: the loop's CA advantage over the fair
   untied control is not a one-config fluke.**
-- **Refinement the grid surfaces (reported plainly):** the loop does **not** beat the *shallow*
-  param-matched MLP on CA. Δ(loop − ff_matched) ≈ 0 at w=9 (tie) but **negative at w=13**
-  (−0.027 → −0.062, bands clear of zero): the wide shallow MLP is the strongest param-matched arm
-  on wide CA. So the loop's CA value is specifically *"tying beats a fair untied stack,"* **not**
-  *"loop beats the shallow MLP."* The loop is robustly **competitive (top-2, never worst)**, not
-  dominant — exactly M2's hedge, now quantified.
+- **Refinement the grid surfaces (reported plainly — this is the inconvenient half):** the loop
+  does **not** beat the *shallow* param-matched MLP (`ff_matched`, the §4a control) on CA.
+  Δ(loop − ff_matched) is positive in only **1/6** cells (rule30/w9, +0.001 ± .014 — noise) and
+  ≤ 0 in the other five; it is **clearly negative at w=13** for rule 30 (−0.062 ± .013) and rule
+  110 (−0.031 ± .008) (the rule90/w13 −0.027 ± .031 band still crosses zero). The wide shallow MLP
+  is the strongest param-matched arm on wide CA. Starkest case — **rule90, w13: `ff_matched`
+  reaches EM 1.000 / acc 1.000 (perfectly solves it) while the loop gets EM 0.71 / acc 0.97.** So
+  the loop's CA value is specifically *"tying beats a fair *untied* stack,"* **not** *"the loop
+  beats its §4a control."* (EM tying-Δs are large at w=9 ~+0.6 but shrink to ~+0.02–0.06 at w=13.)
 - **Deep supervision stays neutral:** Δ(trm_ds − trm_nods) ∈ [−0.013, +0.010] across all cells —
   consistent with M0/M1/M2, the loop's effect is not silently DS.
 
-**Cross-task synthesis (the §9 verdict).** The arm-ordering that makes the loop *uniquely robust
-across A+B* holds across all 6 CA configs: among the three param-matched arms, `ff_matched` is
-strong on CA but **fails parity-k4** (0.763, M2); `untied_matched` solves parity but is the
-**weakest on CA in every cell**; the **loop is the only one competitive on both** — top-2 on CA in
-all 6 cells *and* solves parity-k4. The Task B leg of the robustness claim is now multi-config and
-solid.
+**Cross-task synthesis.** The precise, defensible robustness claim: among the four *param-matched*
+arms, the loop (`trm_nods`) is **never the worst on either task** — `ff_matched` is worst on Task A
+(parity-k4 collapse to 0.763, M2), `untied_matched` is worst on Task B (every one of the 6 cells).
+That "never-the-worst" property is unique to the loop and now holds across 3 rules × 2 widths on
+Task B. **But this is robustness-as-not-failing, NOT dominance:** the loop is top-2 *among all five
+arms* in only 1/6 CA cells (the fat `untied_stack` and `ff_matched` usually beat it), and top-2
+*among the four param-matched arms* in 2/6. The earlier "top-2 on CA in all 6 cells" was wrong;
+corrected here.
 
-**§9 gate — the requested condition is met; M3 is earned (enter cautiously).** M2's literal blocker
-("confirm the cross-task robustness on more Task B rungs/rules") is satisfied: the finding
-replicates across 3 rules × 2 widths with consistent sign and ordering. Two honest caveats temper
-*how strongly* M3 is earned, and should shape it: (i) only the **Task B leg** is now multi-config —
-the **Task A (parity) leg still rests on one `d`** (the k-sweep at d=20); replicating parity across
-`d`/sparsity would fully close the gate. (ii) The loop is competitive, **not dominant** (the shallow
-MLP beats it on wide CA), so the H/L hierarchy must clear the *same* param-matched bar, not a lone
-recurrent number.
+**§9 gate — still NOT cleared; M3 stays gated.** §9's bar is literal: *no hierarchy until the loop
+"beats its control on Task A and Task B."* The loop beats its §4b control (`untied_matched`) on B
+robustly (6/6) — but it does **not** beat its mandatory §4a control (`ff_matched`) on B (wins 1/6,
+by noise; loses on wide CA). On Task A it's the mirror image: it beats `ff_matched` (+0.237, M2)
+but only ties `untied_matched`. So on **neither** task does the loop beat *both* its controls, and
+on Task B it beats only the untied one. What M2-confirm *did* establish — and it's a real result —
+is that the **tying-at-fixed-budget advantage over the untied stack replicates cleanly across
+rules/widths** (Δ(loop − untied_matched) > 0, lower band > 0, in all 6 cells). What it did **not**
+establish is the §9 condition. Two further gaps remain: the **Task A leg is still single-config**
+(one `d`), and the **M1 step-aligned curriculum** lever is unrun. Earn the hierarchy later, not now.
 
 _Then:_
-- **M3** — H/L hierarchy (Task C) is **earned but cautious** (§9): the loop's cross-task robustness
-  replicates across Task B rules/widths (M2-confirm), so the hierarchy may proceed — but against the
-  full param-matched control set (it does not strictly dominate), and ideally after the **parity leg
-  is also replicated across `d`** and/or the **M1 step-aligned curriculum** lever is tried (still
-  unrun; `grid`+`extrapolation` are mutually exclusive, so the curriculum needs its own config).
+- **M3** — H/L hierarchy (Task C) **remains gated** (§9). M2-confirm replicated the *tying vs
+  untied* result but also showed the loop ties/loses to the shallow `ff_matched` (§4a) on Task B,
+  so the literal §9 bar ("beats its control on A and B") is unmet. Before earning the hierarchy:
+  (i) replicate the **Task A (parity) leg across `d`/sparsity** (still one config); (ii) try the
+  **M1 step-aligned T-curriculum** (still unrun — `grid`+`extrapolation` are mutually exclusive, so
+  it needs its own config); (iii) only then re-judge against the *full* param-matched control set.
 
 ## 12. Key references (for grounding a cold agent)
 

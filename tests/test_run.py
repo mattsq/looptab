@@ -153,6 +153,32 @@ def test_grid_point_runs_factorial_with_overrides():
         assert set(out.keys()) == {"trm_ds", "trm_nods", "ff_matched"}
 
 
+def test_grid_cells_deterministic_and_independent():
+    """§5.3/§5.8: a grid cell reproduces bit-for-bit, and cells don't leak state into
+    each other — a cell's metrics are identical regardless of which cells ran before it
+    (the override dict must not mutate cfg.task.params)."""
+    cfg = _cfg(grid=dict(params={"k": [2, 4]}))
+    points = cfg.axis_points()
+    base_params = dict(cfg.task.params)
+
+    def run_cell(overrides):
+        return run_point(cfg, {**cfg.task.params, **overrides}, seed=0)[0]
+
+    # Same cell twice => identical (determinism).
+    a = run_cell(points[0][1])
+    b = run_cell(points[0][1])
+    for lbl in a:
+        assert a[lbl]["accuracy"] == b[lbl]["accuracy"]
+
+    # Running cell 1 in between must not change cell 0's result (independence) and must
+    # not have mutated the shared task params.
+    run_cell(points[1][1])
+    c = run_cell(points[0][1])
+    for lbl in a:
+        assert a[lbl]["accuracy"] == c[lbl]["accuracy"]
+    assert cfg.task.params == base_params
+
+
 def test_resolved_deltas_default():
     cfg = _cfg()
     cfg.deltas = None
