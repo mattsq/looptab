@@ -1,7 +1,7 @@
 """Registry: resolve string names from configs to objects."""
 
-from .models.trm import TRM
 from .models.controls import FFMatched
+from .models.trm import TRM
 
 MODEL_REGISTRY = {
     "trm": TRM,

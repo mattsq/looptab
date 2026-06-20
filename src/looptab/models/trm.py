@@ -5,9 +5,10 @@ is applied repeatedly: each step updates a latent z and produces a readout.
 Deep supervision is enabled by returning per-step logits.
 """
 
+from typing import Optional
+
 import torch
 import torch.nn as nn
-from typing import Optional
 
 
 class TRM(nn.Module):

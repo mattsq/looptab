@@ -1,19 +1,17 @@
 """Integration test: train TRM and FFMatched on Task 0 for a few epochs."""
 
 import torch
-import pytest
-from torch.utils.data import TensorDataset, DataLoader
+from torch.utils.data import DataLoader
 
-from looptab.models.trm import TRM
-from looptab.models.controls import FFMatched
-from looptab.train.loop import train
-from looptab.eval.metrics import accuracy, delta_report
 from looptab.data.generators import make_linear
+from looptab.eval.metrics import accuracy, delta_report
+from looptab.models.controls import FFMatched
+from looptab.models.trm import TRM
+from looptab.train.loop import train
 
 
 def _small_loader():
     X, y = make_linear(n=200, d=10, task_seed=0, sample_seed=1)
-    import torch
     ds = torch.utils.data.TensorDataset(torch.from_numpy(X), torch.from_numpy(y))
     return DataLoader(ds, batch_size=64)
 
@@ -23,7 +21,7 @@ def test_train_trm_runs():
     loader = _small_loader()
     losses = train(m, loader, epochs=5, lr=1e-3, device="cpu")
     assert len(losses) == 5
-    assert all(isinstance(l, float) for l in losses)
+    assert all(isinstance(x, float) for x in losses)
 
 
 def test_train_ff_runs():

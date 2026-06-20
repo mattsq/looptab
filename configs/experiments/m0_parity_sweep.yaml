@@ -1,0 +1,58 @@
+# M0 deliverable: the k-vs-accuracy curve for both models, with variance bands,
+# from a single config (CLAUDE.md §11). Sweeps parity interaction order k in one run.
+#
+# Three arms keep the loop and deep supervision unconfounded (§4/§8):
+#   trm_ds   - TRM loop WITH deep supervision
+#   trm_nods - TRM loop WITHOUT deep supervision (isolates the loop alone)
+#   ff_matched - param-matched feedforward control (§4a)
+# Δ(trm_nods − ff_matched) isolates the loop; Δ(trm_ds − trm_nods) isolates deep supervision.
+
+task:
+  name: parity
+  params:
+    d: 20
+  n_train: 4000
+  n_test: 1000
+  task_seed: 42
+  train_sample_seed: 1
+  test_sample_seed: 2
+
+sweep:
+  param: k
+  values: [2, 3, 4]
+
+arms:
+  - name: trm
+    label: trm_ds
+    hidden_dim: 64
+    latent_dim: 64
+    n_steps: 4
+    deep_supervision: true
+    deep_supervision_weight: 1.0
+  - name: trm
+    label: trm_nods
+    hidden_dim: 64
+    latent_dim: 64
+    n_steps: 4
+    deep_supervision: false
+    deep_supervision_weight: 0.0
+  - name: ff_matched
+    label: ff_matched
+    hidden_dim: 64
+    latent_dim: 64
+    n_steps: 4
+
+deltas:
+  - [trm_nods, ff_matched]   # the loop alone, vs param-matched control
+  - [trm_ds, trm_nods]       # deep supervision alone
+  - [trm_ds, ff_matched]     # loop + deep supervision combined
+
+train:
+  epochs: 100
+  lr: 1e-3
+  weight_decay: 1e-4
+  batch_size: 256
+  device: cpu
+
+seeds: [0, 1, 2, 3, 4]
+results_dir: results

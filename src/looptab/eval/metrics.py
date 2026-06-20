@@ -1,10 +1,10 @@
 """Evaluation metrics and the Δ(recurrent − control) comparison."""
 
+
 import numpy as np
 import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader
-from typing import Optional
 
 
 @torch.no_grad()

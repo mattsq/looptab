@@ -1,13 +1,12 @@
 """Thin PyTorch Dataset wrappers around the numpy generators."""
 
 from dataclasses import dataclass
-from typing import Literal
 
 import numpy as np
 import torch
-from torch.utils.data import Dataset, DataLoader
+from torch.utils.data import DataLoader, Dataset
 
-from .generators import make_linear, make_parity, make_iterated
+from .generators import make_iterated, make_linear, make_parity
 
 
 @dataclass
@@ -19,7 +18,9 @@ class TabularDataset(Dataset):
         return len(self.X)
 
     def __getitem__(self, idx):
-        return torch.from_numpy(self.X[idx]), torch.from_numpy(self.y[idx]) if self.y.ndim > 1 else torch.tensor(self.y[idx])
+        x = torch.from_numpy(self.X[idx])
+        y = torch.from_numpy(self.y[idx]) if self.y.ndim > 1 else torch.tensor(self.y[idx])
+        return x, y
 
 
 def make_splits(
@@ -49,6 +50,8 @@ def make_splits(
 
 
 def make_loaders(train_ds, test_ds, batch_size: int, num_workers: int = 0):
-    train_loader = DataLoader(train_ds, batch_size=batch_size, shuffle=True, num_workers=num_workers, drop_last=False)
+    train_loader = DataLoader(
+        train_ds, batch_size=batch_size, shuffle=True, num_workers=num_workers, drop_last=False
+    )
     test_loader = DataLoader(test_ds, batch_size=batch_size, shuffle=False, num_workers=num_workers)
     return train_loader, test_loader

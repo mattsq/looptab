@@ -218,20 +218,41 @@ by registering it, not by editing the training loop.
 
 ## 11. Project status / next milestone
 
-**M0 — current.** Deliver, end-to-end:
-- Generators for Task 0 + Task A (tested, deterministic).
-- A TRM-style recurrent refinement model.
-- A param-matched feedforward control (§4a).
-- A training loop with optional deep supervision.
-- An eval that reports `Δ(recurrent − control)` over ≥ 5 seeds on Task A for `k ∈ {2,3,4}`.
+**M0 — harness landed; awaiting the real run.** The end-to-end machinery is in place
+and tested (25 tests, ruff-clean):
+- Generators for Task 0 + Task A — spec-faithful and determinism-tested
+  (`src/looptab/data/generators.py`, `tests/test_generators.py`).
+- TRM-style recurrent refinement model with optional per-step readouts
+  (`src/looptab/models/trm.py`).
+- Param-matched feedforward control (§4a), param count matched analytically to ~0.6%
+  (`src/looptab/models/controls.py`).
+- Training loop with deep supervision as a **per-arm** weight, not a global flag
+  (`src/looptab/train/loop.py`).
+- Config-driven runner with **named arms** + a **single-config sweep** over a task
+  parameter, emitting `Δ` between any pair of arms with variance bands, plus a curve
+  CSV (and a PNG if matplotlib is installed) (`src/looptab/run.py`,
+  `configs/experiments/m0_parity_sweep.yaml`).
 
-**Definition of done for M0:** we can produce the `k`-vs-accuracy curve for *both* models,
-with variance bands, from a single config.
+**Key design choice (avoids the §4/§8 confound):** deep supervision is its own arm.
+The canonical M0 experiment runs three arms — `trm_ds` (loop + DS), `trm_nods`
+(loop, no DS), `ff_matched` (control) — so we report `Δ(trm_nods − ff_matched)`
+(the loop alone) and `Δ(trm_ds − trm_nods)` (deep supervision alone) separately.
+Each outer seed also draws a **new `task_seed`** (train/test still share it within a
+seed, per §3) so the variance band reflects function-level variation, not just init+rows.
+
+**Definition of done for M0:** produce the `k`-vs-accuracy curve for *both* models,
+with variance bands, from a single config — `configs/experiments/m0_parity_sweep.yaml`
+does this. **Remaining:** execute the full run (5 seeds × `k∈{2,3,4}` × 100 epochs) and
+commit the summary curve to `results/`. (The harness was validated on a fast smoke run only.)
+
+**Known gap deferred to M1:** the multi-output (Task B) path is not wired — `num_classes`
+is fixed at 2 and TRM has no per-cell head yet. `task: iterated` should not be run until
+that head lands.
 
 _Then:_
-- **M1** — Task B + the depth-extrapolation harness (§3).
-- **M2** — add the depth/compute-matched untied control (§4b) + the deep-supervision
-  ablation (§8).
+- **M1** — Task B + a per-cell output head + the depth-extrapolation harness (§3).
+- **M2** — add the depth/compute-matched untied control (§4b). (The deep-supervision
+  ablation from §8 already ships in M0 as a separate arm.)
 - **M3** — revisit the hierarchy (Task C) *iff* M0–M2 justify it.
 
 ## 12. Key references (for grounding a cold agent)

@@ -4,9 +4,9 @@
 (b) UntiedStack: same block stacked N times without weight tying (M2).
 """
 
+
 import torch
 import torch.nn as nn
-from typing import Optional
 
 
 def _count_trm_params(in_features, num_classes, hidden_dim, latent_dim, n_steps):

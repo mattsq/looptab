@@ -1,14 +1,16 @@
 """Shape and forward-pass sanity tests for TRM and FFMatched."""
 
-import torch
 import pytest
-from looptab.models.trm import TRM
+import torch
+
 from looptab.models.controls import FFMatched
+from looptab.models.trm import TRM
 
 
 @pytest.fixture
 def trm():
-    return TRM(in_features=16, num_classes=2, hidden_dim=32, latent_dim=32, n_steps=3, deep_supervision=True)
+    return TRM(in_features=16, num_classes=2, hidden_dim=32, latent_dim=32,
+               n_steps=3, deep_supervision=True)
 
 
 @pytest.fixture
@@ -21,12 +23,13 @@ def test_trm_output_shape(trm):
     logits, all_logits = trm(X)
     assert logits.shape == (8, 2)
     assert len(all_logits) == 3
-    for l in all_logits:
-        assert l.shape == (8, 2)
+    for step_logits in all_logits:
+        assert step_logits.shape == (8, 2)
 
 
 def test_trm_no_deep_supervision():
-    m = TRM(in_features=16, num_classes=2, hidden_dim=32, latent_dim=32, n_steps=3, deep_supervision=False)
+    m = TRM(in_features=16, num_classes=2, hidden_dim=32, latent_dim=32,
+            n_steps=3, deep_supervision=False)
     X = torch.randn(4, 16)
     logits, all_logits = m(X)
     assert logits.shape == (4, 2)

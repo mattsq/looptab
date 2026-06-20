@@ -15,6 +15,7 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = ["pytest", "ruff"]
+plot = ["matplotlib"]
 
 [tool.ruff]
 line-length = 100

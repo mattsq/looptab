@@ -1,9 +1,9 @@
 """Training loop. Supports deep supervision for TRM-style models."""
 
+
 import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader
-from typing import Optional
 
 
 def _loss_fn(logits: torch.Tensor, targets: torch.Tensor) -> torch.Tensor:
@@ -41,7 +41,9 @@ def train(
             logits, all_logits = model(X)
             loss = _loss_fn(logits, y)
             if all_logits is not None and deep_supervision_weight > 0:
-                ds_loss = sum(_loss_fn(l, y) for l in all_logits) / len(all_logits)
+                ds_loss = sum(
+                    _loss_fn(step_logits, y) for step_logits in all_logits
+                ) / len(all_logits)
                 loss = loss + deep_supervision_weight * ds_loss
             loss.backward()
             opt.step()

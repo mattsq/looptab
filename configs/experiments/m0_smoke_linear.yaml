@@ -1,3 +1,6 @@
+# Task 0 smoke test: validates the pipeline end-to-end before touching Task A.
+# No sweep — a single point. Both models should comfortably beat chance.
+
 task:
   name: linear
   params:
@@ -8,26 +11,36 @@ task:
   train_sample_seed: 1
   test_sample_seed: 2
 
-model:
-  name: trm
-  hidden_dim: 64
-  latent_dim: 64
-  n_steps: 4
-  deep_supervision: true
+arms:
+  - name: trm
+    label: trm_ds
+    hidden_dim: 64
+    latent_dim: 64
+    n_steps: 4
+    deep_supervision: true
+    deep_supervision_weight: 1.0
+  - name: trm
+    label: trm_nods
+    hidden_dim: 64
+    latent_dim: 64
+    n_steps: 4
+    deep_supervision: false
+    deep_supervision_weight: 0.0
+  - name: ff_matched
+    label: ff_matched
+    hidden_dim: 64
+    latent_dim: 64
+    n_steps: 4
 
-control:
-  name: ff_matched
-  hidden_dim: 64
-  latent_dim: 64
-  n_steps: 4
-  deep_supervision: false
+deltas:
+  - [trm_nods, ff_matched]
+  - [trm_ds, trm_nods]
 
 train:
   epochs: 50
   lr: 1e-3
   weight_decay: 1e-4
   batch_size: 256
-  deep_supervision_weight: 1.0
   device: cpu
 
 seeds: [0, 1, 2, 3, 4]

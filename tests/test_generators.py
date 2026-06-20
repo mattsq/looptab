@@ -1,8 +1,8 @@
 """Determinism tests for every task generator. Same seeds => identical bytes."""
 
 import numpy as np
-import pytest
-from looptab.data.generators import make_linear, make_parity, make_iterated, ca_step
+
+from looptab.data.generators import ca_step, make_iterated, make_linear, make_parity
 
 
 def test_linear_determinism():
