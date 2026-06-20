@@ -64,11 +64,19 @@ class SweepConfig(BaseModel):
     values: list
 
 
+class ExtrapolationConfig(BaseModel):
+    """Depth-extrapolation sweep over task CA steps (T) and test unroll steps (R)."""
+
+    T_values: list[int]
+    R_values: list[int]
+
+
 class ExperimentConfig(BaseModel):
     task: TaskConfig
     arms: list[ModelConfig]
     train: TrainConfig
     sweep: Optional[SweepConfig] = None
+    extrapolation: Optional[ExtrapolationConfig] = None
     # Pairs of arm labels to diff: [[recurrent, control], ...]. If omitted, every
     # non-last arm is diffed against the last arm (assumed to be the control).
     deltas: Optional[list[list[str]]] = None

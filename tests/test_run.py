@@ -45,16 +45,17 @@ def _cfg(**over):
 
 def test_run_point_returns_all_arms():
     cfg = _cfg()
-    out = run_point(cfg, cfg.task.params, seed=0)
+    out, models = run_point(cfg, cfg.task.params, seed=0)
     assert set(out.keys()) == {"trm_ds", "trm_nods", "ff_matched"}
     for v in out.values():
         assert "accuracy" in v and "n_params" in v
+    assert set(models.keys()) == {"trm_ds", "trm_nods", "ff_matched"}
 
 
 def test_exact_match_suppressed_for_single_output():
     """Parity is single-output: exact_match == accuracy, so it isn't reported."""
     cfg = _cfg()
-    out = run_point(cfg, cfg.task.params, seed=0)
+    out, _ = run_point(cfg, cfg.task.params, seed=0)
     for v in out.values():
         assert "exact_match" not in v
 
@@ -62,8 +63,8 @@ def test_exact_match_suppressed_for_single_output():
 def test_run_point_deterministic():
     """C3/§5.3: same seed => identical metrics, bit for bit."""
     cfg = _cfg()
-    a = run_point(cfg, cfg.task.params, seed=0)
-    b = run_point(cfg, cfg.task.params, seed=0)
+    a, _ = run_point(cfg, cfg.task.params, seed=0)
+    b, _ = run_point(cfg, cfg.task.params, seed=0)
     for lbl in a:
         assert a[lbl]["accuracy"] == b[lbl]["accuracy"]
 
@@ -74,8 +75,8 @@ def test_arm_init_independent_of_order():
     cfg = _cfg()
     rev = _cfg()
     rev.arms = list(reversed(rev.arms))
-    out = run_point(cfg, cfg.task.params, seed=0)
-    out_rev = run_point(rev, rev.task.params, seed=0)
+    out, _ = run_point(cfg, cfg.task.params, seed=0)
+    out_rev, _ = run_point(rev, rev.task.params, seed=0)
     assert out["ff_matched"]["accuracy"] == out_rev["ff_matched"]["accuracy"]
     assert out["trm_ds"]["accuracy"] == out_rev["trm_ds"]["accuracy"]
 
@@ -84,10 +85,21 @@ def test_function_varies_across_seeds():
     """I1: different outer seeds use different task_seeds => different informative
     bits => the parity functions differ, so metrics generally differ across seeds."""
     cfg = _cfg()
-    s0 = run_point(cfg, cfg.task.params, seed=0)
-    s1 = run_point(cfg, cfg.task.params, seed=1)
+    s0, _ = run_point(cfg, cfg.task.params, seed=0)
+    s1, _ = run_point(cfg, cfg.task.params, seed=1)
     # At least one arm should land on a different accuracy (different function).
     assert any(s0[lbl]["accuracy"] != s1[lbl]["accuracy"] for lbl in s0)
+
+
+def test_run_point_multi_output():
+    cfg = _cfg()
+    cfg.task.name = "iterated"
+    cfg.task.params = {"w": 8, "T": 2, "rule": 90, "distractors": 2}
+    out, models = run_point(cfg, cfg.task.params, seed=0)
+    for lbl in out:
+        assert "exact_match" in out[lbl]
+        assert "accuracy" in out[lbl]
+        assert out[lbl]["accuracy"] >= 0.0
 
 
 def test_resolved_deltas_default():

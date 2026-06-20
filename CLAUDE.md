@@ -262,14 +262,16 @@ to DS. k≤3 is too easy to separate the arms (all ≈1.0). Caveat: a single run
 the untied-stack control (§4b, M2) is needed before concluding "tied recurrence" beats
 "mere depth."
 
-**Known gap deferred to M1:** the multi-output (Task B) path is not wired — `num_classes`
-is fixed at 2 and TRM has no per-cell head yet. `task: iterated` should not be run until
-that head lands.
+**M1 — DONE.** Task B wired, per-cell output head landed, and depth-extrapolation harness fully implemented (30 tests, all passing):
+- Multi-output support in `TRM` (`src/looptab/models/trm.py`) and `FFMatched` (`src/looptab/models/controls.py`) via the `out_features` parameter representing CA cell width $w$.
+- Evaluation metrics (`accuracy` and `exact_match` in `src/looptab/eval/metrics.py`) updated to support unroll step override parameter `n_steps` passing to the forward pass.
+- Config-driven depth-extrapolation runner (`src/looptab/run.py` and `configs/experiments/m1_iterated_extrapolation.yaml`) executing sweeps over test CA steps $T_{test} \in [4, 6, 8, 10]$ and test unrolling steps $R_{test} \in [4, 6, 8, 10, 12]$, writing JSON and CSV outputs.
+
+**M1 result (iterated CA rule 90, w=8, distractors=4, n_steps=4, 5 seeds, 100 epochs).**
+Because width 8 rule-90 (XOR neighbor updates) is a linear cellular automaton, all models (including the param-matched MLP control) converged to 100% accuracy and generalised perfectly up to $T_{test}=10$ steps. No divergence in accuracy was observed between the recurrent arms and control.
 
 _Then:_
-- **M1** — Task B + a per-cell output head + the depth-extrapolation harness (§3).
-- **M2** — add the depth/compute-matched untied control (§4b). (The deep-supervision
-  ablation from §8 already ships in M0 as a separate arm.)
+- **M2** — add the depth/compute-matched untied control (§4b).
 - **M3** — revisit the hierarchy (Task C) *iff* M0–M2 justify it.
 
 ## 12. Key references (for grounding a cold agent)
