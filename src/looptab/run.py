@@ -245,23 +245,17 @@ def main():
     seeds = [args.seed] if args.seed is not None else cfg.seeds
     labels = [a.resolved_label() for a in cfg.arms]
 
-    # Sweep axis: one point if no sweep is declared.
-    if cfg.sweep is not None:
-        sweep_param = cfg.sweep.param
-        sweep_values = cfg.sweep.values
-    else:
-        sweep_param = None
-        sweep_values = [None]
+    # Outer axis: a single point, a 1-D `sweep` curve, or an N-D `grid` of configs.
+    # Each entry is (human label, task-param overrides) — see ExperimentConfig.axis_points.
+    axis_points = cfg.axis_points()
 
-    points = []  # one entry per sweep value
+    points = []  # one entry per axis point
     extrap_results = None
 
-    for sv in sweep_values:
+    for point_label, overrides in axis_points:
         task_params = copy.deepcopy(cfg.task.params)
-        if sweep_param is not None:
-            task_params[sweep_param] = sv
-        tag = f"{sweep_param}={sv}" if sweep_param else "single"
-        print(f"\n=== {tag} ===")
+        task_params.update(overrides)
+        print(f"\n=== {point_label} ===")
 
         per_seed = []
         all_seed_extrap = []
@@ -296,6 +290,10 @@ def main():
             a = agg[lbl]
             print(f"  {lbl:>16}: acc {a['accuracy_mean']:.4f} ± {a['accuracy_std']:.4f}")
 
+        # Exact-match is a distinct, meaningful signal on multi-output tasks (Task B),
+        # so we report its paired Δ *with variance* too — not just a point estimate.
+        multi_output = "exact_match" in per_seed[0][labels[0]]
+
         deltas = {}
         for a, b in cfg.resolved_deltas():
             rep = delta_report(
@@ -303,8 +301,17 @@ def main():
                 [s[b]["accuracy"] for s in per_seed],
                 label="accuracy",
             )
-            deltas[f"{a}-{b}"] = rep
-            print(f"  Δ({a} − {b}) = {rep['delta_mean']:+.4f} ± {rep['delta_std']:.4f}")
+            deltas[f"{a}-{b}"] = {"accuracy": rep}
+            line = f"  Δ({a} − {b}) = {rep['delta_mean']:+.4f} ± {rep['delta_std']:.4f}"
+            if multi_output:
+                em_rep = delta_report(
+                    [s[a]["exact_match"] for s in per_seed],
+                    [s[b]["exact_match"] for s in per_seed],
+                    label="exact_match",
+                )
+                deltas[f"{a}-{b}"]["exact_match"] = em_rep
+                line += f"  [EM {em_rep['delta_mean']:+.4f} ± {em_rep['delta_std']:.4f}]"
+            print(line)
 
         # Aggregate extrapolation results across seeds
         if cfg.extrapolation is not None:
@@ -334,8 +341,9 @@ def main():
 
         points.append(
             {
-                "sweep_param": sweep_param,
-                "sweep_value": sv,
+                "label": point_label,
+                "overrides": overrides,
+                "multi_output": multi_output,
                 "agg": agg,
                 "deltas": deltas,
                 "seeds": per_seed,
@@ -362,16 +370,17 @@ def main():
     with open(json_path, "w") as f:
         json.dump(record, f, indent=2)
 
+    # Per-arm curve CSV. `config` holds the axis-point label ("single", "k=4",
+    # "rule=30, w=9", ...) so the same writer serves a single run, a 1-D sweep and an
+    # N-D grid alike.
     csv_path = out_dir / f"{tag}_{stamp}_curve.csv"
     with open(csv_path, "w", newline="") as f:
         w = csv.writer(f)
-        w.writerow(["sweep_param", "sweep_value", "arm", "metric", "mean", "std", "n_params"])
+        w.writerow(["config", "arm", "metric", "mean", "std", "n_params"])
         for p in points:
-            # Save baseline entry to the curve CSV
             w.writerow(
                 [
-                    p["sweep_param"],
-                    p["sweep_value"],
+                    p["label"],
                     "baseline",
                     "accuracy",
                     p["agg"]["baseline"]["mean"],
@@ -383,8 +392,7 @@ def main():
                 a = p["agg"][lbl]
                 w.writerow(
                     [
-                        p["sweep_param"],
-                        p["sweep_value"],
+                        p["label"],
                         lbl,
                         "accuracy",
                         a["accuracy_mean"],
@@ -395,8 +403,7 @@ def main():
                 if "exact_match_mean" in a:
                     w.writerow(
                         [
-                            p["sweep_param"],
-                            p["sweep_value"],
+                            p["label"],
                             lbl,
                             "exact_match",
                             a["exact_match_mean"],
@@ -405,10 +412,33 @@ def main():
                         ]
                     )
 
+    # Per-config Δ table — THE deliverable (CLAUDE.md §2: a result is a Δ, never a lone
+    # arm number). One row per (config, delta-pair, metric) with paired mean ± std.
+    deltas_csv_path = out_dir / f"{tag}_{stamp}_deltas.csv"
+    with open(deltas_csv_path, "w", newline="") as f:
+        w = csv.writer(f)
+        w.writerow(["config", "delta", "metric", "delta_mean", "delta_std", "n_seeds"])
+        for p in points:
+            for pair, reps in p["deltas"].items():
+                for metric, rep in reps.items():
+                    w.writerow(
+                        [
+                            p["label"],
+                            pair,
+                            metric,
+                            rep["delta_mean"],
+                            rep["delta_std"],
+                            rep["n_seeds"],
+                        ]
+                    )
+
     print(f"\nResults : {json_path}")
     print(f"Curve   : {csv_path}")
+    print(f"Deltas  : {deltas_csv_path}")
+    # The line-plot only makes sense for a 1-D numeric sweep; a grid is summarised by
+    # the CSVs above.
     if cfg.sweep is not None:
-        _maybe_plot(points, labels, sweep_param, out_dir / f"{tag}_{stamp}_curve.png")
+        _maybe_plot(points, labels, cfg.sweep.param, out_dir / f"{tag}_{stamp}_curve.png")
 
     if extrap_results is not None:
         extrap_csv_path = out_dir / f"{tag}_{stamp}_extrapolation.csv"
@@ -472,7 +502,7 @@ def _maybe_plot(points, labels, sweep_param, out_path):
     except Exception:
         print("Plot    : skipped (matplotlib not installed; CSV holds the curve)")
         return
-    xs = [p["sweep_value"] for p in points]
+    xs = [p["overrides"][sweep_param] for p in points]
     fig, ax = plt.subplots()
     for lbl in labels:
         means = np.array([p["agg"][lbl]["accuracy_mean"] for p in points])
