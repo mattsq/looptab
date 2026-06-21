@@ -1,0 +1,99 @@
+# M4 — replicate & stress-test the Task A parity leg across feature dimension and
+# sparsity. The whole Task A result (M0/M2) rests on ONE setting: d=20, with the
+# important separation at k=4. M4 asks whether that finding is robust or a single-config
+# artifact by running the SAME arm factorial over a compact 2-D grid:
+#
+#   d ∈ {20, 40, 80}  (anchor, original rung, harder distractor load)
+#   k ∈ {3, 4, 5}     (interaction order / parity arity)
+#
+# Hyperparameters are inherited verbatim from m2_parity_sweep.yaml (hidden=latent=64,
+# n_steps=4, 100 epochs, lr 1e-3, wd 1e-4, batch 256, n_train 4000, n_test 1000). No
+# per-cell tuning (§8: "no tuning on the held-out config").
+#
+# Four required arms + one labelled ceiling:
+#   trm_ds         - TRM loop WITH deep supervision (final-state DS, the M0–M3a default)
+#   trm_nods       - TRM loop WITHOUT deep supervision (isolates the loop alone) = "the loop"
+#   ff_matched     - param-matched shallow feedforward control (§4a, MANDATORY)
+#   untied_matched - param-matched untied stack, the CLEAN §4b tying control
+#   untied_stack   - ~n_steps× params untied stack — NON-param-matched CEILING ONLY (§4b),
+#                    never the clean tying control; kept for context (cheap on parity)
+#
+# Primary deltas (§2 — a result is a Δ, never a lone arm number):
+#   Δ(trm_nods − ff_matched)       the loop vs §4a control (the M0 headline)
+#   Δ(trm_nods − untied_matched)   weight tying at fixed budget+depth (the clean §4b Δ)
+#   Δ(untied_matched − ff_matched) depth at fixed capacity (deep-narrow vs shallow MLP)
+#   Δ(trm_ds − trm_nods)           deep supervision alone
+
+task:
+  name: parity
+  params: {}            # d and k are both swept by the grid below
+  n_train: 4000
+  n_test: 1000
+  task_seed: 42
+  train_sample_seed: 1
+  test_sample_seed: 2
+
+grid:
+  params:
+    d: [20, 40, 80]
+    k: [3, 4, 5]
+
+arms:
+  - name: trm
+    label: trm_ds
+    hidden_dim: 64
+    latent_dim: 64
+    n_steps: 4
+    deep_supervision: true
+    deep_supervision_weight: 1.0
+  - name: trm
+    label: trm_nods
+    hidden_dim: 64
+    latent_dim: 64
+    n_steps: 4
+    deep_supervision: false
+    deep_supervision_weight: 0.0
+  - name: ff_matched
+    label: ff_matched
+    hidden_dim: 64
+    latent_dim: 64
+    n_steps: 4
+  - name: untied_matched
+    label: untied_matched
+    hidden_dim: 64
+    latent_dim: 64
+    n_steps: 4
+    deep_supervision: false
+    deep_supervision_weight: 0.0
+  - name: untied_stack
+    label: untied_stack       # CEILING ONLY — ~n_steps× params, NOT param-matched
+    hidden_dim: 64
+    latent_dim: 64
+    n_steps: 4
+    deep_supervision: false
+    deep_supervision_weight: 0.0
+
+deltas:
+  - [trm_nods, ff_matched]       # the loop alone vs §4a control (M0 headline)
+  - [trm_nods, untied_matched]   # CLEAN §4b: weight tying at fixed capacity + depth
+  - [untied_matched, ff_matched] # depth at fixed capacity (deep untied vs shallow MLP)
+  - [trm_ds, trm_nods]           # deep supervision alone
+  - [trm_nods, untied_stack]     # confounded ceiling (tying + ~n_steps× capacity) — context only
+
+# Budget-parity audit: the loop defines the budget; the three other param-matched arms
+# (trm_ds is tied, so identical to trm_nods; ff_matched / untied_matched are width-solved
+# to the loop's budget per cell) must stay within ±2%. untied_stack is the exempt ceiling.
+# Surfaces any integer-width quantization drift in the params CSV rather than hiding it.
+budget_reference: trm_nods
+budget_ceiling: [untied_stack]
+budget_tol: 0.02
+
+train:
+  epochs: 100
+  lr: 1e-3
+  weight_decay: 1e-4
+  batch_size: 256
+  device: cpu
+
+seeds: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
+results_dir: results

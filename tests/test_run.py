@@ -1,6 +1,9 @@
 """Tests for the run harness: arms, sweep, Δ reporting, and determinism."""
 
+from pathlib import Path
+
 import pytest
+import yaml
 
 from looptab.config import ExperimentConfig
 from looptab.run import budget_audit, run_point
@@ -177,6 +180,29 @@ def test_grid_cells_deterministic_and_independent():
     for lbl in a:
         assert a[lbl]["accuracy"] == c[lbl]["accuracy"]
     assert cfg.task.params == base_params
+
+
+def test_m4_parity_grid_config_is_2d_d_by_k():
+    """M4: the parity grid is the full d × k Cartesian product (3×3 = 9 cells), runs the
+    four required arms + the labelled untied_stack ceiling, and wires the budget audit
+    with the loop as reference and only untied_stack exempt."""
+    path = Path(__file__).resolve().parents[1] / "configs/experiments/m4_parity_grid.yaml"
+    with open(path) as f:
+        cfg = ExperimentConfig(**yaml.safe_load(f))
+    pts = cfg.axis_points()
+    assert [ov for _, ov in pts] == [
+        {"d": d, "k": k} for d in (20, 40, 80) for k in (3, 4, 5)
+    ]
+    labels = {a.resolved_label() for a in cfg.arms}
+    assert {"trm_ds", "trm_nods", "ff_matched", "untied_matched", "untied_stack"} == labels
+    assert cfg.budget_reference == "trm_nods"
+    assert cfg.budget_ceiling == ["untied_stack"]
+    # The four required M4 deltas must all be present.
+    assert ["trm_nods", "ff_matched"] in cfg.deltas
+    assert ["trm_nods", "untied_matched"] in cfg.deltas
+    assert ["untied_matched", "ff_matched"] in cfg.deltas
+    assert ["trm_ds", "trm_nods"] in cfg.deltas
+    assert len(cfg.seeds) == 10
 
 
 def test_resolved_deltas_default():

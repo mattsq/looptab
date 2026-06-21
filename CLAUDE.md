@@ -242,7 +242,7 @@ behaviour-changing conclusions, and the next pointer. Append detail to LOG.md, n
   `sweep`, an N-D `grid`, and a depth-`extrapolation` harness (`grid` and `extrapolation`
   are mutually exclusive). Emits per-arm curve CSV, per-config Δ CSV, JSON record (config +
   metrics + seed + git SHA), and PNGs if matplotlib present (`src/looptab/run.py`).
-- **Configs:** `configs/experiments/` (m0…m2-confirm + the in-progress m3a/m3b).
+- **Configs:** `configs/experiments/` (m0…m2-confirm, m3a/m3b, m4_parity_grid).
 - **Tests:** `tests/` — generator determinism, model shapes/param-ratios, runner
   determinism/independence. Run `uv run pytest -q`; lint `uv run ruff check`.
 
@@ -272,33 +272,47 @@ behaviour-changing conclusions, and the next pointer. Append detail to LOG.md, n
   does not crack the wall past the trained horizon.
 - **The loop does NOT beat its §4a control `ff_matched` on Task B** at any depth (M2-confirm
   wins 1/6 by noise; M3a ≤0 at every T, significantly negative at T=4/T=8). On Task A it's the
-  mirror: beats `ff_matched` (+0.237) but only ties `untied_matched`. So on neither task does
+  mirror: beats `ff_matched` but only ties `untied_matched`. So on neither task does
   the loop beat *both* controls → the literal §9 gate is unmet. The loop's defensible property
   is "never the worst param-matched arm" (robustness), not dominance. The gate as literally
   worded may be unsatisfiable by a generalist judged against single-axis specialists.
+- **Task A "depth helps, tying neutral" REPLICATES across d × k and strengthens with k (M4).**
+  Over d∈{20,40,80} × k∈{3,4,5} (10 seeds), Δ(loop − ff_matched) reproduces at d=20,k=4 (+0.228,
+  6/0, p=.031) and grows at k=5 (**+0.497**, 10/0, p=.002; ff at pure chance 0.503 while the loop
+  is perfect) — no longer a single-`d` artifact. But Δ(loop − untied_matched) is **non-significant
+  in all 9 cells**, and the depth Δ(untied_matched − ff_matched) carries the same sign/significance
+  as Δ(loop − ff) — so the win is **depth, not tying**, and the loop beats *both* controls in **0**
+  cells. Raising d mostly hits an **unlearnability wall** (d≥40,k≥4: all arms at test-chance — deep
+  arms overfit train, ff_matched underfits it) rather than separating arms, so the clean signal
+  lives at d=20 (all k).
 - **No transferable step operator; the loop does NOT extrapolate in depth (M1 + M3b).**
   Over-unrolling R′>R decays to baseline, and OOD depth T>T_train collapses to baseline for
   every arm. M3b applied the two named levers (T-curriculum + step-aligned DS) and the OOD
   collapse (T≥12) STILL holds — a stronger, cleaner null than M1's. Within the curriculum
   there's only weak compositional signal (R′=T tracks for T≤8, tops out ~0.58).
-- Each leg still rests on few configs: Task A on one `d`; Task B depth swept (M3a) but
-  unlearnable past T=4 one-shot; M3b on one rule (30) / one width (9).
+- Each leg still rests on few configs: Task A now multi-`d`/multi-`k` (M4) but harder cells are
+  sample-limited, not capacity-limited; Task B depth swept (M3a) but unlearnable past T=4 one-shot;
+  M3b on one rule (30) / one width (9).
 
 ### (c) Next milestone
 
-**M3a and M3b are both DONE** (full narratives in LOG.md). M3a falsified "loop edge grows
+**M3a, M3b, and M4 are all DONE** (full narratives in LOG.md). M3a falsified "loop edge grows
 with depth" (it vanishes by T≥8; deep CA is unlearnable one-shot for all arms). M3b applied
-the T-curriculum + step-aligned DS levers: it found step-aligned DS is a *real* short-horizon
-win (DS was mis-specified, not inert) but did **not** yield a transferable operator — OOD
-depth still collapses, M1's null reproduced and hardened.
+the T-curriculum + step-aligned DS levers: step-aligned DS is a *real* short-horizon win (DS was
+mis-specified, not inert) but did **not** yield a transferable operator. M4 replicated the Task A
+parity leg across d∈{20,40,80} × k∈{3,4,5}: the loop's edge over `ff_matched` is **robust and
+grows with k** (no longer single-`d`), but it is purely **depth** (ties `untied_matched` in all 9
+cells) and the loop beats *both* controls in **0** cells; d≥40,k≥4 is a sample-complexity wall.
 
 **No milestone is currently in flight.** The §9 gate is still unmet (no task where the loop
-beats *both* controls), so **M3/Task C (H/L hierarchy) stays gated**. Open levers for whoever
-picks this up next, in rough priority: (i) **replicate the Task A (parity) leg across `d` /
-sparsity** — still the single biggest single-config gap; (ii) **broaden M3b** to more rules /
-widths and try a *fixed-point or halting* objective (PonderNet/ACT) or an annealed curriculum
-against the depth-extrapolation null; (iii) only then re-judge the loop against the full
-param-matched control set. Earn the hierarchy later, not now.
+beats *both* controls), and M4 closed the "Task A single-config" gap without changing that verdict.
+Open levers for whoever picks this up next, in rough priority: (i) **re-judge the §9 gate wording
+itself** — both tasks now say the loop is robust-not-dominant; the literal "beats both controls"
+bar may be unsatisfiable by a generalist vs single-axis specialists (decide whether to relax it,
+do NOT build Task C on the current evidence); (ii) **lift the M4 sample-complexity wall** (larger
+`n_train` or a k-curriculum) to test whether the d=80/k=3 depth hints are real near the wall;
+(iii) **broaden M3b** to more rules/widths and try a *fixed-point or halting* objective
+(PonderNet/ACT) against the depth-extrapolation null. Earn the hierarchy later, not now.
 
 ## 12. Key references (for grounding a cold agent)
 
