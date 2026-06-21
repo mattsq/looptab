@@ -552,3 +552,28 @@ depth/tying edge near the wall or noise; this milestone deliberately did not tun
 §9 "beats both controls" condition is still unmet on *either* task — as M2-confirm noted, it may be
 literally unsatisfiable by a generalist judged against single-axis specialists; re-judging the gate
 wording (not building the hierarchy) is the live question, untouched here.
+
+## Infra — Training/eval performance (no scientific change). Bit-identical, ~2.5× faster.
+
+Not a milestone — a perf pass on the model/training/eval path. **All run outputs are byte-for-byte
+unchanged** (verified: parity single-output and iterated multi-output cells reproduce prior
+accuracies and exact-match exactly; 67/67 tests pass; ruff clean).
+
+Two bottlenecks resolved:
+
+1. **Data path dominated wall-clock.** For the tiny models here the per-sample
+   `Dataset.__getitem__` + default-collate path of `torch.utils.data.DataLoader` cost more than
+   the matmuls. Replaced with `InMemoryLoader` (`src/looptab/data/dataset.py`): the RAM-resident
+   dataset is stacked into tensors once and batched by slicing a permutation. Determinism is
+   preserved **bit-for-bit** by reproducing `DataLoader`'s exact per-epoch global-RNG protocol —
+   the `_BaseDataLoaderIter` worker `_base_seed` draw *and then* `RandomSampler`'s seed draw → fresh
+   `Generator` → `randperm` — so both the consumed RNG state and the batch composition match the
+   loader it replaces (checked against a real `DataLoader` over multiple epochs).
+2. **Redundant eval forward pass.** On multi-output (Task B) cells, `accuracy` and `exact_match`
+   each ran their own forward over the test set (and once per R' in the extrapolation harness).
+   Added `evaluate` (`src/looptab/eval/metrics.py`) which derives both from a single `_predict`;
+   `run_point` and `run_extrapolation_point` now use it. Same predictions, half the eval passes.
+
+Measured: a representative `run_point` (2 arms × 30 epochs, n_train=4000) went 7.19s → 2.85s (~2.5×)
+on CPU; multi-output runs gain additionally from the single-pass eval. Larger sweeps/grids scale the
+same. No config, metric, or conclusion changes — this only makes re-running the suite cheaper.

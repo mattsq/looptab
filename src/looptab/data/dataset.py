@@ -4,7 +4,7 @@ from dataclasses import dataclass
 
 import numpy as np
 import torch
-from torch.utils.data import DataLoader, Dataset
+from torch.utils.data import Dataset
 
 from .generators import make_iterated, make_linear, make_parity
 
@@ -21,6 +21,15 @@ class TabularDataset(Dataset):
         x = torch.from_numpy(self.X[idx])
         y = torch.from_numpy(self.y[idx]) if self.y.ndim > 1 else torch.tensor(self.y[idx])
         return x, y
+
+    def tensors(self) -> tuple[torch.Tensor, torch.Tensor]:
+        """Whole dataset as (features, targets) tensors for the in-memory loader.
+
+        Equivalent, row-for-row and dtype-for-dtype, to stacking ``__getitem__`` over every
+        index (``from_numpy`` is a zero-copy view of the same float32/int64 buffers), so the
+        fast loader yields batches bit-identical to the default-collate path it replaces.
+        """
+        return torch.from_numpy(self.X), torch.from_numpy(self.y)
 
 
 @dataclass
@@ -40,6 +49,10 @@ class TrajectoryDataset(Dataset):
 
     def __getitem__(self, idx):
         return torch.from_numpy(self.X[idx]), torch.from_numpy(self.traj[idx])
+
+    def tensors(self) -> tuple[torch.Tensor, torch.Tensor]:
+        """Whole dataset as (features, trajectory) tensors for the in-memory loader."""
+        return torch.from_numpy(self.X), torch.from_numpy(self.traj)
 
 
 def make_splits(
@@ -88,9 +101,58 @@ def make_trajectory_dataset(
     return TrajectoryDataset(X, traj)
 
 
+class InMemoryLoader:
+    """Fast batch iterator over an in-memory dataset (drop-in for ``DataLoader``).
+
+    The synthetic suite fits entirely in RAM, so for the tiny models here the dominant
+    training-loop cost was ``DataLoader``'s per-sample ``__getitem__`` + default-collate
+    path, not the matmuls. This batches by slicing pre-stacked tensors instead, which
+    removes that per-row Python overhead.
+
+    **Determinism is preserved bit-for-bit** (CLAUDE.md §5.3). Creating a ``DataLoader``
+    iterator consumes the global RNG in a fixed per-epoch protocol that this reproduces
+    exactly, so both the global-RNG state *and* the batch composition match the loader it
+    replaces (verified against ``DataLoader`` over multiple epochs):
+      1. one int64 ``_base_seed`` draw (the worker seed ``_BaseDataLoaderIter`` always takes),
+         discarded here as there are no workers;
+      2. with ``shuffle=True``, ``RandomSampler``'s own int64 seed draw -> fresh ``Generator``
+         -> ``randperm`` (``shuffle=False`` mirrors the draw-free ``SequentialSampler``).
+    Batches are contiguous chunks of that permutation (``drop_last=False``), identical to
+    ``BatchSampler``. Training trajectories are therefore unchanged.
+    """
+
+    def __init__(self, X: torch.Tensor, y: torch.Tensor, batch_size: int, shuffle: bool):
+        self.X = X
+        self.y = y
+        self.batch_size = batch_size
+        self.shuffle = shuffle
+        self.n = int(X.shape[0])
+
+    def __len__(self) -> int:
+        return (self.n + self.batch_size - 1) // self.batch_size
+
+    def __iter__(self):
+        # (1) The worker base-seed draw DataLoader takes on every iterator creation, even
+        # with num_workers=0. Discarded, but consumed to keep the global RNG state aligned.
+        _ = torch.empty((), dtype=torch.int64).random_()
+        if self.shuffle:
+            # (2) RandomSampler: one global-RNG int64 seed -> fresh generator -> randperm.
+            seed = int(torch.empty((), dtype=torch.int64).random_().item())
+            gen = torch.Generator()
+            gen.manual_seed(seed)
+            perm = torch.randperm(self.n, generator=gen)
+        else:
+            perm = torch.arange(self.n)
+        for start in range(0, self.n, self.batch_size):
+            idx = perm[start : start + self.batch_size]
+            yield self.X[idx], self.y[idx]
+
+
 def make_loaders(train_ds, test_ds, batch_size: int, num_workers: int = 0):
-    train_loader = DataLoader(
-        train_ds, batch_size=batch_size, shuffle=True, num_workers=num_workers, drop_last=False
-    )
-    test_loader = DataLoader(test_ds, batch_size=batch_size, shuffle=False, num_workers=num_workers)
+    # `num_workers` is accepted for call-site compatibility but unused: the data is already
+    # resident in memory, so worker processes would only add IPC/serialization overhead.
+    train_X, train_y = train_ds.tensors()
+    test_X, test_y = test_ds.tensors()
+    train_loader = InMemoryLoader(train_X, train_y, batch_size, shuffle=True)
+    test_loader = InMemoryLoader(test_X, test_y, batch_size, shuffle=False)
     return train_loader, test_loader

@@ -22,7 +22,7 @@ import yaml
 
 from .config import ExperimentConfig, ModelConfig
 from .data.dataset import make_loaders, make_splits, make_trajectory_dataset
-from .eval.metrics import accuracy, delta_report, exact_match, majority_baseline
+from .eval.metrics import accuracy, delta_report, evaluate, majority_baseline
 from .registry import get_model
 from .train.loop import train, train_curriculum
 
@@ -142,8 +142,11 @@ def run_point(cfg: ExperimentConfig, task_params: dict, seed: int) -> tuple[dict
                 deep_supervision_weight=arm.deep_supervision_weight,
                 device=device,
             )
+        # One forward pass over the test set yields both accuracy and (for multi-output
+        # Task B) exact-match; train accuracy is a separate pass.
+        test_metrics = evaluate(m, test_loader, device, want_exact_match=multi_output)
         metrics = {
-            "accuracy": accuracy(m, test_loader, device),
+            "accuracy": test_metrics["accuracy"],
             # Train accuracy is the M3a optimization-vs-capacity diagnostic: a loop that
             # fails at high T with *low train acc too* is an optimization failure (Phase 2's
             # step-aligned DS may help), not a capacity verdict against the loop.
@@ -151,7 +154,7 @@ def run_point(cfg: ExperimentConfig, task_params: dict, seed: int) -> tuple[dict
             "n_params": m.count_params(),
         }
         if multi_output:
-            metrics["exact_match"] = exact_match(m, test_loader, device)
+            metrics["exact_match"] = test_metrics["exact_match"]
         results[arm.resolved_label()] = metrics
         models[arm.resolved_label()] = m
 
@@ -231,20 +234,13 @@ def run_extrapolation_point(
         # recurrent arm (TRM) can be unrolled to different steps R'
         if arm.name == "trm":
             for R in R_test_values:
-                metrics = {
-                    "accuracy": accuracy(m, test_loader, device, n_steps=R),
-                }
-                if multi_output:
-                    metrics["exact_match"] = exact_match(m, test_loader, device, n_steps=R)
-                point_results[(lbl, R)] = metrics
+                point_results[(lbl, R)] = evaluate(
+                    m, test_loader, device, want_exact_match=multi_output, n_steps=R
+                )
         else:
             # Control arm (feedforward) is not recurrent, so R' doesn't apply to it.
             # We evaluate it once, and copy results for all R' to make plotting/CSV easier.
-            metrics = {
-                "accuracy": accuracy(m, test_loader, device),
-            }
-            if multi_output:
-                metrics["exact_match"] = exact_match(m, test_loader, device)
+            metrics = evaluate(m, test_loader, device, want_exact_match=multi_output)
             for R in R_test_values:
                 point_results[(lbl, R)] = metrics
 
