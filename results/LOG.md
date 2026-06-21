@@ -559,7 +559,7 @@ Not a milestone — a perf pass on the model/training/eval path. **All run outpu
 unchanged** (verified: parity single-output and iterated multi-output cells reproduce prior
 accuracies and exact-match exactly; 67/67 tests pass; ruff clean).
 
-Two bottlenecks resolved:
+Three bottlenecks resolved:
 
 1. **Data path dominated wall-clock.** For the tiny models here the per-sample
    `Dataset.__getitem__` + default-collate path of `torch.utils.data.DataLoader` cost more than
@@ -573,7 +573,22 @@ Two bottlenecks resolved:
    each ran their own forward over the test set (and once per R' in the extrapolation harness).
    Added `evaluate` (`src/looptab/eval/metrics.py`) which derives both from a single `_predict`;
    `run_point` and `run_extrapolation_point` now use it. Same predictions, half the eval passes.
+3. **CPU thread oversubscription.** The tiny models' matmuls fall below torch's parallelization
+   threshold, so torch's default intra-op thread count (= core count) adds only dispatch overhead.
+   Measured (4-core box): threads 1≈2 < 4 < **8 ≈ 3× slower than 1**. On many-core cloud machines
+   the default is far worse (torch defaults to the full core count). Added `TrainConfig.num_threads`
+   (default **1**), applied once in `run.main()` via `torch.set_num_threads`. Verified bit-identical
+   across thread counts (full-precision, both single- and multi-output) — the small kernels don't
+   reorder reductions — so this is a pure speed/portability win. `num_threads: null` restores torch's
+   default for when models grow.
 
 Measured: a representative `run_point` (2 arms × 30 epochs, n_train=4000) went 7.19s → 2.85s (~2.5×)
-on CPU; multi-output runs gain additionally from the single-pass eval. Larger sweeps/grids scale the
-same. No config, metric, or conclusion changes — this only makes re-running the suite cheaper.
+on CPU from (1)+(2); thread pinning takes the warm loop a further ~2.83s → 2.43s here and avoids the
+~3×+ oversubscription penalty on big-core boxes. Multi-output runs gain additionally from the
+single-pass eval. No config, metric, or conclusion changes — this only makes re-running cheaper.
+
+**Still on the table (not done):** seeds/grid-cells are embarrassingly parallel (each is a pure
+function of its seed, already reseeded independently), so running them across processes — one torch
+thread each — would give near-linear speedup on the full suite. Deferred: it's a runner-level change
+(process pool + result aggregation) with more surface area than the wins above, so it should be a
+deliberate decision, not folded into this pass.

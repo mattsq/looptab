@@ -347,6 +347,12 @@ def main():
         raw = yaml.safe_load(f)
     cfg = ExperimentConfig(**raw)
 
+    # Pin CPU threads before any tensor work. For the tiny models here, torch's default
+    # (= core count) oversubscribes and is much slower than 1 thread, especially on
+    # many-core cloud machines (see TrainConfig.num_threads). Bit-identical to the default.
+    if cfg.train.num_threads is not None:
+        torch.set_num_threads(cfg.train.num_threads)
+
     seeds = [args.seed] if args.seed is not None else cfg.seeds
     labels = [a.resolved_label() for a in cfg.arms]
 
