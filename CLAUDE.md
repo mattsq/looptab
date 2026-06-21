@@ -282,8 +282,9 @@ behaviour-changing conclusions, and the next pointer. Append detail to LOG.md, n
   is perfect) — no longer a single-`d` artifact. But Δ(loop − untied_matched) is **non-significant
   in all 9 cells**, and the depth Δ(untied_matched − ff_matched) carries the same sign/significance
   as Δ(loop − ff) — so the win is **depth, not tying**, and the loop beats *both* controls in **0**
-  cells. Raising d mostly hits a **sample-complexity wall** (d≥40,k≥4: all arms at test-chance with
-  high train acc) rather than separating arms, so the clean signal lives at d=20 (all k).
+  cells. Raising d mostly hits an **unlearnability wall** (d≥40,k≥4: all arms at test-chance — deep
+  arms overfit train, ff_matched underfits it) rather than separating arms, so the clean signal
+  lives at d=20 (all k).
 - **No transferable step operator; the loop does NOT extrapolate in depth (M1 + M3b).**
   Over-unrolling R′>R decays to baseline, and OOD depth T>T_train collapses to baseline for
   every arm. M3b applied the two named levers (T-curriculum + step-aligned DS) and the OOD

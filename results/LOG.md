@@ -452,11 +452,14 @@ reference), `trm_ds` (loop+final-state DS), `ff_matched` (§4a shallow), `untied
 tying control) — plus `untied_stack` as a **labelled non-param-matched ceiling** (~4× params, never
 the clean control). Per-cell param ratios to the loop: `ff_matched` 0.994–1.007, `untied_matched`
 0.986–**1.023**. The audit flagged **3 cells** (all at d=40) where `untied_matched` drifts to
-**+2.3%** (ratio 1.023) — the expected integer-width-quantization finding, surfaced not hidden. It
-is **one-directional (over budget)**, so if anything it *helps* `untied_matched`; and all three
-breach cells sit *inside* the unlearnability wall below (no significant call rides on them). The
-headline `Δ(loop − ff_matched)` is on two arms matched to ≤0.7% in every cell, so depth attribution
-is clean regardless.
+**+2.3%** (ratio 1.023) — the expected integer-width-quantization finding, surfaced not hidden.
+All three breach cells (d=40, k∈{3,4,5}) sit *inside* the unlearnability wall below — k=3 is solved
+by every arm, k=4/k=5 are at test-chance for every arm — so **no significant Δ rides on them** and
+the breach changes no verdict. (Note the drift is *over* budget, which for the "tying neutral"
+reading cuts toward the loop, not against it — an over-budget um that still only ties the loop is, if
+anything, evidence the loop is not *better* than a strictly-matched um; we do not lean on this, since
+the cells are at chance anyway.) The headline `Δ(loop − ff_matched)` is on two arms matched to ≤0.7%
+in every cell, so depth attribution is clean regardless.
 
 **Per-arm test accuracy (mean ± std, 10 seeds; us = untied_stack ceiling):**
 
@@ -496,11 +499,14 @@ when arms saturate at 1.000) reduce the effective n, so e.g. 6/0 with 4 ties →
    d=20,k=4 separation reproduces (Δ(loop − ff) = **+0.228**, 6/0, p=.031) and *intensifies* at
    k=5, where `ff_matched` sits at **pure chance (0.503)** while the loop is perfect on all 10
    seeds (Δ = **+0.497**, 10/0, p=.002). So the M0/M2 headline "the loop beats its §4a shallow
-   control on parity" is **not a single-config artifact** — it holds across the k-ladder at d=20
-   and grows with interaction order.
+   control on parity" is **not a single-config artifact** — it holds across the k-ladder at d=20.
+   (Mechanistically the Δ "grows" because the *control's* floor drops as k rises — ff_matched slides
+   1.000→0.772→0.503 while the deep arms stay pinned at 1.000; the loop is not doing progressively
+   *more*, the shallow MLP is failing progressively *harder*. The separation is real either way.)
 2. **Does the loop ever beat `untied_matched`? NO — Task A is still "depth helps, tying neutral."**
    Δ(loop − untied_matched) is **non-significant in every one of the 9 cells** (largest is +0.099
-   at d=20,k=5, 2/0/8-ties, p=.5 — the loop edges um only because um fails on 1 seed). Where there
+   at d=20,k=5, 2/0/8-ties, p=.5 — the loop edges um only because um fails on 2 of 10 seeds while the
+   loop is perfect 10/10; a robustness gap, not a significant accuracy delta). Where there
    is separation (d=20, k=4/k=5), the *depth* delta Δ(um − ff) carries the **same sign and
    significance** as Δ(loop − ff): both deep arms beat the shallow MLP and **tie each other**. The
    active ingredient on parity is **depth, not weight tying** — now confirmed across the d=20
@@ -509,10 +515,15 @@ when arms saturate at 1.000) reduce the effective n, so e.g. 6/0 with 4 ties →
    confounded by a sample-complexity wall.** At fixed d=20, `ff_matched` degrades **monotonically
    with k** (1.000 → 0.772 → 0.503) while the deep arms hold at 1.000 — exactly the predicted
    "shallow MLP can't represent high-order parity." But **raising d does NOT cleanly stress the
-   architecture**: at d=40 (k≥4) and d=80 (k≥4) *every* arm collapses to test-chance **despite high
-   train accuracy** (loop/um/us reach 0.90–1.00 train, ff ~0.74) — a **generalization /
+   architecture**: at d=40 (k≥4) and d=80 (k≥4) *every* arm collapses to test-chance, but the
+   train/test pattern differs by arm and the failure is **not a single mechanism**. The **deep arms**
+   (loop/um/us) fit train at 0.90–1.00 yet score chance on test → a **generalization /
    sample-complexity wall** (k-sparse parity is not identifiable from 4000 rows once the distractor
-   count is large), not a recurrence verdict. d=80,k=3 sits on the wall's edge: the deep arms (and
+   count is large). `ff_matched`, by contrast, only reaches **~0.74 train** at d=40,k≥4 → it *also*
+   **underfits** there (an optimization/representation limit), so it is not the same overfitting
+   story. Either way the regime carries **no recurrence verdict** — no arm separates on test. (The
+   blanket "high train acc ⇒ generalization wall" should not be read to cover ff_matched.) d=80,k=3
+   sits on the wall's edge: the deep arms (and
    the fat ceiling, 0.842) beat ff on the mean (+0.16) but with 6/4 seed splits and ±0.21 bands —
    suggestive, **not significant**.
 4. **Is there any cell where the loop beats BOTH mandatory controls? NO.** The loop beats `ff_matched`
