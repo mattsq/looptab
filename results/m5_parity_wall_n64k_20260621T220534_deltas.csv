@@ -1,0 +1,21 @@
+config,delta,metric,delta_mean,delta_std,n_seeds,sign_pos,sign_neg,sign_p
+"d=40, k=4",trm_nods-ff_matched,accuracy,0.0,0.0,10,0,0,1.0
+"d=40, k=4",trm_nods-untied_matched,accuracy,0.0,0.0,10,0,0,1.0
+"d=40, k=4",untied_matched-ff_matched,accuracy,0.0,0.0,10,0,0,1.0
+"d=40, k=4",trm_ds-trm_nods,accuracy,0.0,0.0,10,0,0,1.0
+"d=40, k=4",trm_nods-untied_stack,accuracy,0.0,0.0,10,0,0,1.0
+"d=40, k=5",trm_nods-ff_matched,accuracy,0.0,0.0,10,0,0,1.0
+"d=40, k=5",trm_nods-untied_matched,accuracy,0.00010000000000000009,0.0003162277660168382,10,1,0,1.0
+"d=40, k=5",untied_matched-ff_matched,accuracy,-0.00010000000000000009,0.0003162277660168382,10,0,1,1.0
+"d=40, k=5",trm_ds-trm_nods,accuracy,0.0,0.0,10,0,0,1.0
+"d=40, k=5",trm_nods-untied_stack,accuracy,0.0,0.0,10,0,0,1.0
+"d=80, k=4",trm_nods-ff_matched,accuracy,-0.00020000000000000017,0.0006324555320336764,10,0,1,1.0
+"d=80, k=4",trm_nods-untied_matched,accuracy,-0.00020000000000000017,0.0006324555320336764,10,0,1,1.0
+"d=80, k=4",untied_matched-ff_matched,accuracy,0.0,0.0,10,0,0,1.0
+"d=80, k=4",trm_ds-trm_nods,accuracy,0.00020000000000000017,0.0006324555320336764,10,1,0,1.0
+"d=80, k=4",trm_nods-untied_stack,accuracy,-0.00020000000000000017,0.0006324555320336764,10,0,1,1.0
+"d=80, k=5",trm_nods-ff_matched,accuracy,-0.09129999999999999,0.19977100779531434,10,5,5,1.0
+"d=80, k=5",trm_nods-untied_matched,accuracy,-0.0019000000000000017,0.01895872710213779,10,4,5,1.0
+"d=80, k=5",untied_matched-ff_matched,accuracy,-0.0894,0.20040192946509605,10,4,6,0.75390625
+"d=80, k=5",trm_ds-trm_nods,accuracy,0.002300000000000002,0.018348781370373848,10,6,4,0.75390625
+"d=80, k=5",trm_nods-untied_stack,accuracy,-0.0006000000000000005,0.017683639645477728,10,7,3,0.34375

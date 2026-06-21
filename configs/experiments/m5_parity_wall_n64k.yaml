@@ -1,0 +1,84 @@
+# M5 — lift the M4 sample-complexity wall (Task A parity), HEAVY rung.
+# n_train 64000 (16× M4's 4000). FOCUSED to the cells still mid-transition at the 16k
+# rung: the k=3 column saturated to 1.000 for EVERY arm at 16k (and M4's d=80,k=3 "depth
+# hint" dissolved — it was ff_matched sample-starvation, not architecture), so re-running
+# k=3 at 64k would only reconfirm 1.000. The verdict-relevant cells are:
+#   d=40,k=5  (messy partial at 16k: ff unexpectedly best, loop at chance)
+#   d=80,k=4  (16k hint: deep arms ~0.60 generalize, ff & um at chance — ns, ±0.21)
+#   d=80,k=5  (wall persists at 16k: high train, chance test)
+# The grid is rectangular, so d∈{40,80} × k∈{4,5} is the tightest cover (it also re-runs
+# the already-saturated d=40,k=4 as a cheap saturation re-confirm).
+#
+# Question 64k resolves: does d=80,k=4's loop-over-both-controls hint firm up into a
+# stable (sample-efficiency) edge, or lift to all-solve like d=40,k=4 / d=80,k=3 did?
+# See m5_parity_wall_n16k.yaml for the full pre-registered reading.
+
+task:
+  name: parity
+  params: {}            # d and k are both swept by the grid below
+  n_train: 64000        # <-- the one knob (16k rung used 16000; M4 used 4000)
+  n_test: 1000
+  task_seed: 42
+  train_sample_seed: 1
+  test_sample_seed: 2
+
+grid:
+  params:
+    d: [40, 80]
+    k: [4, 5]            # k=3 dropped: saturated to 1.000 for all arms at the 16k rung
+
+arms:
+  - name: trm
+    label: trm_ds
+    hidden_dim: 64
+    latent_dim: 64
+    n_steps: 4
+    deep_supervision: true
+    deep_supervision_weight: 1.0
+  - name: trm
+    label: trm_nods
+    hidden_dim: 64
+    latent_dim: 64
+    n_steps: 4
+    deep_supervision: false
+    deep_supervision_weight: 0.0
+  - name: ff_matched
+    label: ff_matched
+    hidden_dim: 64
+    latent_dim: 64
+    n_steps: 4
+  - name: untied_matched
+    label: untied_matched
+    hidden_dim: 64
+    latent_dim: 64
+    n_steps: 4
+    deep_supervision: false
+    deep_supervision_weight: 0.0
+  - name: untied_stack
+    label: untied_stack       # CEILING ONLY — ~n_steps× params, NOT param-matched
+    hidden_dim: 64
+    latent_dim: 64
+    n_steps: 4
+    deep_supervision: false
+    deep_supervision_weight: 0.0
+
+deltas:
+  - [trm_nods, ff_matched]       # the loop alone vs §4a control (M0 headline)
+  - [trm_nods, untied_matched]   # CLEAN §4b: weight tying at fixed capacity + depth
+  - [untied_matched, ff_matched] # depth at fixed capacity (deep untied vs shallow MLP)
+  - [trm_ds, trm_nods]           # deep supervision alone
+  - [trm_nods, untied_stack]     # confounded ceiling (tying + ~n_steps× capacity) — context only
+
+budget_reference: trm_nods
+budget_ceiling: [untied_stack]
+budget_tol: 0.02
+
+train:
+  epochs: 100
+  lr: 1e-3
+  weight_decay: 1e-4
+  batch_size: 256
+  device: cpu
+
+seeds: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
+results_dir: results
