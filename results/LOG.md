@@ -603,3 +603,19 @@ on CPU from (1)+(2); thread pinning (3) takes the warm loop a further ~2.83s →
 runs (4.12× measured on 4 cores). Multi-output runs gain additionally from the single-pass eval. No
 config, metric, or conclusion changes — this only makes re-running cheaper. **Set `parallel_workers`
 to the core count on any ≥5-seed sweep/grid to use the cores; it stays off (1) by default.**
+
+**Model-level changes investigated and REJECTED (negative result, §8).** A pass looking for
+faster *model math* found nothing worth landing — the TRM core is tiny and already minimal, so its
+cost is the irreducible matmul forward/backward, not removable Python overhead. Measured on
+representative configs (d∈{20,40,80}, steps 4–8, threads=1):
+  - *Precompute the constant `X` projection out of the weight-tied loop* (mathematically the same
+    reassociation of the first linear): **1.01–1.05×**, and **not** bit-identical (maxdiff ~1e-7
+    from FP reassociation → would force re-baselining every committed result). Reject.
+  - *Batch deep supervision into one `cross_entropy` over stacked per-step logits*: **0.98–0.99×
+    (slightly slower** — the `stack`+`expand` cost cancels the fewer-call saving), and not
+    bit-identical. Reject.
+  - *Functional forward* (`F.linear`/`F.gelu` instead of `Module.__call__`, skipping hook checks):
+    **bit-identical (maxdiff 0.0)** but only **1.01–1.04×** — not worth the readability cost of
+    reaching into `update_net` internals on the canonical model. Reject.
+So the model is left as-is; the wins all live at the harness level (1)–(4). Don't re-litigate these
+without first changing the regime (much larger models, or accepting a numerics re-baseline).
