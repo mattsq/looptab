@@ -236,8 +236,18 @@ behaviour-changing conclusions, and the next pointer. Append detail to LOG.md, n
   width-shrunk to the loop's budget — the *clean* tying control). In
   `src/looptab/models/{trm,controls}.py`, registered in `src/looptab/registry.py`.
 - **Train/eval:** deep supervision is a **per-arm weight** (`src/looptab/train/loop.py`),
-  not a global flag. Metrics `accuracy` / `exact_match` / `majority_baseline`
-  (`src/looptab/eval/metrics.py`). Paired Δ with variance is `delta_report`.
+  not a global flag. Metrics `accuracy` / `exact_match` / `majority_baseline` and the
+  single-pass `evaluate` (`src/looptab/eval/metrics.py`). Paired Δ with variance is
+  `delta_report`. **Data loading uses a custom in-memory `InMemoryLoader`** (not torch
+  `DataLoader`) for the RAM-resident synthetic suite — it reproduces `DataLoader`'s exact
+  per-epoch RNG protocol so training is **bit-identical**, just faster (see §5.3); if you
+  ever swap it back, re-check determinism against the committed results. The runner also
+  **pins CPU threads to 1** (`TrainConfig.num_threads`, default 1) — these models are below
+  torch's matmul-parallelization threshold, so the default (= core count) only oversubscribes
+  (≈3× slower at 8 threads, worse on many-core cloud boxes); bit-identical, so set
+  `num_threads: null` only if you scale the models up. The per-seed loop can also run across a
+  **process pool** (`ExperimentConfig.parallel_workers`, default 1 = serial) — bit-identical to
+  serial (seeds self-reseed), ~Ncores× faster; raise it on ≥5-seed sweeps/grids.
 - **Runner:** one entry point `python -m looptab.run --config <yaml>`. Supports a 1-D
   `sweep`, an N-D `grid`, and a depth-`extrapolation` harness (`grid` and `extrapolation`
   are mutually exclusive). Emits per-arm curve CSV, per-config Δ CSV, JSON record (config +

@@ -75,6 +75,21 @@ def test_run_point_deterministic():
         assert a[lbl]["accuracy"] == b[lbl]["accuracy"]
 
 
+def test_parallel_seeds_bit_identical_to_serial():
+    """§5.3: running seeds across worker processes must be bit-for-bit identical to serial —
+    parallelism is a speed knob only (seeds are independent and self-reseed)."""
+    from looptab.run import _compute_seeds
+
+    seeds = [0, 1, 2]
+    serial = _compute_seeds(_cfg(parallel_workers=1), _cfg().task.params, seeds)
+    parallel = _compute_seeds(_cfg(parallel_workers=3), _cfg().task.params, seeds)
+    assert len(serial) == len(parallel) == len(seeds)
+    for (r_s, _), (r_p, _) in zip(serial, parallel):
+        assert r_s.keys() == r_p.keys()
+        for lbl in ("trm_ds", "trm_nods", "ff_matched"):
+            assert r_s[lbl]["accuracy"] == r_p[lbl]["accuracy"]
+
+
 def test_arm_init_independent_of_order():
     """C3: reseeding before each arm => an arm's result is independent of which
     arms ran before it. Reversing arm order must not change a shared arm's metric."""

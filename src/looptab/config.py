@@ -59,6 +59,15 @@ class TrainConfig(BaseModel):
     weight_decay: float = 1e-4
     batch_size: int = 256
     device: str = "cpu"
+    # CPU intra-op thread count (applied once by the runner). The models here are tiny, so
+    # their matmuls fall below torch's parallelization threshold: extra threads add only
+    # dispatch overhead. Measured on this regime, 1 thread is fastest and oversubscription
+    # (threads ≫ work) is *catastrophic* — e.g. 8 threads ran ~3× slower than 1. This bites
+    # hardest on many-core cloud boxes, where torch otherwise defaults to the full core count.
+    # Bit-identical to other thread counts (the small kernels don't reorder reductions), so
+    # pinning is a pure speed/portability win, not a numerical change. `None` leaves torch's
+    # default untouched (set this if you ever scale the models past the tiny regime).
+    num_threads: Optional[int] = 1
 
 
 class SweepConfig(BaseModel):
@@ -128,6 +137,15 @@ class ExperimentConfig(BaseModel):
     deltas: Optional[list[list[str]]] = None
     seeds: list[int] = Field(default_factory=lambda: [0, 1, 2, 3, 4])
     results_dir: str = "results"
+
+    # Number of worker processes for the per-axis-point seed loop. Seeds are embarrassingly
+    # parallel — each is a pure function of its seed and self-reseeds (CLAUDE.md §5.3) — so
+    # running them across processes is **bit-identical** to serial, just faster on multi-core
+    # CPUs (the only place parallelism helps here, since the tiny per-run work is pinned to
+    # one torch thread). Default 1 = serial (unchanged behaviour); raise it (e.g. to the core
+    # count) on a ≥5-seed run for a near-linear speedup. Each worker is pinned to
+    # `train.num_threads` so workers × threads never oversubscribe.
+    parallel_workers: int = 1
 
     # --- M3a: depth-at-fixed-budget sweep (CLAUDE.md §11 / LOG.md) -------------------
     # When set (e.g. "T"), every recurrent/untied arm's unroll depth is set to the swept

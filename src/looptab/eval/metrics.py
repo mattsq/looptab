@@ -6,21 +6,19 @@ import torch.nn as nn
 from torch.utils.data import DataLoader
 
 
-@torch.no_grad()
+@torch.inference_mode()
 def _predict(
     model: nn.Module, loader: DataLoader, device: str, **kwargs
 ) -> tuple[np.ndarray, np.ndarray]:
+    # inference_mode is a strictly-faster no_grad (skips view/version tracking) and is safe
+    # here: predictions only feed argmax/numpy, never autograd. Numerically identical.
     model.eval()
     preds, targets = [], []
     for X, y in loader:
         X = X.to(device)
         logits, _ = model(X, **kwargs)
-        if logits.ndim == 2:
-            pred = logits.argmax(dim=-1).cpu().numpy()
-        else:
-            # multi-output (B, W, C)
-            pred = logits.argmax(dim=-1).cpu().numpy()
-        preds.append(pred)
+        # argmax over the class dim handles both single-output (B, C) and multi-output (B, W, C).
+        preds.append(logits.argmax(dim=-1).cpu().numpy())
         targets.append(y.numpy())
     return np.concatenate(preds), np.concatenate(targets)
 
@@ -37,6 +35,32 @@ def exact_match(model: nn.Module, loader: DataLoader, device: str = "cpu", **kwa
     if targets.ndim == 1:
         return float((preds == targets).mean())  # same as accuracy for single-output
     return float((preds == targets).all(axis=-1).mean())
+
+
+def evaluate(
+    model: nn.Module,
+    loader: DataLoader,
+    device: str = "cpu",
+    *,
+    want_exact_match: bool = False,
+    **kwargs,
+) -> dict:
+    """Accuracy (and optional exact-match) from a *single* forward pass over ``loader``.
+
+    ``accuracy`` and ``exact_match`` each run their own ``_predict``, so asking for both —
+    which every multi-output (Task B) eval does, on test *and* under the extrapolation
+    harness for each R' — used to forward the model over the data twice. This computes the
+    predictions once and derives both metrics, halving eval forward passes there. The values
+    are identical to calling the two functions separately (same argmax, same reductions).
+    """
+    preds, targets = _predict(model, loader, device, **kwargs)
+    out = {"accuracy": float((preds == targets).mean())}
+    if want_exact_match:
+        if targets.ndim == 1:
+            out["exact_match"] = out["accuracy"]  # whole-row == per-row for single-output
+        else:
+            out["exact_match"] = float((preds == targets).all(axis=-1).mean())
+    return out
 
 
 def majority_baseline(loader: DataLoader) -> float:

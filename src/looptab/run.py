@@ -13,6 +13,7 @@ import csv
 import json
 import subprocess
 import time
+from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
 from typing import Optional
 
@@ -22,7 +23,7 @@ import yaml
 
 from .config import ExperimentConfig, ModelConfig
 from .data.dataset import make_loaders, make_splits, make_trajectory_dataset
-from .eval.metrics import accuracy, delta_report, exact_match, majority_baseline
+from .eval.metrics import accuracy, delta_report, evaluate, majority_baseline
 from .registry import get_model
 from .train.loop import train, train_curriculum
 
@@ -142,8 +143,11 @@ def run_point(cfg: ExperimentConfig, task_params: dict, seed: int) -> tuple[dict
                 deep_supervision_weight=arm.deep_supervision_weight,
                 device=device,
             )
+        # One forward pass over the test set yields both accuracy and (for multi-output
+        # Task B) exact-match; train accuracy is a separate pass.
+        test_metrics = evaluate(m, test_loader, device, want_exact_match=multi_output)
         metrics = {
-            "accuracy": accuracy(m, test_loader, device),
+            "accuracy": test_metrics["accuracy"],
             # Train accuracy is the M3a optimization-vs-capacity diagnostic: a loop that
             # fails at high T with *low train acc too* is an optimization failure (Phase 2's
             # step-aligned DS may help), not a capacity verdict against the loop.
@@ -151,7 +155,7 @@ def run_point(cfg: ExperimentConfig, task_params: dict, seed: int) -> tuple[dict
             "n_params": m.count_params(),
         }
         if multi_output:
-            metrics["exact_match"] = exact_match(m, test_loader, device)
+            metrics["exact_match"] = test_metrics["exact_match"]
         results[arm.resolved_label()] = metrics
         models[arm.resolved_label()] = m
 
@@ -231,24 +235,68 @@ def run_extrapolation_point(
         # recurrent arm (TRM) can be unrolled to different steps R'
         if arm.name == "trm":
             for R in R_test_values:
-                metrics = {
-                    "accuracy": accuracy(m, test_loader, device, n_steps=R),
-                }
-                if multi_output:
-                    metrics["exact_match"] = exact_match(m, test_loader, device, n_steps=R)
-                point_results[(lbl, R)] = metrics
+                point_results[(lbl, R)] = evaluate(
+                    m, test_loader, device, want_exact_match=multi_output, n_steps=R
+                )
         else:
             # Control arm (feedforward) is not recurrent, so R' doesn't apply to it.
             # We evaluate it once, and copy results for all R' to make plotting/CSV easier.
-            metrics = {
-                "accuracy": accuracy(m, test_loader, device),
-            }
-            if multi_output:
-                metrics["exact_match"] = exact_match(m, test_loader, device)
+            metrics = evaluate(m, test_loader, device, want_exact_match=multi_output)
             for R in R_test_values:
                 point_results[(lbl, R)] = metrics
 
     return point_results, majority_baseline(test_loader)
+
+
+def _compute_seed(
+    cfg: ExperimentConfig, task_params: dict, seed: int
+) -> tuple[dict, Optional[dict]]:
+    """All per-seed work for one axis point: the arm sweep plus, if configured, the depth
+    extrapolation for that seed. Returns ``(r_rec, seed_extrap)`` — both fully serializable
+    (no models), so this is the unit dispatched to worker processes. It is a pure function of
+    ``(cfg, task_params, seed)``: ``run_point`` self-reseeds every arm, so parallel execution
+    is bit-identical to serial (CLAUDE.md §5.3).
+    """
+    r, models, baseline = run_point(cfg, task_params, seed)
+    r_rec = {"seed": seed, "baseline": baseline, **r}
+    seed_extrap = None
+    if cfg.extrapolation is not None:
+        seed_extrap = {}
+        for T_test in cfg.extrapolation.T_values:
+            seed_extrap[T_test] = run_extrapolation_point(
+                cfg,
+                task_params,
+                seed,
+                models,
+                T_test,
+                cfg.extrapolation.R_values,
+                cfg.train.device,
+            )
+    return r_rec, seed_extrap
+
+
+def _init_worker(num_threads: Optional[int]) -> None:
+    """Pool initializer: pin each worker to ``num_threads`` so workers × intra-op threads
+    don't oversubscribe the CPU (the tiny models are fastest at 1 thread; see TrainConfig)."""
+    if num_threads is not None:
+        torch.set_num_threads(num_threads)
+
+
+def _compute_seeds(
+    cfg: ExperimentConfig, task_params: dict, seeds: list[int]
+) -> list[tuple[dict, Optional[dict]]]:
+    """Run ``_compute_seed`` for every seed, serially or across a process pool, preserving
+    seed order. Parallelism is opt-in (``parallel_workers``) and bit-identical to serial."""
+    workers = min(cfg.parallel_workers, len(seeds))
+    if workers <= 1 or len(seeds) <= 1:
+        return [_compute_seed(cfg, task_params, s) for s in seeds]
+    with ProcessPoolExecutor(
+        max_workers=workers,
+        initializer=_init_worker,
+        initargs=(cfg.train.num_threads,),
+    ) as ex:
+        # map preserves input order, so per-seed records stay aligned with `seeds`.
+        return list(ex.map(_compute_seed, [cfg] * len(seeds), [task_params] * len(seeds), seeds))
 
 
 def _aggregate_extrapolation(
@@ -351,6 +399,12 @@ def main():
         raw = yaml.safe_load(f)
     cfg = ExperimentConfig(**raw)
 
+    # Pin CPU threads before any tensor work. For the tiny models here, torch's default
+    # (= core count) oversubscribes and is much slower than 1 thread, especially on
+    # many-core cloud machines (see TrainConfig.num_threads). Bit-identical to the default.
+    if cfg.train.num_threads is not None:
+        torch.set_num_threads(cfg.train.num_threads)
+
     seeds = [args.seed] if args.seed is not None else cfg.seeds
     labels = [a.resolved_label() for a in cfg.arms]
 
@@ -368,26 +422,14 @@ def main():
 
         per_seed = []
         all_seed_extrap = []
-        for seed in seeds:
-            r, models, baseline = run_point(cfg, task_params, seed)
-            r_rec = {"seed": seed, "baseline": baseline, **r}
+        # Seeds are independent (each self-reseeds), so they run serially or across a process
+        # pool per `parallel_workers` — same results either way. Printing stays in seed order.
+        seed_outputs = _compute_seeds(cfg, task_params, seeds)
+        for seed, (r_rec, seed_extrap) in zip(seeds, seed_outputs):
             per_seed.append(r_rec)
-            summary = "  ".join(f"{lbl}={r[lbl]['accuracy']:.3f}" for lbl in labels)
-            print(f"  [seed={seed}] {summary} (baseline={baseline:.3f})")
-
-            # Run extrapolation for this seed if configured
-            if cfg.extrapolation is not None:
-                seed_extrap = {}
-                for T_test in cfg.extrapolation.T_values:
-                    seed_extrap[T_test] = run_extrapolation_point(
-                        cfg,
-                        task_params,
-                        seed,
-                        models,
-                        T_test,
-                        cfg.extrapolation.R_values,
-                        cfg.train.device,
-                    )
+            summary = "  ".join(f"{lbl}={r_rec[lbl]['accuracy']:.3f}" for lbl in labels)
+            print(f"  [seed={seed}] {summary} (baseline={r_rec['baseline']:.3f})")
+            if seed_extrap is not None:
                 all_seed_extrap.append(seed_extrap)
 
         agg = _aggregate(per_seed, labels)
