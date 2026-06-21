@@ -552,3 +552,99 @@ depth/tying edge near the wall or noise; this milestone deliberately did not tun
 §9 "beats both controls" condition is still unmet on *either* task — as M2-confirm noted, it may be
 literally unsatisfiable by a generalist judged against single-axis specialists; re-judging the gate
 wording (not building the hierarchy) is the live question, untouched here.
+
+---
+
+## M5 — DONE. Lift the M4 sample wall (Task A parity, larger n_train). Wall is SAMPLE-bound and lifts to all-solve with no separation; M4's d=80,k=3 hint dissolves; d=80,k=5 is a CAPACITY wall, not sample-bound.
+
+M4's biggest open gap (lever §11(c)(ii)): the d≥40 cells collapsed to test-chance for every arm
+at `n_train=4000`, and the **d=80,k=3 "depth hint"** (deep arms +0.16 over `ff_matched`, 6/4
+seed splits, ns) sat on the wall's edge — was it a real depth/tying edge that more data would
+expose, or just `ff_matched` running out of samples? M5 re-ran M4's **d≥40 sub-block** at a
+larger-`n_train` ladder, changing **exactly one knob** vs M4 (`n_train`: 4000 → 16000 → 64000),
+holding model size, epochs (100), arms, 10 seeds, and the budget guard fixed. **Zero new code** —
+`n_train` is a `TaskConfig` scalar and `d`/`k` are the existing `grid` axis. Configs
+`m5_parity_wall_n16k.yaml` (all 6 cells, `d∈{40,80}×k∈{3,4,5}`) and `m5_parity_wall_n64k.yaml`
+(**focused** to the 4 cells still mid-transition at 16k, `d∈{40,80}×k∈{4,5}` — the k=3 column had
+saturated to 1.000 for every arm, so re-running it at 64k would only reconfirm). 67 tests, ruff
+clean (no code touched). Tracked summaries:
+`results/m5_parity_wall_n16k_20260621T143402_{curve,deltas,params}.csv` and
+`results/m5_parity_wall_n64k_20260621T220534_{curve,deltas,params}.csv` (+ JSON records).
+The d=40,k=3 cell reproduces M4 (all arms 1.000), anchoring comparability.
+
+**Test accuracy across the n_train ladder (loop = `trm_nods`; * = at/near chance for matched arms):**
+
+| d | k | 4k (M4) loop / ff / um | 16k loop / ff / um | 64k loop / ff / um |
+|---|---|---|---|---|
+| 40 | 3 | 1.00 / 1.00 / 1.00 | 1.00 / 1.00 / 1.00 | — (saturated at 16k, not re-run) |
+| 40 | 4 | 0.51 / 0.50 / 0.57 * | **1.00 / 1.00 / 1.00** | 1.00 / 1.00 / 1.00 |
+| 40 | 5 | 0.49 / 0.50 / 0.53 * | 0.50 / 0.62 / 0.55 *(messy, ±.20)* | **1.00 / 1.00 / 1.00** |
+| 80 | 3 | **0.70 / 0.53 / 0.67** *(M4 "depth hint")* | **1.00 / 1.00 / 1.00** | — (saturated at 16k, not re-run) |
+| 80 | 4 | 0.50 / 0.50 / 0.50 * | **0.60 / 0.50 / 0.51** *(loop-hint, ±.21)* | **1.00 / 1.00 / 1.00** |
+| 80 | 5 | 0.50 / 0.51 / 0.51 * | 0.50 / 0.51 / 0.50 * | 0.50 / 0.59 / 0.50 *(still walled)* |
+
+**Key paired Δ (accuracy, 10 seeds; sign-test p).** In every cell that lifts, all arms reach
+1.000 together, so the lifted-cell Δs are exactly 0. The informative Δs are at the transition:
+
+| cell | n_train | Δ(loop − ff) | Δ(loop − um) | Δ(um − ff) | Δ(ds − nods) |
+|---|---|---|---|---|---|
+| d=80,k=4 | 16k | **+0.103** (8/2, p=.109) | +0.097 (3/6, p=.51) | +0.006 (6/4, p=.75) | −0.005 (ns) |
+| d=80,k=4 | 64k | −0.000 (saturated) | −0.000 (saturated) | +0.000 | +0.000 |
+| d=40,k=5 | 16k | −0.120 (3/7, p=.34) | −0.045 (4/6, p=.75) | −0.074 (4/6, p=.75) | −0.009 (ns) |
+| d=40,k=5 | 64k | +0.000 (saturated) | +0.000 (saturated) | −0.000 | +0.000 |
+| d=80,k=5 | 64k | −0.091 (5/5, p=1) | −0.002 (4/5, p=1) | −0.089 (4/6, p=.75) | +0.002 (ns) |
+
+**Reading (per §2/§8 — answering M5's question).**
+
+1. **The d≥40 wall is genuinely SAMPLE-complexity-bound, and lifting it reveals NO architectural
+   separation.** Four of the five originally-walled cells (d=40,k=4; d=40,k=5; d=80,k=3; d=80,k=4)
+   go from all-chance/partial to **all-arms-solve = 1.000** as `n_train` grows. The transition
+   pattern is uniform: `chance(all) → high-variance partial → 1.000(all)`. When the wall lifts,
+   **every arm gets there together** — there is no hidden edge behind it. So the d≥40 regime
+   carries **no recurrence verdict** (as M4 already cautioned), now confirmed by actually lifting it.
+2. **The M4 d=80,k=3 "depth hint" was `ff_matched` sample-starvation, NOT architecture.** At 4k,
+   `ff` lagged (0.53) while the deep arms reached ~0.70, manufacturing the +0.16 hint. With 4× data
+   **everyone hits 1.000** (16k). The hint dissolves — it was the wall, not depth or tying. This is
+   the headline answer to lever §11(c)(ii).
+3. **The 16k "d=80,k=4 loop-beats-both hint" was a TRANSIENT sample-efficiency ordering, erased by
+   saturation.** At 16k the deep tied arms (loop / `trm_ds`) generalized to ~0.60 while `ff` and
+   `um` sat at chance — the only loop>both *direction* on the whole ladder (Δ(loop−ff)=+0.103, but
+   ns at 8/2, p=.109; Δ(loop−um) mean +0.097 yet a 3/6 seed split, p=.51 — seed-lottery, ±0.21). At
+   64k **all arms reach 1.000**, so it is **not** a stable accuracy edge. There is a *mild, honest
+   sub-finding* here — the loop reached generalization at a smaller `n` than the single-axis
+   controls at d=80,k=4 — but it is high-variance, non-significant, and vanishes at saturation, so
+   it is reported as a hint at most, never a claim. **No significant loop-beats-both cell exists
+   anywhere on the 4k→16k→64k ladder.**
+4. **d=80,k=5 is the exception: a CAPACITY wall, not a sample wall.** It stays at test-chance even
+   at 64k, and crucially **train accuracy DROPS** with more data (loop 0.91→0.73, um 0.97→0.75,
+   ff 0.89→0.77): the ~14k-param matched arms can no longer even *fit* 64k rows of the
+   (80-choose-5)≈24M-subset parity in 100 epochs (overfit→underfit flip). Even the 4× `untied_stack`
+   ceiling fits train 0.94 but still tests at chance. So "raise `n_train`" alone does **not** crack
+   the hardest cell — it needs a larger model, which is out of scope (would confound the budget).
+   `ff_matched` shows the same flaky high-variance partial generalization here (0.59 ± 0.20) that
+   d=40,k=5 showed at 16k — a couple of lucky seeds, not a verdict.
+5. **Tying stays neutral and DS stays inert at scale.** Δ(loop − um) ≈ 0 in every solved cell
+   (largest |·| is +0.0001), and |Δ(ds − nods)| ≤ 0.009 across all cells/rungs — both consistent
+   with M0–M4. The §9 gate is **unmoved**: no cell, at any `n_train`, where the loop beats *both*
+   controls.
+
+**Budget audit.** `untied_matched` drifts to +2.3% (ratio 1.023) at d=40 (the expected integer
+width-quantization, surfaced in the params CSV not hidden); all d=40 cells are saturated so no Δ
+rides on it. d=80 arms are matched to ≤0.7%.
+
+**Net.** M5 closes the M4 sample-wall gap cleanly: the d≥40 wall is predominantly
+**sample-complexity-bound and lifts to all-arms-solve with no architectural separation**, the two
+"hints" M4/M5-16k surfaced (d=80,k=3; d=80,k=4) are both explained as transition artifacts
+(data-starvation / transient sample-efficiency ordering), and the single cell that does *not* lift
+(d=80,k=5) is **capacity-bound**, not sample-bound, so more data is the wrong lever there. Task A's
+verdict is unchanged and now stress-tested across an `n_train` ladder: **depth-positive (at d=20,
+M4), tying-neutral, robustness-not-dominance, loop-beats-both in zero cells.** The §9 gate remains
+unmet on Task A.
+
+**Caveats / open gaps.** (i) The depth-positive Task A signal still lives only at d=20 (M4) — the
+d≥40 cells either lift to all-solve (no separation) or stay capacity-walled (d=80,k=5), so raising
+`n_train` did not surface a *new* depth/tying separation; it dissolved the apparent ones. (ii)
+d=80,k=5 would need a bigger model to probe, deliberately not done (confounds the budget). (iii) The
+§9 gate is still unmet on either task; M5 strengthens the M2-confirm suspicion that "beats both
+single-axis controls" may be unsatisfiable by a generalist — **re-judging the gate wording is now
+the highest-value live question** (do NOT build Task C on this evidence).

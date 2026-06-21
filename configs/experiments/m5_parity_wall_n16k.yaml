@@ -1,0 +1,88 @@
+# M5 — lift the M4 sample-complexity wall (Task A parity). ONE knob changed vs M4:
+# n_train 4000 -> 16000 (4×). Everything else is inherited VERBATIM from
+# m4_parity_grid.yaml so the deltas are directly comparable.
+#
+# M4 found d≥40,k≥4 collapses to test-chance for EVERY arm — a wall, not a separation —
+# diagnosed as sample-complexity-bound (deep arms fit train 0.90–1.00 but score chance on
+# test). §11(c) lever (ii): "lift the M4 sample-complexity wall (larger n_train) to test
+# whether the d=80/k=3 depth hints are real near the wall." We re-run ONLY M4's d≥40
+# sub-block (the 6 wall cells); d=20 already separates cleanly and is NOT re-run.
+#
+# Grid: d ∈ {40, 80} × k ∈ {3, 4, 5}  (exactly M4's d≥40 cells)
+#
+# Pre-registered reading (§8 — no tuning to chase cells):
+#   loop-beats-both cell  ⇔  Δ(trm_nods − ff_matched) > 0 AND Δ(trm_nods − untied_matched) > 0,
+#                            both sign-test-significant in the SAME cell (the only §9-mover).
+#   Wall lifts            ⇔  test accuracy rises toward train accuracy as n_train grows.
+#   Disambiguator: if Δ(loop−ff) tracks Δ(untied_matched−ff) in sign/significance, the win
+#                  is DEPTH, not tying (the M4 pattern).
+
+task:
+  name: parity
+  params: {}            # d and k are both swept by the grid below
+  n_train: 16000        # <-- the one knob (M4 used 4000)
+  n_test: 1000
+  task_seed: 42
+  train_sample_seed: 1
+  test_sample_seed: 2
+
+grid:
+  params:
+    d: [40, 80]
+    k: [3, 4, 5]
+
+arms:
+  - name: trm
+    label: trm_ds
+    hidden_dim: 64
+    latent_dim: 64
+    n_steps: 4
+    deep_supervision: true
+    deep_supervision_weight: 1.0
+  - name: trm
+    label: trm_nods
+    hidden_dim: 64
+    latent_dim: 64
+    n_steps: 4
+    deep_supervision: false
+    deep_supervision_weight: 0.0
+  - name: ff_matched
+    label: ff_matched
+    hidden_dim: 64
+    latent_dim: 64
+    n_steps: 4
+  - name: untied_matched
+    label: untied_matched
+    hidden_dim: 64
+    latent_dim: 64
+    n_steps: 4
+    deep_supervision: false
+    deep_supervision_weight: 0.0
+  - name: untied_stack
+    label: untied_stack       # CEILING ONLY — ~n_steps× params, NOT param-matched
+    hidden_dim: 64
+    latent_dim: 64
+    n_steps: 4
+    deep_supervision: false
+    deep_supervision_weight: 0.0
+
+deltas:
+  - [trm_nods, ff_matched]       # the loop alone vs §4a control (M0 headline)
+  - [trm_nods, untied_matched]   # CLEAN §4b: weight tying at fixed capacity + depth
+  - [untied_matched, ff_matched] # depth at fixed capacity (deep untied vs shallow MLP)
+  - [trm_ds, trm_nods]           # deep supervision alone
+  - [trm_nods, untied_stack]     # confounded ceiling (tying + ~n_steps× capacity) — context only
+
+budget_reference: trm_nods
+budget_ceiling: [untied_stack]
+budget_tol: 0.02
+
+train:
+  epochs: 100
+  lr: 1e-3
+  weight_decay: 1e-4
+  batch_size: 256
+  device: cpu
+
+seeds: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
+results_dir: results
