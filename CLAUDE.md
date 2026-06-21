@@ -242,7 +242,8 @@ behaviour-changing conclusions, and the next pointer. Append detail to LOG.md, n
   `sweep`, an N-D `grid`, and a depth-`extrapolation` harness (`grid` and `extrapolation`
   are mutually exclusive). Emits per-arm curve CSV, per-config Δ CSV, JSON record (config +
   metrics + seed + git SHA), and PNGs if matplotlib present (`src/looptab/run.py`).
-- **Configs:** `configs/experiments/` (m0…m2-confirm, m3a/m3b, m4_parity_grid).
+- **Configs:** `configs/experiments/` (m0…m2-confirm, m3a/m3b, m4_parity_grid,
+  m5_parity_wall_n16k/n64k).
 - **Tests:** `tests/` — generator determinism, model shapes/param-ratios, runner
   determinism/independence. Run `uv run pytest -q`; lint `uv run ruff check`.
 
@@ -285,34 +286,52 @@ behaviour-changing conclusions, and the next pointer. Append detail to LOG.md, n
   cells. Raising d mostly hits an **unlearnability wall** (d≥40,k≥4: all arms at test-chance — deep
   arms overfit train, ff_matched underfits it) rather than separating arms, so the clean signal
   lives at d=20 (all k).
+- **The M4 d≥40 wall is SAMPLE-complexity-bound and lifts to ALL-arms-solve with NO separation
+  (M5).** Sweeping `n_train` 4k→16k→64k on M4's d≥40 cells, four of the five walled cells
+  (d=40,k=4; d=40,k=5; d=80,k=3; d=80,k=4) go chance→1.000 for *every* arm together — there is no
+  hidden architectural edge behind the wall. **M4's d=80,k=3 "depth hint" was just `ff_matched`
+  sample-starvation** (dissolves to 1.000-all by 16k), and the **16k d=80,k=4 "loop-beats-both
+  hint" was a transient sample-efficiency ordering** (the tied deep arms generalize at smaller `n`
+  than the controls, but it is ns at ±0.21 and erased to 1.000-all by 64k). So **no significant
+  loop-beats-both cell exists anywhere on the ladder.** The lone exception, **d=80,k=5, is a
+  CAPACITY wall not a sample wall**: it stays at test-chance even at 64k and train accuracy *drops*
+  (overfit→underfit flip) — the ~14k-param arms can't fit the (80-choose-5) parity at all, so more
+  data is the wrong lever (needs a bigger model, out of scope). Tying stays neutral and DS inert at
+  scale (M5 confirms M4).
 - **No transferable step operator; the loop does NOT extrapolate in depth (M1 + M3b).**
   Over-unrolling R′>R decays to baseline, and OOD depth T>T_train collapses to baseline for
   every arm. M3b applied the two named levers (T-curriculum + step-aligned DS) and the OOD
   collapse (T≥12) STILL holds — a stronger, cleaner null than M1's. Within the curriculum
   there's only weak compositional signal (R′=T tracks for T≤8, tops out ~0.58).
-- Each leg still rests on few configs: Task A now multi-`d`/multi-`k` (M4) but harder cells are
-  sample-limited, not capacity-limited; Task B depth swept (M3a) but unlearnable past T=4 one-shot;
-  M3b on one rule (30) / one width (9).
+- Each leg still rests on few configs: Task A now multi-`d`/multi-`k` (M4) and the d≥40 wall has
+  been swept over `n_train` (M5 — it is sample-bound and lifts to all-solve, except d=80,k=5 which
+  is capacity-bound); Task B depth swept (M3a) but unlearnable past T=4 one-shot; M3b on one rule
+  (30) / one width (9).
 
 ### (c) Next milestone
 
-**M3a, M3b, and M4 are all DONE** (full narratives in LOG.md). M3a falsified "loop edge grows
+**M3a, M3b, M4, and M5 are all DONE** (full narratives in LOG.md). M3a falsified "loop edge grows
 with depth" (it vanishes by T≥8; deep CA is unlearnable one-shot for all arms). M3b applied
 the T-curriculum + step-aligned DS levers: step-aligned DS is a *real* short-horizon win (DS was
 mis-specified, not inert) but did **not** yield a transferable operator. M4 replicated the Task A
 parity leg across d∈{20,40,80} × k∈{3,4,5}: the loop's edge over `ff_matched` is **robust and
-grows with k** (no longer single-`d`), but it is purely **depth** (ties `untied_matched` in all 9
-cells) and the loop beats *both* controls in **0** cells; d≥40,k≥4 is a sample-complexity wall.
+grows with k** but is purely **depth** (ties `untied_matched` in all 9 cells), loop-beats-both in
+**0** cells. M5 swept `n_train` (4k→16k→64k) on M4's d≥40 wall: it is **sample-bound and lifts to
+all-arms-solve with NO separation** — M4's d=80,k=3 hint was `ff` sample-starvation and the 16k
+d=80,k=4 loop hint was a transient sample-efficiency ordering, both erased by more data; the lone
+non-lifting cell (d=80,k=5) is a **capacity** wall (needs a bigger model, not more data).
 
 **No milestone is currently in flight.** The §9 gate is still unmet (no task where the loop
-beats *both* controls), and M4 closed the "Task A single-config" gap without changing that verdict.
-Open levers for whoever picks this up next, in rough priority: (i) **re-judge the §9 gate wording
-itself** — both tasks now say the loop is robust-not-dominant; the literal "beats both controls"
-bar may be unsatisfiable by a generalist vs single-axis specialists (decide whether to relax it,
-do NOT build Task C on the current evidence); (ii) **lift the M4 sample-complexity wall** (larger
-`n_train` or a k-curriculum) to test whether the d=80/k=3 depth hints are real near the wall;
-(iii) **broaden M3b** to more rules/widths and try a *fixed-point or halting* objective
-(PonderNet/ACT) against the depth-extrapolation null. Earn the hierarchy later, not now.
+beats *both* controls) and M5 confirmed that raising `n_train` dissolves the apparent Task A hints
+rather than turning them into a loop-beats-both cell. Open levers for whoever picks this up next, in
+rough priority: (i) **re-judge the §9 gate wording itself** — now the **highest-value** question:
+both tasks say the loop is robust-not-dominant, and M4/M5 strengthen the suspicion that "beats both
+single-axis controls" is unsatisfiable by a generalist vs single-axis specialists (decide whether
+to relax it — e.g. to "never-worst across both tasks" or "beats both on one task" — do NOT build
+Task C on the current evidence); (ii) **broaden M3b** to more rules/widths and try a *fixed-point or
+halting* objective (PonderNet/ACT) against the depth-extrapolation null; (iii) if a bigger-model
+probe of d=80,k=5 is ever wanted, it must scale the budget for *all* arms together (confound guard).
+The "lift the M4 sample wall" lever is now **closed** (M5). Earn the hierarchy later, not now.
 
 ## 12. Key references (for grounding a cold agent)
 
