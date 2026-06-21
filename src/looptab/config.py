@@ -138,6 +138,15 @@ class ExperimentConfig(BaseModel):
     seeds: list[int] = Field(default_factory=lambda: [0, 1, 2, 3, 4])
     results_dir: str = "results"
 
+    # Number of worker processes for the per-axis-point seed loop. Seeds are embarrassingly
+    # parallel — each is a pure function of its seed and self-reseeds (CLAUDE.md §5.3) — so
+    # running them across processes is **bit-identical** to serial, just faster on multi-core
+    # CPUs (the only place parallelism helps here, since the tiny per-run work is pinned to
+    # one torch thread). Default 1 = serial (unchanged behaviour); raise it (e.g. to the core
+    # count) on a ≥5-seed run for a near-linear speedup. Each worker is pinned to
+    # `train.num_threads` so workers × threads never oversubscribe.
+    parallel_workers: int = 1
+
     # --- M3a: depth-at-fixed-budget sweep (CLAUDE.md §11 / LOG.md) -------------------
     # When set (e.g. "T"), every recurrent/untied arm's unroll depth is set to the swept
     # task value `task_params[param]` instead of its static `n_steps`. This is what makes

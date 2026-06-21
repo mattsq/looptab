@@ -6,21 +6,19 @@ import torch.nn as nn
 from torch.utils.data import DataLoader
 
 
-@torch.no_grad()
+@torch.inference_mode()
 def _predict(
     model: nn.Module, loader: DataLoader, device: str, **kwargs
 ) -> tuple[np.ndarray, np.ndarray]:
+    # inference_mode is a strictly-faster no_grad (skips view/version tracking) and is safe
+    # here: predictions only feed argmax/numpy, never autograd. Numerically identical.
     model.eval()
     preds, targets = [], []
     for X, y in loader:
         X = X.to(device)
         logits, _ = model(X, **kwargs)
-        if logits.ndim == 2:
-            pred = logits.argmax(dim=-1).cpu().numpy()
-        else:
-            # multi-output (B, W, C)
-            pred = logits.argmax(dim=-1).cpu().numpy()
-        preds.append(pred)
+        # argmax over the class dim handles both single-output (B, C) and multi-output (B, W, C).
+        preds.append(logits.argmax(dim=-1).cpu().numpy())
         targets.append(y.numpy())
     return np.concatenate(preds), np.concatenate(targets)
 

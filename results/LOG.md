@@ -559,7 +559,7 @@ Not a milestone — a perf pass on the model/training/eval path. **All run outpu
 unchanged** (verified: parity single-output and iterated multi-output cells reproduce prior
 accuracies and exact-match exactly; 67/67 tests pass; ruff clean).
 
-Three bottlenecks resolved:
+Four bottlenecks resolved:
 
 1. **Data path dominated wall-clock.** For the tiny models here the per-sample
    `Dataset.__getitem__` + default-collate path of `torch.utils.data.DataLoader` cost more than
@@ -587,8 +587,19 @@ on CPU from (1)+(2); thread pinning takes the warm loop a further ~2.83s → 2.4
 ~3×+ oversubscription penalty on big-core boxes. Multi-output runs gain additionally from the
 single-pass eval. No config, metric, or conclusion changes — this only makes re-running cheaper.
 
-**Still on the table (not done):** seeds/grid-cells are embarrassingly parallel (each is a pure
-function of its seed, already reseeded independently), so running them across processes — one torch
-thread each — would give near-linear speedup on the full suite. Deferred: it's a runner-level change
-(process pool + result aggregation) with more surface area than the wins above, so it should be a
-deliberate decision, not folded into this pass.
+4. **Serial seed loop left cores idle.** With per-run work pinned to 1 thread (item 3), a
+   multi-core CPU sat mostly idle. The per-axis-point seed loop now runs across a process pool
+   (`ExperimentConfig.parallel_workers`, default **1** = unchanged serial; `run._compute_seeds`),
+   each worker pinned to `train.num_threads` so workers × threads never oversubscribe. Seeds are
+   pure functions of their seed and self-reseed, so it is **bit-identical** to serial (verified:
+   `parallel_workers=4` reproduces serial accuracies exactly; guarded by
+   `test_parallel_seeds_bit_identical_to_serial`). Measured **4.12× on a 4-core box** for a
+   4-seed run; scales with cores/seeds. Also switched eval to `torch.inference_mode` (a
+   strictly-faster `no_grad`; numerically identical).
+
+Measured: a representative `run_point` (2 arms × 30 epochs, n_train=4000) went 7.19s → 2.85s (~2.5×)
+on CPU from (1)+(2); thread pinning (3) takes the warm loop a further ~2.83s → 2.43s and avoids the
+~3×+ oversubscription penalty on big-core boxes; seed-parallelism (4) adds ~Ncores× on multi-seed
+runs (4.12× measured on 4 cores). Multi-output runs gain additionally from the single-pass eval. No
+config, metric, or conclusion changes — this only makes re-running cheaper. **Set `parallel_workers`
+to the core count on any ≥5-seed sweep/grid to use the cores; it stays off (1) by default.**

@@ -245,7 +245,9 @@ behaviour-changing conclusions, and the next pointer. Append detail to LOG.md, n
   **pins CPU threads to 1** (`TrainConfig.num_threads`, default 1) — these models are below
   torch's matmul-parallelization threshold, so the default (= core count) only oversubscribes
   (≈3× slower at 8 threads, worse on many-core cloud boxes); bit-identical, so set
-  `num_threads: null` only if you scale the models up.
+  `num_threads: null` only if you scale the models up. The per-seed loop can also run across a
+  **process pool** (`ExperimentConfig.parallel_workers`, default 1 = serial) — bit-identical to
+  serial (seeds self-reseed), ~Ncores× faster; raise it on ≥5-seed sweeps/grids.
 - **Runner:** one entry point `python -m looptab.run --config <yaml>`. Supports a 1-D
   `sweep`, an N-D `grid`, and a depth-`extrapolation` harness (`grid` and `extrapolation`
   are mutually exclusive). Emits per-arm curve CSV, per-config Δ CSV, JSON record (config +
