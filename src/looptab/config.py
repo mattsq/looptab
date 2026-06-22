@@ -17,7 +17,7 @@ from pydantic import BaseModel, Field, model_validator
 
 
 class TaskConfig(BaseModel):
-    name: Literal["linear", "parity", "iterated"]
+    name: Literal["linear", "parity", "multi_parity", "iterated", "converge"]
     params: dict = Field(default_factory=dict)
     n_train: int = 4000
     n_test: int = 1000
@@ -47,7 +47,17 @@ class ModelConfig(BaseModel):
     #   "step_aligned" — loop step i is supervised against the intermediate CA state s_i
     #                    (requires a trajectory target and n_steps == T per batch). This is
     #                    the version that *should* fire if the loop learns a step operator.
-    ds_mode: Literal["final", "step_aligned"] = "final"
+    #   "progressive_final" / "progressive_step" — Deep Thinking progressive loss (M7, Bansal
+    #                    2022): per batch run (T−k) steps with gradients DETACHED, then k steps
+    #                    with gradient, supervising the k grad steps against the final state
+    #                    (_final) or step-aligned against s_{T−k+1..T} (_step). Forces an
+    #                    iteration-count-independent / repeatable step operator → the depth-
+    #                    extrapolation lever. Requires a trajectory target; loop arms only.
+    ds_mode: Literal["final", "step_aligned", "progressive_final", "progressive_step"] = "final"
+    # M7: mix weight between the progressive term and the standard full-T term in the
+    # progressive loss: L = alpha·L_progressive + (1−alpha)·L_full. Deep Thinking keeps both
+    # (the full term anchors the model so it doesn't collapse). Only used by progressive ds_modes.
+    progressive_alpha: float = 0.5
 
     def resolved_label(self) -> str:
         return self.label or self.name

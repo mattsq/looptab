@@ -6,7 +6,13 @@ import numpy as np
 import torch
 from torch.utils.data import Dataset
 
-from .generators import make_iterated, make_linear, make_parity
+from .generators import (
+    make_converge,
+    make_iterated,
+    make_linear,
+    make_multi_parity,
+    make_parity,
+)
 
 
 @dataclass
@@ -73,8 +79,16 @@ def make_splits(
         elif task == "parity":
             X, y, _ = make_parity(n=n, task_seed=task_seed, sample_seed=sample_seed, **task_cfg)
             return TabularDataset(X, y)
+        elif task == "multi_parity":
+            X, y, _ = make_multi_parity(
+                n=n, task_seed=task_seed, sample_seed=sample_seed, **task_cfg
+            )
+            return TabularDataset(X, y)
         elif task == "iterated":
             X, y = make_iterated(n=n, task_seed=task_seed, sample_seed=sample_seed, **task_cfg)
+            return TabularDataset(X, y)
+        elif task == "converge":
+            X, y = make_converge(n=n, task_seed=task_seed, sample_seed=sample_seed, **task_cfg)
             return TabularDataset(X, y)
         else:
             raise ValueError(f"Unknown task: {task}")
@@ -88,14 +102,18 @@ def make_trajectory_dataset(
     sample_seed: int,
     n: int,
     T_max: int,
+    task: str = "iterated",
 ) -> "TrajectoryDataset":
-    """Build a trajectory training set for the iterated-CA task at length ``T_max`` (M3b).
+    """Build a trajectory training set at length ``T_max`` (M3b/M8).
 
-    Only the iterated task has a trajectory; ``task_cfg`` may carry the fixed-T reference
-    (``T``) which is ignored here in favour of ``T_max`` for trajectory generation.
+    The CA-family tasks carry a trajectory: ``iterated`` (target s_T, traj last frame == s_T)
+    and ``converge`` (target s_inf the fixed point — traj last frame is s_{T_max}, which for
+    slow-converging rows is *not* yet s_inf; that gap is intentional, M8). ``task_cfg`` may carry
+    the fixed-T reference (``T``) which is ignored here in favour of ``T_max``.
     """
     cfg = {k: v for k, v in task_cfg.items() if k != "T"}
-    X, _, traj = make_iterated(
+    gen = make_converge if task == "converge" else make_iterated
+    X, _, traj = gen(
         n=n, T=T_max, task_seed=task_seed, sample_seed=sample_seed, return_trajectory=True, **cfg
     )
     return TrajectoryDataset(X, traj)

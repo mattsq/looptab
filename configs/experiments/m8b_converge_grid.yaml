@@ -1,0 +1,99 @@
+# M8b — Replicate the M8 "loop beats BOTH controls on exact-match" signal across converging
+# rules × widths. (Follow-up to M8; "try once more" on the one genuinely new positive.)
+#
+# WHY. M8 (rule 92, w=32) produced the project's FIRST loop-beats-both signal — but only on the
+# whole-row EXACT-MATCH metric, at the trained depth: Δ(stepDS−ff)=+0.050 EM (10/0, p=.002),
+# Δ(stepDS−untied)=+0.125 EM (10/0, p=.002), while token-acc only TIES ff. The mechanism looks like
+# recurrence/tying improving whole-row COHERENCE on a fixed-point multi-output target (the tied loop
+# gets EM 0.16 vs the fair untied control's 0.04 — a tying-positive, unlike parity). Before this can be
+# a claim it must replicate beyond one rule/width (the adversarial-review lesson from M6a/M7). NOTE the
+# M8 adaptive-compute headline FAILED (over-unrolling decays even on a convergent target), so this is a
+# TRAINED-DEPTH comparison only — no extrapolation harness (mutually exclusive with grid anyway).
+#
+# Grid: rule ∈ {13, 78, 92} (three converging ECAs, all verified balanced ~0.56 + wide depth spread)
+#     × w ∈ {24, 32}. Curriculum T~{1..6}, build depth 6, 5 arms, 10 seeds. Hyperparameters = M8.
+#
+# PRE-REGISTERED reading (§8): loop-beats-both EM ⟺ Δ(stepDS−ff)>0 AND Δ(stepDS−untied)>0, both
+# sign-test p<.05, in a cell. If it holds in most cells → a real (qualified, EM-only) loop-beats-both
+# finding — the first in the project. If it appears only at rule 92 → a fluke, report as such.
+# Watch the budget audit: untied_matched width-quantizes over budget at these w (M8 had +3.1%); it is
+# the LOSING arm and over-budget handicaps it, so any loop>untied result is conservative — disclose.
+
+task:
+  name: converge
+  params:
+    T: 6            # reference depth (curriculum overrides per batch); required by couple_n_steps_to_param
+    distractors: 8
+  n_train: 4000
+  n_test: 1000
+  task_seed: 42
+  train_sample_seed: 1
+  test_sample_seed: 2
+
+grid:
+  params:
+    rule: [13, 78, 92]
+    w: [24, 32]
+
+curriculum:
+  param: T
+  T_min: 1
+  T_max: 6
+
+couple_n_steps_to_param: T
+
+arms:
+  - name: trm
+    label: trm_stepDS
+    hidden_dim: 64
+    latent_dim: 64
+    n_steps: 6
+    deep_supervision: true
+    ds_mode: step_aligned
+  - name: trm
+    label: trm_prog_step
+    hidden_dim: 64
+    latent_dim: 64
+    n_steps: 6
+    deep_supervision: true
+    ds_mode: progressive_step
+    progressive_alpha: 0.5
+  - name: trm
+    label: trm_nods
+    hidden_dim: 64
+    latent_dim: 64
+    n_steps: 6
+    deep_supervision: false
+    ds_mode: final
+  - name: ff_matched
+    label: ff_matched
+    hidden_dim: 64
+    latent_dim: 64
+    n_steps: 6
+  - name: untied_matched
+    label: untied_matched
+    hidden_dim: 64
+    latent_dim: 64
+    n_steps: 6
+    deep_supervision: false
+    ds_mode: final
+
+deltas:
+  - [trm_stepDS, ff_matched]      # §4a — the clean budget-matched comparison
+  - [trm_stepDS, untied_matched]  # §4b — fair tying control (watch the over-budget breach)
+  - [trm_prog_step, trm_stepDS]   # does progressive loss add (M7/M8 said no)?
+  - [trm_nods, ff_matched]        # plain loop vs §4a
+
+budget_reference: trm_nods
+budget_tol: 0.02
+
+train:
+  epochs: 100
+  lr: 1e-3
+  weight_decay: 1e-4
+  batch_size: 256
+  device: cpu
+
+seeds: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
+parallel_workers: 4
+results_dir: results

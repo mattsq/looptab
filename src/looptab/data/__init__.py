@@ -1,3 +1,15 @@
-from .generators import make_iterated, make_linear, make_parity
+from .generators import (
+    make_converge,
+    make_iterated,
+    make_linear,
+    make_multi_parity,
+    make_parity,
+)
 
-__all__ = ["make_linear", "make_parity", "make_iterated"]
+__all__ = [
+    "make_linear",
+    "make_parity",
+    "make_multi_parity",
+    "make_iterated",
+    "make_converge",
+]

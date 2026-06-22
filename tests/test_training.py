@@ -9,7 +9,7 @@ from looptab.data.generators import make_linear
 from looptab.eval.metrics import accuracy, delta_report
 from looptab.models.controls import FFMatched
 from looptab.models.trm import TRM
-from looptab.train.loop import train, train_curriculum
+from looptab.train.loop import train, train_curriculum, train_progressive
 
 
 def _small_loader():
@@ -117,6 +117,90 @@ def test_step_aligned_requires_per_step_readouts():
     )
     with pytest.raises(ValueError):
         train_curriculum(m, loader, T_min=3, T_max=3, ds_mode="step_aligned", epochs=1, seed=0)
+
+
+def test_train_progressive_final_runs_and_learns():
+    """M7: progressive loss (final target) runs and reduces the training loss."""
+    loader, w = _traj_loader(T_max=5, w=8)
+    m = TRM(
+        in_features=10,
+        num_classes=2,
+        hidden_dim=32,
+        latent_dim=32,
+        n_steps=5,
+        deep_supervision=False,
+        out_features=w,
+    )
+    losses = train_progressive(
+        m, loader, T_min=1, T_max=5, ds_mode="progressive_final", alpha=0.5, epochs=20, seed=0
+    )
+    assert len(losses) == 20
+    assert losses[-1] < losses[0]
+
+
+def test_train_progressive_step_runs_and_learns():
+    """M7: step-aligned progressive loss runs and reduces the training loss."""
+    loader, w = _traj_loader(T_max=5, w=8)
+    m = TRM(
+        in_features=10,
+        num_classes=2,
+        hidden_dim=32,
+        latent_dim=32,
+        n_steps=5,
+        deep_supervision=True,  # progressive_step needs per-step readouts
+        out_features=w,
+    )
+    losses = train_progressive(
+        m, loader, T_min=1, T_max=5, ds_mode="progressive_step", alpha=0.5, epochs=20, seed=0
+    )
+    assert len(losses) == 20
+    assert losses[-1] < losses[0]
+
+
+def test_train_progressive_step_requires_per_step_readouts():
+    loader, w = _traj_loader(T_max=3, w=8)
+    m = TRM(
+        in_features=10,
+        num_classes=2,
+        hidden_dim=16,
+        latent_dim=16,
+        n_steps=3,
+        deep_supervision=False,
+        out_features=w,
+    )
+    with pytest.raises(ValueError):
+        train_progressive(
+            m, loader, T_min=3, T_max=3, ds_mode="progressive_step", epochs=1, seed=0
+        )
+
+
+def test_train_progressive_rejects_non_progressive_mode():
+    loader, w = _traj_loader(T_max=3, w=8)
+    m = TRM(in_features=10, num_classes=2, hidden_dim=16, latent_dim=16, n_steps=3, out_features=w)
+    with pytest.raises(ValueError):
+        train_progressive(m, loader, T_min=1, T_max=3, ds_mode="final", epochs=1, seed=0)
+
+
+def test_train_progressive_is_deterministic():
+    """Same seed => identical training (the per-batch T,k schedule is reproducible)."""
+    loader, w = _traj_loader(T_max=5, w=8)
+
+    def run():
+        torch.manual_seed(0)
+        m = TRM(
+            in_features=10,
+            num_classes=2,
+            hidden_dim=16,
+            latent_dim=16,
+            n_steps=5,
+            deep_supervision=True,
+            out_features=w,
+        )
+        return train_progressive(
+            m, loader, T_min=1, T_max=5, ds_mode="progressive_step", epochs=8, seed=3
+        )
+
+    assert run() == run()
 
 
 def test_curriculum_depth_schedule_is_deterministic():

@@ -1,0 +1,111 @@
+# M6a — the both-axes probe. A DECISIVE empirical test of the §9 gate.
+#
+# WHY. After M0–M5 the §9 gate ("the loop beats BOTH controls on Task A AND Task B") is unmet
+# everywhere, for a STRUCTURAL reason: each canonical task needs exactly ONE axis, so the
+# single-axis control that owns that axis always TIES the loop.
+#   - Task A (parity) rewards DEPTH  → ff_matched (shallow) fails at k≥4; loop ≈ untied_matched.
+#   - Task B (CA)     rewards WIDTH  → untied_matched (narrow) is worst; loop ≈ ff_matched.
+# The loop is the generalist that is "never worst, never dominant." The clean way to decide
+# whether "beats both single-axis controls" is satisfiable AT ALL is a task that needs BOTH
+# depth AND width at a fixed tiny budget — exactly where a generalist should beat both
+# specialists. This is a sharper re-test of the original M2 "buys depth AND width from one
+# budget" synthesis (M3a could only soften it to width-only because CA's depth was unlearnable;
+# here depth stays individually learnable — k=4 at d=20 is solved by the deep arms, M4).
+#
+# TASK = multi_parity: predict w INDEPENDENT k-parities in parallel from the same d bits.
+#   - Depth axis: each output is order-k parity → shallow ff_matched fails at k≥4 (M4).
+#   - Width axis: w parallel computations → narrow untied_matched blocks should bottleneck,
+#     while the loop's single WIDE tied block, reused at depth, can carry all w.
+# NOT Task C / the H/L hierarchy (still gated, §9): the w parities are independent, no
+# sub-problem feeds another. w=1 reduces exactly to Task A (a built-in sanity anchor).
+#
+# Hyperparameters inherited VERBATIM from m4_parity_grid.yaml (hidden=latent=64, n_steps=4,
+# 100 epochs, lr 1e-3, wd 1e-4, batch 256, n_train 4000, n_test 1000). No per-cell tuning (§8).
+#
+# PRE-REGISTERED reading (decide before running, §8):
+#   - loop-beats-both in a cell ⟺ Δ(loop−ff) > 0 AND Δ(loop−um) > 0, BOTH sign-test p<.05
+#     (10 seeds). Any such cell CLEARS §9 empirically on a third task → headline positive.
+#   - Loop ties a control in every cell (e.g. um still solves multi_parity, as it solved single
+#     parity in M4) → the gate is unsatisfiable-in-principle by a generalist → that is the
+#     evidence to relax the §9 wording.
+#   - Sanity gates: w=1,k=4 reproduces M4 (loop≈um perfect, ff collapses on a minority of
+#     seeds); k=3 all-arms-solve. An all-arms-at-chance cell (e.g. w=8,k=4 if 4000 rows can't
+#     identify 8 subsets) carries NO verdict (sample/capacity wall, cf. M4/M5 d≥40) — re-run
+#     only such cells at larger n_train (M5-style) before reading them; do not tune per cell.
+#
+# Arms: four required + one labelled ceiling (identical roster to M4).
+
+task:
+  name: multi_parity
+  params:
+    d: 20               # fixed: stays off the M4/M5 d≥40 sample wall. k, w swept by the grid.
+  n_train: 4000
+  n_test: 1000
+  task_seed: 42
+  train_sample_seed: 1
+  test_sample_seed: 2
+
+grid:
+  params:
+    k: [3, 4]           # 3 = easy rung (all solve); 4 = the rung where ff fails (M4)
+    w: [1, 4, 8]        # 1 = Task A reduction (anchor); 4,8 = the width pressure on untied
+
+arms:
+  - name: trm
+    label: trm_ds
+    hidden_dim: 64
+    latent_dim: 64
+    n_steps: 4
+    deep_supervision: true
+    deep_supervision_weight: 1.0
+  - name: trm
+    label: trm_nods             # = "the loop"; the budget reference
+    hidden_dim: 64
+    latent_dim: 64
+    n_steps: 4
+    deep_supervision: false
+    deep_supervision_weight: 0.0
+  - name: ff_matched
+    label: ff_matched           # §4a shallow control — should fail the DEPTH axis (k≥4)
+    hidden_dim: 64
+    latent_dim: 64
+    n_steps: 4
+  - name: untied_matched
+    label: untied_matched       # §4b clean tying control — should fail the WIDTH axis (w>1)
+    hidden_dim: 64
+    latent_dim: 64
+    n_steps: 4
+    deep_supervision: false
+    deep_supervision_weight: 0.0
+  - name: untied_stack
+    label: untied_stack         # CEILING ONLY — ~n_steps× params, NOT param-matched
+    hidden_dim: 64
+    latent_dim: 64
+    n_steps: 4
+    deep_supervision: false
+    deep_supervision_weight: 0.0
+
+deltas:
+  - [trm_nods, ff_matched]       # DEPTH axis: loop vs §4a control
+  - [trm_nods, untied_matched]   # WIDTH axis: weight tying at fixed budget+depth (clean §4b Δ)
+  - [untied_matched, ff_matched] # depth at fixed capacity (deep-narrow vs shallow MLP)
+  - [trm_ds, trm_nods]           # deep supervision alone
+  - [trm_nods, untied_stack]     # confounded ceiling (tying + ~n_steps× capacity) — context only
+
+# Budget-parity audit: the loop defines the budget; ff_matched / untied_matched are width-solved
+# to it per cell and must stay within ±2%. untied_matched is EXPECTED to drift with width
+# quantization as w grows — surfaced in the params CSV, not hidden (§8). untied_stack is exempt.
+budget_reference: trm_nods
+budget_ceiling: [untied_stack]
+budget_tol: 0.02
+
+train:
+  epochs: 100
+  lr: 1e-3
+  weight_decay: 1e-4
+  batch_size: 256
+  device: cpu
+
+seeds: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
+parallel_workers: 4     # = core count; bit-identical to serial, ~Ncores× faster (§Infra)
+results_dir: results

@@ -25,7 +25,7 @@ from .config import ExperimentConfig, ModelConfig
 from .data.dataset import make_loaders, make_splits, make_trajectory_dataset
 from .eval.metrics import accuracy, delta_report, evaluate, majority_baseline
 from .registry import get_model
-from .train.loop import train, train_curriculum
+from .train.loop import train, train_curriculum, train_progressive
 
 
 def _git_sha() -> str:
@@ -103,6 +103,7 @@ def run_point(cfg: ExperimentConfig, task_params: dict, seed: int) -> tuple[dict
     if curriculum is not None:
         coupled_steps = curriculum.T_max
         traj_ds = make_trajectory_dataset(
+            task=task_cfg.name,
             task_cfg=task_params,
             task_seed=this_task_seed,
             sample_seed=task_cfg.train_sample_seed + seed * 100,
@@ -119,7 +120,23 @@ def run_point(cfg: ExperimentConfig, task_params: dict, seed: int) -> tuple[dict
         # shuffle stream are identical across arms and independent of arm order.
         torch.manual_seed(seed)
         m = _build_model(arm, in_features, num_classes, out_features, n_steps=coupled_steps)
-        if curriculum is not None:
+        if curriculum is not None and arm.ds_mode in ("progressive_final", "progressive_step"):
+            # M7: Deep Thinking progressive loss (TRM loop arms only; controls take the
+            # standard curriculum path below via their "final" ds_mode).
+            train_progressive(
+                m,
+                traj_loader,
+                T_min=curriculum.T_min,
+                T_max=curriculum.T_max,
+                ds_mode=arm.ds_mode,
+                alpha=arm.progressive_alpha,
+                epochs=cfg.train.epochs,
+                lr=cfg.train.lr,
+                weight_decay=cfg.train.weight_decay,
+                device=device,
+                seed=seed,
+            )
+        elif curriculum is not None:
             train_curriculum(
                 m,
                 traj_loader,

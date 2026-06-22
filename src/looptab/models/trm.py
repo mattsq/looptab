@@ -41,22 +41,40 @@ class TRM(nn.Module):
         self.z0 = nn.Parameter(torch.zeros(latent_dim))
 
     def forward(
-        self, X: torch.Tensor, n_steps: Optional[int] = None
-    ) -> tuple[torch.Tensor, Optional[list[torch.Tensor]]]:
+        self,
+        X: torch.Tensor,
+        n_steps: Optional[int] = None,
+        init_state: Optional[tuple[torch.Tensor, torch.Tensor]] = None,
+        return_state: bool = False,
+    ):
         """
+        Args:
+            init_state: optional ``(z, a)`` to resume from instead of the learned ``z0`` /
+                zero answer. ``a`` is the *flat* (B, answer_dim) answer state. Lets the
+                progressive-loss routine (M7, Deep Thinking) detach an intermediate rollout
+                and continue from it. ``None`` reproduces the canonical fresh start exactly.
+            return_state: if True, also return the final flat ``(z, a)`` so a rollout can be
+                detached and resumed. Composition is bit-identical: unrolling ``n+m`` steps
+                equals unrolling ``n`` (return_state) then resuming ``m`` from that state.
+
         Returns:
             logits: (B, num_classes) or (B, out_features, num_classes) final step logits
             all_logits: list of per-step logits if deep_supervision, else None
+            state (only if return_state): final flat ``(z, a)``
         """
         B = X.shape[0]
         steps = n_steps if n_steps is not None else self.n_steps
-        z = self.z0.unsqueeze(0).expand(B, -1)  # (B, latent_dim)
 
         if self.out_features is not None:
             answer_dim = self.out_features * self.num_classes
         else:
             answer_dim = self.num_classes
-        a = torch.zeros(B, answer_dim, device=X.device)  # answer state
+
+        if init_state is None:
+            z = self.z0.unsqueeze(0).expand(B, -1)  # (B, latent_dim)
+            a = torch.zeros(B, answer_dim, device=X.device)  # flat answer state
+        else:
+            z, a = init_state
 
         all_logits = [] if self.deep_supervision else None
 
@@ -70,10 +88,11 @@ class TRM(nn.Module):
                 else:
                     all_logits.append(a)
 
-        if self.out_features is not None:
-            a = a.view(B, self.out_features, self.num_classes)
+        out = a.view(B, self.out_features, self.num_classes) if self.out_features is not None else a
 
-        return a, all_logits
+        if return_state:
+            return out, all_logits, (z, a)
+        return out, all_logits
 
     def count_params(self) -> int:
         return sum(p.numel() for p in self.parameters() if p.requires_grad)
