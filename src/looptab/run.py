@@ -54,7 +54,7 @@ def _build_model(
     )
     # The TRM loop and both untied-stack controls (§4b) emit per-step readouts, so deep
     # supervision can be ablated on the same axis for each.
-    if arm.name in ("trm", "untied_stack", "untied_matched"):
+    if arm.name in ("trm", "trm_decoupled", "untied_stack", "untied_matched"):
         kwargs["deep_supervision"] = arm.deep_supervision
     return get_model(arm.name, **kwargs)
 
@@ -259,8 +259,8 @@ def run_extrapolation_point(
         lbl = arm.resolved_label()
         m = models[lbl]
 
-        # recurrent arm (TRM) can be unrolled to different steps R'
-        if arm.name == "trm":
+        # recurrent arms (TRM and the decoupled variant) can be unrolled to different steps R'
+        if arm.name in ("trm", "trm_decoupled"):
             for R in R_test_values:
                 point_results[(lbl, R)] = evaluate(
                     m, test_loader, device, want_exact_match=multi_output, n_steps=R

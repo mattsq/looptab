@@ -1,0 +1,108 @@
+# M10 — Decoupled-head ablation on the `converge` fixed-point task.
+# The deepest remaining mechanism question after M9. M9 proved the weight-tied loop buys
+# WHOLE-ROW COHERENCE (at matched token-acc it makes coherent rows a shallow MLP can't: loop
+# vs ff @ w=24, ΔEM +0.133, p=.002) but did NOT isolate *why*. The canonical TRM refines a
+# SINGLE shared latent and feeds the FULL answer (all w cells) back each step, so every cell's
+# refinement conditions on every other cell's current estimate. M10 severs exactly that
+# cross-cell coupling — `trm_decoupled` gives each cell its own latent slice and lets it see
+# ONLY its own answer — holding everything else identical (weight-tied recurrence, recall,
+# per-step readouts, total param budget).
+#
+# PRE-REGISTERED honesty fork (§8), measured by Δ(trm_nods − trm_decoupled):
+#   - decoupled collapses toward ff-like coherence (ΔEM > 0 at matched token-acc)
+#       ⇒ the JOINT state is the mechanism (cross-cell info flow buys whole-row coherence).
+#   - decoupled keeps the coherence edge (ΔEM ≈ 0)
+#       ⇒ recurrence per se drives coherence; the joint readout is incidental.
+# Either way is a clean, publishable-internally result.
+#
+# Single knob vs M9 (m9_converge_width): the new `trm_decoupled` arm. Everything else — rule 78,
+# converge task, curriculum, fair §4a/§4b grounding arms, 10 seeds — matches M8c/M9 so the
+# joint-loop / ff / untied numbers reproduce as a sanity anchor. Widths straddle the M9
+# coherence regime: w=16/24 inside the clean loop-beats-both band, w=32 just outside it.
+
+task:
+  name: converge
+  params:
+    T: 6
+    distractors: 8
+  n_train: 4000
+  n_test: 1000
+  task_seed: 42
+  train_sample_seed: 1
+  test_sample_seed: 2
+
+grid:
+  params:
+    rule: [78]
+    w: [16, 24, 32]
+
+curriculum:
+  param: T
+  T_min: 1
+  T_max: 6
+
+couple_n_steps_to_param: T
+
+arms:
+  - name: trm
+    label: trm_nods                 # joint loop, final loss (budget reference)
+    hidden_dim: 64
+    latent_dim: 64
+    n_steps: 6
+    deep_supervision: false
+    ds_mode: final
+  - name: trm_decoupled
+    label: trm_decoupled_nods       # per-cell refinement, equal (final) supervision — THE ablation
+    hidden_dim: 64
+    latent_dim: 64
+    n_steps: 6
+    deep_supervision: false
+    ds_mode: final
+  - name: trm
+    label: trm_stepDS               # joint loop, step-aligned DS
+    hidden_dim: 64
+    latent_dim: 64
+    n_steps: 6
+    deep_supervision: true
+    ds_mode: step_aligned
+  - name: trm_decoupled
+    label: trm_decoupled_stepDS     # per-cell refinement, equal step-aligned supervision
+    hidden_dim: 64
+    latent_dim: 64
+    n_steps: 6
+    deep_supervision: true
+    ds_mode: step_aligned
+  - name: ff_matched
+    label: ff_matched               # §4a shallow MLP grounding (continuity w/ M9)
+    hidden_dim: 64
+    latent_dim: 64
+    n_steps: 6
+  - name: untied_matched
+    label: untied_matched           # §4b fair untied stack, final loss (continuity w/ M9)
+    hidden_dim: 64
+    latent_dim: 64
+    n_steps: 6
+    deep_supervision: false
+    ds_mode: final
+
+deltas:
+  - [trm_nods, trm_decoupled_nods]      # THE M10 headline: joint vs decoupled @ equal final loss
+  - [trm_stepDS, trm_decoupled_stepDS]  # joint vs decoupled @ equal step-aligned supervision
+  - [trm_nods, ff_matched]              # loop vs §4a (anchor: reproduce M9 loop-beats-both)
+  - [trm_nods, untied_matched]          # loop vs §4b (anchor: reproduce M9 tying-positive)
+  - [trm_decoupled_nods, ff_matched]    # does the decoupled head still beat the shallow MLP?
+  - [trm_decoupled_nods, untied_matched]  # does the decoupled head still beat the fair untied?
+
+budget_reference: trm_nods
+budget_tol: 0.02
+
+train:
+  epochs: 100
+  lr: 1e-3
+  weight_decay: 1e-4
+  batch_size: 256
+  device: cpu
+
+seeds: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
+parallel_workers: 4
+results_dir: results
