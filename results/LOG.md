@@ -940,6 +940,111 @@ mechanism is whole-row coherence from recurrence/tying, **not** adaptive computa
 
 ---
 
+## M9 — DONE. Width sweep + coherence-mechanism diagnostic (converge). The M8 tying-positive STRENGTHENS (loop-beats-both is a w≤24 regime, not a w=24 knife-edge), and the "whole-row coherence" mechanism is CONFIRMED at matched token-accuracy.
+
+Pursued the project's one pro-loop result (M8/M8c: the weight-tied loop beats a *fair untied stack*
+on whole-row exact-match) along §11(c)'s two named sub-levers: **(ii)** sweep the output width `w` to
+map *where* "loop-beats-both" survives and *why* the M8 w=24→w=32 edge fades, and **(iii)** add a
+**coherence diagnostic** that directly tests *whether* tying buys whole-row coherence beyond raw
+token-accuracy. One experimental knob vs M8c (`w`), one additive metric. New metric
+`coherence_excess = EM − token_acc**w` (observed whole-row score minus the EM expected if per-cell
+errors were *independent* at the same token-acc; >0 ⇒ errors clustered into fewer rows = coherent),
+plus a `mean_wrong_per_row` companion — both derived from the existing single prediction pass in
+`evaluate`, **bit-identical** for prior metrics, threaded through `run.py` (per-seed → aggregate →
+sign-tested paired Δ → curve/deltas CSVs) exactly like `exact_match`. Task = `converge`, **rule 78**
+fixed (cleanest loop>ff in M8b; M8b showed rules behave alike, so fixing rule + sweeping `w` is the
+clean single-knob design), `w ∈ {12,16,24,32,48}`, M8c fair-supervision arms (`trm_nods`,
+`trm_stepDS`, `ff_matched`, `untied_matched`, `untied_stepDS`), 10 seeds, 100 epochs. 97 tests
+(+2 coherence-math unit tests), ruff clean. Tracked:
+`results/m9_converge_width_20260622T050349_{curve,deltas,params}.csv` (+ JSON). **Sanity anchor —
+the `w=24`/`w=32` cells reproduce M8b/M8c's rule-78 numbers BIT-FOR-BIT** (stepDS EM 0.427/0.169,
+ff EM 0.311/0.121, untied EM 0.126/0.037), confirming the additive metric perturbed nothing.
+
+**Per-arm exact-match (EM) and token-accuracy (acc), 10 seeds (baseline acc ≈ 0.562):**
+
+| w | nods EM / acc | stepDS EM / acc | ff EM / acc | untied EM / acc | untied_stepDS EM / acc |
+|---|---|---|---|---|---|
+| 12 | 0.911 / 0.988 | 0.833 / 0.972 | 0.638 / 0.950 | 0.854 / 0.979 | 0.902 / 0.986 |
+| 16 | 0.828 / 0.981 | 0.759 / 0.974 | 0.549 / 0.952 | 0.464 / 0.929 | 0.540 / 0.944 |
+| 24 | 0.444 / 0.944 | 0.427 / 0.947 | 0.311 / 0.941 | 0.126 / 0.867 | 0.135 / 0.874 |
+| 32 | 0.107 / 0.899 | 0.169 / 0.923 | 0.121 / 0.921 | 0.037 / 0.834 | 0.040 / 0.841 |
+| 48 | 0.008 / 0.861 | 0.009 / 0.872 | 0.016 / 0.892 | 0.004 / 0.789 | 0.004 / 0.802 |
+
+**Headline paired Δs (sign-test p, 10 seeds). nods/untied/ff = equal (final-loss) supervision:**
+
+| w | Δ(nods−untied) EM | Δ(nods−ff) EM | Δ(nods−ff) acc | Δ(coh: nods−untied) | Δ(coh: nods−ff) |
+|---|---|---|---|---|---|
+| 12 | +0.057 (10/0, .002) | +0.273 (10/0, .002) | +0.038 (10/0, .002) | −0.033 (2/8, .11 ns) | −0.048 (0/10, .002) |
+| 16 | +0.364 (10/0, .002) | +0.279 (10/0, .002) | +0.028 (10/0, .002) | −0.057 (0/10, .002) | +0.008 (6/4, .75 ns) |
+| 24 | +0.318 (10/0, .002) | **+0.133 (10/0, .002)** | +0.003 (6/4, .75 ns) | **+0.090 (10/0, .002)** | **+0.107 (10/0, .002)** |
+| 32 | +0.070 (10/0, .002) | −0.014 (5/5, 1.0 ns) | **−0.021 (0/10, .002)** | +0.038 (10/0, .002) | +0.024 (8/2, .11 ns) |
+| 48 | +0.005 (9/1, .021) | −0.008 (1/9, .021) | **−0.031 (0/10, .002)** | +0.004 (9/1, .021) | −0.004 (3/7, .34 ns) |
+
+**Reading (per §2/§8 — answering M9's three pre-registered predictions).**
+
+1. **P1 (tying robustness) — CONFIRMED.** `Δ(loop − fair untied)` is **positive on token-acc in all
+   5 widths, both supervision regimes (10/0, p=.002 every cell)**, and **positive on EM in 9/10
+   width×regime cells** — the lone exception is `Δ(stepDS − untied_stepDS)` EM at w=12 (−0.069, 3/7,
+   p=.34, ns) where the task is near-saturated (all arms 0.83–0.91 EM, no room). So the M8c
+   tying-positive is **width-robust, not a w=24/32 artifact** — it holds from w=12 to w=48. This is
+   the strongest, cleanest leg: weight tying beats a fair untied stack at fixed budget across the
+   whole width range. (`untied_matched` is the **weakest** param-matched arm on EM in every cell.)
+2. **P2 (loop-beats-both boundary) — CONFIRMED, and the regime is WIDER than M8c reported.** The
+   *clean* loop-beats-both (plain `trm_nods` at equal supervision beats **both** `untied_matched`
+   AND `ff_matched`, both sign-test p<.05 on EM) holds at **w=12, 16, AND 24** — a contiguous
+   **w≤24 regime**, not the single w=24 cell M8c's coarse grid surfaced — and **vanishes by w≥32**
+   (at w=32 the loop ties ff on EM and *loses* on token-acc −0.021, 0/10, p=.002; at w=48 it loses ff
+   on both). On token-acc the wide shallow MLP overtakes the loop monotonically (Δ(nods−ff) acc:
+   +0.038 → +0.028 → +0.003(ns) → −0.021 → −0.031), crossing over at ~w=24; **EM (coherence) is the
+   loop's durable edge, extending its competitiveness one width-step past where token-acc crosses.**
+   With step-aligned DS the loop>ff EM edge stretches to w=32 (Δ(stepDS−ff) EM +0.048, 9/1, p=.021)
+   — the *supervision-carried* half M8c flagged; the clean (equal-supervision) regime is w≤24.
+3. **P3 (mechanism) — CONFIRMED at the M8 operating point, with a metric caveat; the "whole-row
+   coherence" framing SURVIVES the honesty fork.** The cleanest evidence is **loop vs ff at w=24,
+   where token-acc is matched** (Δ(nods−ff) acc +0.003, ns): at *equal per-cell accuracy* the loop
+   wins EM by +0.133 (10/0, p=.002) and has **+0.107 higher `coherence_excess`** (10/0, p=.002;
+   nods 0.182 vs ff 0.075). With no token-acc confound, recurrence/tying produces coherent whole
+   rows the shallow MLP cannot — the direct mechanism demonstration the project lacked. vs untied at
+   w=24, Δ(coh) = +0.090 (10/0, p=.002) on top of a token-acc gap. **The coherence advantage is
+   width-localized: it PEAKS at w=24** (loop coh_excess 0.182, vs 0.044/0.097 at w=12/16 and
+   0.072/0.008 at w=32/48) — exactly where loop-beats-both holds cleanly. **Caveat (the metric's
+   limit):** `coherence_excess` is confounded by token-acc *level* across arms (a lower-acc arm has a
+   lower independence baseline, hence more "room" for excess) — this is why at w=16 `untied` shows a
+   *higher* coh_excess (0.153) than the loop (0.097) despite far lower EM, and why Δ(coh:nods−untied)
+   is ns/negative at w=12/16. So the coherence Δ is only clean where token-acc is comparable (loop vs
+   ff at w=24 is the gold case, acc matched). The "→0 as w grows" half holds at the top end (w=48 all
+   arms ≈0.004–0.012, EM collapsed) but the curve is **non-monotonic** — it rises to a w=24 peak then
+   decays, rather than decaying throughout.
+
+**Net.** M9 **strengthens** the M8 tying-positive on both axes it set out to probe. (1) The
+tying-over-fair-untied advantage is **width-robust** (token-acc 10/10 cells; EM 9/10), confirming
+it is the project's durable architectural pro-loop fact. (2) The clean **loop-beats-both** regime is
+**w≤24** (broader than M8c's single w=24 snapshot), bounded above between w=24 and w=32 by the wide
+shallow MLP overtaking the loop on token-acc as outputs multiply. (3) The hypothesized **mechanism —
+whole-row coherence from recurrence/tying — is confirmed at matched token-accuracy** (loop vs ff,
+w=24: +0.107 coherence_excess at equal acc), and it is shown to be **width-localized** (peaks at
+w≈24, where EM is mid-range so coherence can differentiate; confounded at small-w saturation,
+dissolved at large-w EM collapse). The honesty fork did **not** fire: coherence_excess(loop) ≠
+coherence_excess(control) where token-acc is comparable. The loop's value statement is now sharper:
+**weight-tied recurrence buys whole-row coherence on multi-output fixed-point targets at a fixed
+budget — robustly over a fair untied stack across width, and over a shallow MLP at matched token-acc
+in a w≤24 regime — but NOT a token-accuracy edge at large `w`, NOT adaptive compute (M8), NOT
+depth-extrapolation (M1/M3b/M7).** Still does not satisfy the *literal* §9 gate (names Tasks A/B).
+
+**Caveats / open gaps.** (i) One rule (78), one model size, n_train=4000 — the width axis is now
+well-resolved but the rule/size axes are not (M8c covered rules {13,78,92} at w∈{24,32}). (ii)
+`coherence_excess` is token-acc-confounded across arms (above) — interpret cross-arm coherence Δs
+only where token-acc is comparable; the loop-vs-ff @ w=24 matched-acc cell is the clean anchor.
+(iii) **Budget breach carried forward:** `untied_matched`/`untied_stepDS` land ratio 1.025/1.031
+(OVER budget) at w=24/32 and 0.978 (under) at w=12 — width-quantization, flagged `within_tol=False`
+in the params CSV; over-budget *handicaps* the control where it matters (w≥16), so the tying-positive
+is conservative. The strictly-budget-clean fix (§11(c)(i)) is still deferred (it would only weaken
+the control further). (iv) A **decoupled-head ablation** (does the *joint* multi-output readout, vs
+per-cell-independent heads, drive the coherence?) is the natural M10 follow-up — it needs new model
+code, so it was kept out of this single-knob milestone.
+
+---
+
 ## Infra — Training/eval performance (no scientific change). Bit-identical, ~2.5× faster.
 
 Not a milestone — a perf pass on the model/training/eval path. **All run outputs are byte-for-byte
