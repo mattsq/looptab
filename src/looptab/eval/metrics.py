@@ -59,7 +59,22 @@ def evaluate(
         if targets.ndim == 1:
             out["exact_match"] = out["accuracy"]  # whole-row == per-row for single-output
         else:
-            out["exact_match"] = float((preds == targets).all(axis=-1).mean())
+            correct = preds == targets  # (N, W) per-cell correctness
+            out["exact_match"] = float(correct.all(axis=-1).mean())
+            # --- Coherence diagnostic (M9) -------------------------------------------------
+            # Tests *why* the weight-tied loop wins whole-row exact-match on multi-output
+            # fixed-point targets (M8): does it produce *coherent* rows (errors clustered into
+            # few rows) rather than merely higher per-cell accuracy? `independence_em` is the
+            # whole-row score you'd expect if per-cell errors were INDEPENDENT at this same
+            # token-accuracy (token_acc ** W). `coherence_excess` = observed EM − that baseline:
+            #   > 0  ⇒ errors clustered (more rows fully correct than chance predicts) = coherent
+            #   ≈ 0  ⇒ EM edge is fully explained by token-accuracy, no extra coherence
+            # The M9 mechanism test is Δ(coherence_excess: loop − untied) > 0. `mean_wrong_per_row`
+            # (mean count of wrong cells per row) is reported alongside for the narrative.
+            w_out = targets.shape[-1]
+            token_acc = out["accuracy"]
+            out["coherence_excess"] = out["exact_match"] - float(token_acc**w_out)
+            out["mean_wrong_per_row"] = float((~correct).sum(axis=-1).mean())
     return out
 
 

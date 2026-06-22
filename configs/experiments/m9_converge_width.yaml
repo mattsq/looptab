@@ -1,0 +1,103 @@
+# M9 — Width sweep + coherence mechanism on the `converge` fixed-point task.
+# Pursues the project's one pro-loop result (M8/M8c: the weight-tied loop beats a FAIR untied
+# stack on whole-row exact-match, 6/6 cells at equal supervision). M9 asks TWO things at once,
+# changing exactly ONE experimental knob vs M8c — the output width `w`:
+#
+#   (1) WHERE does it survive? Sweep w ∈ {12,16,24,32,48}. M8c found the clean "loop-beats-both"
+#       only at w=24 (EM-only) and that the plain loop LOSES to wide shallow ff on token-acc at
+#       w=32. M9 maps the boundary below (12,16) and above (48) the M8 grid. w=24 and w=32
+#       reproduce M8c bit-for-bit (arms reseed independently, same task_seed/arms) = sanity anchor.
+#
+#   (2) WHY does the edge fade? The new `coherence_excess` metric (eval.metrics) = observed EM −
+#       (token_acc ** w): whole-row score beyond what independent per-cell errors would give.
+#       The mechanism test is Δ(coherence_excess: trm_nods − untied_matched) > 0 (tying buys
+#       *coherence*, not just token-acc). Honesty fork (§8): if loop's coherence_excess ≈ untied's,
+#       the "whole-row coherence" framing dies — the M8 edge is then just token-acc + a harsh metric.
+#
+# PRE-REGISTERED (§8):
+#   P1 Δ(nods−untied) EM > 0 and Δ(stepDS−untied_stepDS) EM > 0 across ALL widths (tying robust).
+#   P2 clean loop-beats-both (Δ(nods−untied) AND Δ(nods−ff) both sig on EM) holds small-w, gone w≥32.
+#   P3 Δ(coherence_excess: nods−untied) > 0; coherence_excess → 0 for all arms as w grows.
+#
+# Single rule = 78 (cleanest loop>ff in M8b; M8b showed rules {13,78,92} behave alike, so fixing
+# rule and sweeping w is the clean one-knob design). Everything else identical to m8c_converge_fair.
+# Carried-forward caveat: untied_matched lands ~+2.5–3% OVER budget at large w (width-quantization),
+# which HANDICAPS the control (loop wins anyway → conservative); surfaced in the params CSV, not fixed.
+
+task:
+  name: converge
+  params:
+    T: 6
+    distractors: 8
+  n_train: 4000
+  n_test: 1000
+  task_seed: 42
+  train_sample_seed: 1
+  test_sample_seed: 2
+
+grid:
+  params:
+    rule: [78]
+    w: [12, 16, 24, 32, 48]
+
+curriculum:
+  param: T
+  T_min: 1
+  T_max: 6
+
+couple_n_steps_to_param: T
+
+arms:
+  - name: trm
+    label: trm_stepDS
+    hidden_dim: 64
+    latent_dim: 64
+    n_steps: 6
+    deep_supervision: true
+    ds_mode: step_aligned
+  - name: trm
+    label: trm_nods
+    hidden_dim: 64
+    latent_dim: 64
+    n_steps: 6
+    deep_supervision: false
+    ds_mode: final
+  - name: ff_matched
+    label: ff_matched
+    hidden_dim: 64
+    latent_dim: 64
+    n_steps: 6
+  - name: untied_matched
+    label: untied_matched      # fair §4b control, FINAL loss (matches trm_nods's supervision)
+    hidden_dim: 64
+    latent_dim: 64
+    n_steps: 6
+    deep_supervision: false
+    ds_mode: final
+  - name: untied_matched
+    label: untied_stepDS        # fair §4b control GIVEN step-aligned DS (matches trm_stepDS)
+    hidden_dim: 64
+    latent_dim: 64
+    n_steps: 6
+    deep_supervision: true
+    ds_mode: step_aligned
+
+deltas:
+  - [trm_nods, untied_matched]       # CLEAN tying isolation @ equal final-loss supervision (P1/P3 key)
+  - [trm_stepDS, untied_stepDS]      # CLEAN tying isolation @ equal step-aligned supervision (gold std)
+  - [trm_nods, ff_matched]           # architectural loop vs §4a @ equal supervision (P2 loop-beats-both)
+  - [trm_stepDS, ff_matched]         # best-loop vs §4a (ff cannot take step-DS — continuity w/ M8b)
+
+budget_reference: trm_nods
+budget_tol: 0.02
+
+train:
+  epochs: 100
+  lr: 1e-3
+  weight_decay: 1e-4
+  batch_size: 256
+  device: cpu
+
+seeds: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
+parallel_workers: 4
+results_dir: results

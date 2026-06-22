@@ -3,9 +3,11 @@
 from pathlib import Path
 
 import pytest
+import torch
 import yaml
 
 from looptab.config import ExperimentConfig
+from looptab.eval.metrics import evaluate
 from looptab.run import budget_audit, run_point
 
 
@@ -64,6 +66,59 @@ def test_exact_match_suppressed_for_single_output():
     out, _, _ = run_point(cfg, cfg.task.params, seed=0)
     for v in out.values():
         assert "exact_match" not in v
+
+
+class _FixedPredModel(torch.nn.Module):
+    """Stub whose argmax over the class dim reproduces a preset (N, W) prediction array."""
+
+    def __init__(self, preds, num_classes=2):
+        super().__init__()
+        onehot = torch.nn.functional.one_hot(torch.as_tensor(preds), num_classes).float()
+        self._logits = onehot * 10.0  # (N, W, C); argmax(-1) == preds
+
+    def forward(self, X, **kwargs):
+        return self._logits, None
+
+
+def _one_batch_loader(targets):
+    y = torch.as_tensor(targets)
+    X = torch.zeros(y.shape[0], 1)  # ignored by the stub
+    return [(X, y)]
+
+
+def test_coherence_excess_diagnostic_m9():
+    """M9: coherence_excess = EM − token_acc**W. At matched token-acc, CLUSTERED errors give a
+    POSITIVE excess (coherent whole rows) and SPREAD errors give a negative one — the mechanism
+    test for the M8 tying-positive."""
+    targets = [[0, 0], [0, 0], [0, 0], [0, 0]]  # 4 rows × 2 cells, all class 0
+
+    # Clustered: one row entirely wrong, rest perfect. token_acc=0.75, EM=0.75.
+    clustered = _FixedPredModel([[1, 1], [0, 0], [0, 0], [0, 0]])
+    out_c = evaluate(clustered, _one_batch_loader(targets), want_exact_match=True)
+    assert out_c["accuracy"] == pytest.approx(0.75)
+    assert out_c["exact_match"] == pytest.approx(0.75)
+    assert out_c["coherence_excess"] == pytest.approx(0.75 - 0.75**2)  # +0.1875
+    assert out_c["coherence_excess"] > 0
+    assert out_c["mean_wrong_per_row"] == pytest.approx(0.5)
+
+    # Spread: same token_acc=0.75 but errors split across two rows → lower EM, negative excess.
+    spread = _FixedPredModel([[1, 0], [1, 0], [0, 0], [0, 0]])
+    out_s = evaluate(spread, _one_batch_loader(targets), want_exact_match=True)
+    assert out_s["accuracy"] == pytest.approx(0.75)  # matched token-acc
+    assert out_s["exact_match"] == pytest.approx(0.5)
+    assert out_s["coherence_excess"] == pytest.approx(0.5 - 0.75**2)  # -0.0625
+    assert out_c["coherence_excess"] > out_s["coherence_excess"]
+
+
+def test_coherence_excess_absent_for_single_output():
+    """Single-output (1-D targets): no whole-row notion, so coherence_excess isn't emitted."""
+    targets = [0, 1, 0, 1]
+    model = _FixedPredModel([[0], [1], [1], [1]]).eval()
+    # 1-D targets path: build logits of shape (N, C) by squeezing the W=1 dim.
+    model._logits = model._logits.squeeze(1)
+    out = evaluate(model, _one_batch_loader(targets), want_exact_match=True)
+    assert "coherence_excess" not in out
+    assert out["exact_match"] == out["accuracy"]
 
 
 def test_run_point_deterministic():
