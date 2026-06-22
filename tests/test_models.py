@@ -4,6 +4,7 @@ import pytest
 import torch
 
 from looptab.models.controls import FFMatched, UntiedStack, UntiedStackMatched
+from looptab.models.decoupled import TRMDecoupled
 from looptab.models.trm import TRM
 
 
@@ -269,6 +270,112 @@ def test_untied_matched_clamps_overunroll():
     logits, all_logits = m(X, n_steps=9)
     assert logits.shape == (4, 2)
     assert len(all_logits) == 3
+
+
+def test_decoupled_multi_output_shape():
+    m = TRMDecoupled(
+        in_features=16,
+        num_classes=2,
+        hidden_dim=32,
+        latent_dim=32,
+        n_steps=3,
+        deep_supervision=True,
+        out_features=8,
+    )
+    X = torch.randn(5, 16)
+    logits, all_logits = m(X)
+    assert logits.shape == (5, 8, 2)
+    assert len(all_logits) == 3
+    for step_logits in all_logits:
+        assert step_logits.shape == (5, 8, 2)
+
+
+def test_decoupled_no_deep_supervision():
+    m = TRMDecoupled(
+        in_features=16, num_classes=2, hidden_dim=32, latent_dim=32, n_steps=3,
+        deep_supervision=False, out_features=8,
+    )
+    X = torch.randn(4, 16)
+    logits, all_logits = m(X)
+    assert logits.shape == (4, 8, 2)
+    assert all_logits is None
+
+
+def test_decoupled_requires_out_features():
+    """The decoupled-head ablation is meaningless for a single output (no whole row)."""
+    with pytest.raises(ValueError):
+        TRMDecoupled(in_features=16, num_classes=2, hidden_dim=32, latent_dim=32, n_steps=3)
+
+
+def test_decoupled_step_override():
+    m = TRMDecoupled(
+        in_features=16, num_classes=2, hidden_dim=32, latent_dim=32, n_steps=3,
+        deep_supervision=True, out_features=6,
+    )
+    X = torch.randn(5, 16)
+    logits, all_logits = m(X, n_steps=5)
+    assert logits.shape == (5, 6, 2)
+    assert len(all_logits) == 5
+
+
+def test_decoupled_is_param_matched():
+    """Per-cell width is solved to the TRM loop's budget, exactly like UntiedStackMatched (§8)."""
+    for out_features in (9, 24, 32):
+        kw = dict(
+            in_features=out_features + 8,  # converge: in = w + distractors
+            num_classes=2,
+            hidden_dim=64,
+            latent_dim=64,
+            n_steps=6,
+            out_features=out_features,
+        )
+        trm = TRM(**kw)
+        dec = TRMDecoupled(**kw)
+        ratio = dec.count_params() / trm.count_params()
+        assert 0.8 <= ratio <= 1.2, f"decoupled/TRM ratio = {ratio:.3f} (out={out_features})"
+
+
+def test_decoupled_no_cross_cell_leakage():
+    """THE decoupling invariant (M10): cell c's output depends ONLY on (X, z_c, a_c).
+
+    Perturbing one cell's refinement state must leave every *other* cell's output bit-identical
+    — this is precisely what severs the joint-state coupling the canonical TRM has, and what the
+    M10 ablation tests. A regression that lets cells mix (e.g. a stray reduction over the cell
+    dim) is caught here.
+    """
+    m = TRMDecoupled(
+        in_features=12, num_classes=2, hidden_dim=32, latent_dim=32, n_steps=3,
+        deep_supervision=False, out_features=5,
+    )
+    m.eval()
+    X = torch.randn(4, 12)
+    B, w, dim = 4, 5, m.cell_latent_dim
+    z = torch.randn(B, w, dim)
+    a = torch.randn(B, w, 2)
+    with torch.no_grad():
+        out1, _ = m(X, init_state=(z, a))
+        z2, a2 = z.clone(), a.clone()
+        z2[:, 2, :] += torch.randn(B, dim)
+        a2[:, 2, :] += torch.randn(B, 2)
+        out2, _ = m(X, init_state=(z2, a2))
+    others = [c for c in range(w) if c != 2]
+    torch.testing.assert_close(out1[:, others, :], out2[:, others, :], rtol=0, atol=0)
+    assert not torch.allclose(out1[:, 2, :], out2[:, 2, :]), "perturbed cell must change"
+
+
+def test_decoupled_return_state_composition_bit_identical():
+    """Unrolling n+m steps == unrolling n (return_state) then resuming m (interface parity)."""
+    m = TRMDecoupled(
+        in_features=12, num_classes=2, hidden_dim=32, latent_dim=32, n_steps=4,
+        deep_supervision=False, out_features=7,
+    )
+    m.eval()
+    X = torch.randn(8, 12)
+    with torch.no_grad():
+        full, _ = m(X, n_steps=7)
+        _, _, state = m(X, n_steps=3, return_state=True)
+        resumed, _ = m(X, n_steps=4, init_state=state)
+    torch.testing.assert_close(resumed, full, rtol=0, atol=0)
 
 
 def test_param_counts_roughly_matched():

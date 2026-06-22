@@ -1,10 +1,12 @@
 """Registry: resolve string names from configs to objects."""
 
 from .models.controls import FFMatched, UntiedStack, UntiedStackMatched
+from .models.decoupled import TRMDecoupled
 from .models.trm import TRM
 
 MODEL_REGISTRY = {
     "trm": TRM,
+    "trm_decoupled": TRMDecoupled,
     "ff_matched": FFMatched,
     "untied_stack": UntiedStack,
     "untied_matched": UntiedStackMatched,

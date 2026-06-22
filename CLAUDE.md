@@ -236,8 +236,11 @@ behaviour-changing conclusions, and the next pointer. Append detail to LOG.md, n
 - **Models/arms:** `trm` (weight-tied refinement loop, optional per-step readouts),
   `ff_matched` (§4a param-matched shallow MLP), `untied_stack` (§4b untied, ~`n_steps`×
   params — a confounded ceiling, NOT param-matched), `untied_matched` (§4b untied,
-  width-shrunk to the loop's budget — the *clean* tying control). In
-  `src/looptab/models/{trm,controls}.py`, registered in `src/looptab/registry.py`.
+  width-shrunk to the loop's budget — the *clean* tying control), and `trm_decoupled` (M10
+  mechanism ablation: the loop with **per-cell** refinement — each output cell has its own
+  latent slice and sees only its own answer, severing the joint multi-output state; budget-
+  matched, multi-output only). In `src/looptab/models/{trm,controls,decoupled}.py`, registered
+  in `src/looptab/registry.py`.
 - **Train/eval:** deep supervision is a **per-arm weight** (`src/looptab/train/loop.py`),
   not a global flag. Three training routines: `train` (standard), `train_curriculum` (M3b
   depth-curriculum + step-aligned DS), and `train_progressive` (M7 Deep Thinking progressive
@@ -261,14 +264,15 @@ behaviour-changing conclusions, and the next pointer. Append detail to LOG.md, n
   metrics + seed + git SHA), and PNGs if matplotlib present (`src/looptab/run.py`).
 - **Configs:** `configs/experiments/` (m0…m2-confirm, m3a/m3b, m4_parity_grid,
   m5_parity_wall_n16k/n64k, m6a_multi_parity_grid, m7_progressive_extrapolation, m7b_progressive_alpha1,
-  m8_converge_adaptive, m8b_converge_grid, m8c_converge_fair, m9_converge_width).
+  m8_converge_adaptive, m8b_converge_grid, m8c_converge_fair, m9_converge_width,
+  m10_decoupled_converge).
 - **Metrics:** `accuracy` / `exact_match` / `majority_baseline`, the single-pass `evaluate`, and
   (M9) `coherence_excess = EM − token_acc**w` (whole-row coherence beyond what independent per-cell
   errors would give; >0 = errors clustered) with a `mean_wrong_per_row` companion — all in
   `src/looptab/eval/metrics.py`; paired Δ with variance + sign test is `delta_report`.
-- **Tests:** `tests/` — generator determinism, model shapes/param-ratios, runner
-  determinism/independence, coherence-metric math. Run `uv run --extra dev pytest -q` (98 tests);
-  lint `uv run ruff check`.
+- **Tests:** `tests/` — generator determinism, model shapes/param-ratios (incl. the M10
+  decoupled no-cross-cell-leakage invariant), runner determinism/independence, coherence-metric
+  math. Run `uv run --extra dev pytest -q` (105 tests); lint `uv run ruff check`.
 
 ### (b) Behaviour-changing conclusions to date (read before re-running anything)
 
@@ -399,6 +403,18 @@ behaviour-changing conclusions, and the next pointer. Append detail to LOG.md, n
   value: **tied recurrence buys whole-row coherence on multi-output fixed-point targets — width-robust
   over a fair untied stack, and over a shallow MLP at matched token-acc for w≤24 (rule 78) — NOT a
   token-acc edge at large w, NOT adaptive compute, NOT depth-extrapolation.**
+- **The whole-row-coherence mechanism is the JOINT multi-output state, not recurrence per se (M10).**
+  `trm_decoupled` (the loop refining each output cell in its *own* latent, seeing only its own answer —
+  budget/recurrence/recall/supervision all matched to `trm_nods`, ONLY the joint state removed) **loses
+  the coherence**: Δ(nods−decoupled_nods) EM +0.51/+0.39/+0.09 at w=16/24/32 (10/0, p=.002), and
+  +0.32/+0.32/+0.14 at *equal step-aligned supervision* (where the decoupled arm trains stably, so it is
+  NOT an optimization artifact). Stronger than the pre-registered fork required: the decoupled loop falls
+  **below the shallow §4a MLP** on both token-acc AND EM in all 3 widths (Δ(decoupled−ff) 0/10, p=.002) —
+  so the joint coupling is not a bonus on top of recurrence, it is the thing carrying the loop's entire
+  value here. M9's loop-vs-ff @ w=24 anchor reproduces (Δacc +0.003 ns / ΔEM +0.133). **Sharpened value
+  statement: tied recurrence with a JOINT multi-output state buys whole-row coherence** — the "joint"
+  qualifier is now load-bearing and demonstrated. (Caveat: rule 78 / one size; `decoupled_nods` is
+  fragile under final-loss-only, so lean on the step-aligned pair for the trainability-controlled Δ.)
 - Each leg still rests on few configs: Task A now multi-`d`/multi-`k` (M4) and the d≥40 wall has
   been swept over `n_train` (M5 — it is sample-bound and lifts to all-solve, except d=80,k=5 which
   is capacity-bound); Task B depth swept (M3a) but unlearnable past T=4 one-shot; M3b on one rule
@@ -425,27 +441,28 @@ confound in M8b's headline). **M9** swept output width `w∈{12,16,24,32,48}` on
 clean **loop-beats-both is a w≤24 regime** (broader than M8c's lone w=24 cell, gone by w≥32), and the
 **whole-row-coherence mechanism is CONFIRMED at matched token-acc** (loop vs ff @ w=24: +0.107
 coherence_excess at equal accuracy, 10/0, p=.002). M8/M9 are the FIRST loop-beats-both anywhere — real
-but narrow (multi-output fixed-point, EM/coherence, w≤24), and NOT adaptive-compute.
+but narrow (multi-output fixed-point, EM/coherence, w≤24), and NOT adaptive-compute. **M10** built the
+`trm_decoupled` ablation and **isolated the coherence mechanism to the JOINT multi-output state**:
+refining cells *independently* (same budget/recurrence/supervision) loses the coherence (ΔEM +0.09…+0.51,
+10/0; +0.14…+0.32 at equal step-aligned supervision) and falls *below* the shallow §4a MLP (0/10) — so
+the "joint" qualifier on "tied recurrence buys coherence" is now load-bearing and demonstrated.
 
 **No milestone is currently in flight.** Open threads, in rough priority:
 - **A DECISION (now the highest-value live question): relax the literal §9 gate wording.** M6a showed
-  "beats both on A and B" is structurally unsatisfiable; **M8+M9 supply the *useful* reframing with
-  evidence**: the loop's value is **whole-row/structural coherence on multi-output fixed-point targets**
-  (width-robust tying-over-untied; loop-beats-both at matched token-acc for w≤24), NOT single-axis
-  dominance and NOT token-acc. Rewrite §9's gate around this; do **NOT** build Task C.
-- **M10 — decoupled-head ablation (the deepest remaining mechanism question).** M9 confirmed tying buys
-  whole-row coherence at matched token-acc but did NOT isolate *why*: is it the *joint* multi-output
-  readout (all `w` cells share one latent/answer state, refined together) vs per-cell-independent heads?
-  Build a TRM variant with decoupled per-cell refinement and compare on `converge` @ w≈24 (the coherence
-  peak). Needs new model code — kept out of M9's single-knob scope.
-- **Lower-value extensions of M9:** more operator families / a model-size axis (M8c had 3 rules at
+  "beats both on A and B" is structurally unsatisfiable; **M8+M9+M10 supply the *useful* reframing with
+  evidence**: the loop's value is **whole-row/structural coherence on multi-output fixed-point targets,
+  driven by the joint refinement state** (width-robust tying-over-untied; loop-beats-both at matched
+  token-acc for w≤24; mechanism = the joint state, M10), NOT single-axis dominance and NOT token-acc.
+  Rewrite §9's gate around this; do **NOT** build Task C.
+- **Lower-value extensions of M9/M10:** more operator families / a model-size axis (M8c had 3 rules at
   w∈{24,32}; M9 has 1 rule × 5 widths — neither covers rule×width×size jointly); (deferred) the strictly-
   budget-clean `untied` fix — currently over-budget at w=24/32, which only *handicaps* the control, so the
   tying-positive is already conservative.
 - **Closed levers (do not redo):** depth-extrapolation via progressive loss / path-independence (M7/M8 —
   decay is intrinsic, not convergence-related); adaptive compute on a fixed-point target (M8 — decays);
-  "lift the M4 sample wall" (M5); "re-judge via a both-axes task" (M6a). A bigger-model probe of d=80,k=5
-  must scale the budget for *all* arms (M5).
+  "lift the M4 sample wall" (M5); "re-judge via a both-axes task" (M6a); **the decoupled-head mechanism
+  question (M10 — coherence is the joint state, not recurrence per se)**. A bigger-model probe of
+  d=80,k=5 must scale the budget for *all* arms (M5).
 
 ## 12. Key references (for grounding a cold agent)
 

@@ -1060,6 +1060,119 @@ code, so it was kept out of this single-knob milestone.
 
 ---
 
+## M10 — DONE. Decoupled-head ablation (converge). The WHOLE-ROW-COHERENCE mechanism is ISOLATED: the JOINT multi-output state is what buys it — severing cross-cell refinement drops the recurrent model BELOW the shallow MLP.
+
+The deepest remaining mechanism question (§11(c) lever, M9 caveat iv). M9 proved the weight-tied
+loop buys *whole-row coherence* (at matched token-acc it makes coherent rows a shallow MLP can't:
+loop vs ff @ w=24, ΔEM +0.133, p=.002) but did **not** isolate *why*. The canonical `TRM` refines a
+**single shared latent** and feeds the **full flat answer** (all `w` cells) back into every update,
+so each output cell's refinement conditions on the current estimate of *every other cell*. That
+cross-cell coupling was the obvious candidate for "coherence." M10 severs exactly it.
+
+**New model `TRMDecoupled`** (`src/looptab/models/decoupled.py`, registered `trm_decoupled`):
+each output cell carries its **own** latent slice and sees **only its own** answer during refinement
+— no cross-cell information flow. *Everything else is held identical to `TRM`*: weight-tied
+recurrence (one shared update net reused every step **and** across cells), the same input `X`
+re-injected each step (recall), the same per-step readout interface (deep supervision), and the
+**same total parameter budget** (per-cell latent width `m` solved to the loop's budget exactly as
+`UntiedStackMatched`/`FFMatched`; realized ratios 0.992–1.001, all within ±2%). The axis that differs
+is joint-state vs per-cell-state refinement — with one **inherent budget-allocation asymmetry** (not a
+hidden confound, but worth stating): to distinguish cells the decoupled head needs a per-cell init
+latent `z0` of shape `(w, m)`, which consumes **8–13%** of its budget (vs ~0.4% for the joint loop's
+single `z0`), compensated by a wider per-cell net (m≈73–80 vs the joint 64). So "only jointness differs"
+is true of the *mechanism* (cross-cell info flow) but the parameter *allocation* necessarily differs;
+total budget is matched, capacity is not handicapped (the decoupled net is wider), but it is not a
+single-knob byte-for-byte edit. Per-cell identity comes from a small *randomly
+initialized* per-cell init latent `z0` (`(w, m)`): with a fully shared net and `X` shared across
+cells, a zero `z0` (TRM's choice for its single latent) leaves every cell computing the identical
+update forever — the inter-cell symmetry then breaks only slowly through per-cell gradients and the
+arm sits at the majority baseline for many epochs; `nn.init.normal_(std=0.02)` differentiates the
+cells from step 0 so the decoupled head trains on the same footing as the joint loop (deterministic
+— the runner seeds torch before building each arm). 105 tests (+7: shape, param-match, the
+no-cross-cell-leakage invariant, state-composition), ruff clean. Config
+`m10_decoupled_converge.yaml` = M9's `converge`/rule-78 setup, `w∈{16,24,32}` (straddling the M9
+coherence regime), 6 arms (joint `trm_nods`/`trm_stepDS`, decoupled `trm_decoupled_nods`/`_stepDS`,
+plus `ff_matched`/`untied_matched` grounding), 10 seeds, 100 epochs. Tracked:
+`results/m10_decoupled_converge_20260622T092240_{curve,deltas,params}.csv` (+ JSON). **Sanity anchor
+— the joint `trm_nods` vs `ff_matched` reproduces M9 bit-consistently** (w=24: Δacc +0.003 ns / ΔEM
++0.133, 10/0, p=.002; each arm self-reseeds, so the new decoupled arm does not perturb it).
+
+**Per-arm test accuracy / exact-match (EM), 10 seeds (majority baseline ≈ 0.562):**
+
+| w | trm_nods EM/acc | trm_decoupled_nods EM/acc | trm_stepDS EM/acc | trm_decoupled_stepDS EM/acc | ff_matched EM/acc | untied_matched EM/acc |
+|---|---|---|---|---|---|---|
+| 16 | 0.828 / 0.981 | 0.320 / 0.913 | 0.759 / 0.974 | 0.438 / 0.941 | 0.549 / 0.952 | 0.464 / 0.929 |
+| 24 | 0.444 / 0.944 | 0.058 / 0.816 | 0.427 / 0.947 | 0.110 / 0.893 | 0.311 / 0.941 | 0.126 / 0.867 |
+| 32 | 0.107 / 0.899 | 0.019 / 0.825 | 0.169 / 0.923 | 0.031 / 0.865 | 0.121 / 0.921 | 0.037 / 0.834 |
+
+**Headline paired Δs (sign-test p, 10 seeds):**
+
+| w | Δ(nods − decoupled_nods) EM | Δ(stepDS − decoupled_stepDS) EM | Δ(decoupled_nods − ff) EM | Δ(decoupled_nods − ff) acc |
+|---|---|---|---|---|
+| 16 | **+0.508 (10/0, p=.002)** | +0.321 (10/0, p=.002) | **−0.229 (0/10, p=.002)** | −0.039 (0/10, p=.002) |
+| 24 | **+0.387 (10/0, p=.002)** | +0.317 (10/0, p=.002) | **−0.254 (0/10, p=.002)** | −0.126 (0/10, p=.002) |
+| 32 | **+0.088 (10/0, p=.002)** | +0.138 (10/0, p=.002) | **−0.101 (0/10, p=.002)** | −0.095 (0/10, p=.002) |
+
+**Reading (per §2/§8 — the pre-registered honesty fork resolves cleanly, and harder than predicted).**
+
+1. **The JOINT state is the mechanism — decoupling collapses whole-row coherence (the fork's first
+   branch fires).** Severing cross-cell refinement costs the loop **+0.51 / +0.39 / +0.09 EM**
+   (w=16/24/32, all 10/0, p=.002) at the same budget, recurrence, recall, and supervision. The pre-
+   registered alternative ("decoupled keeps the coherence edge ⇒ recurrence per se drives it") is
+   **rejected**: per-cell-independent recurrence does *not* reproduce the coherence. So the M9 "whole-
+   row coherence" is specifically a property of **refining all cells together through one shared latent
+   with cross-cell answer feedback**, not of weight-tied recurrence in the abstract.
+2. **Decoupled recurrence is WORSE than a plain MLP — though this is closer to expected than surprising
+   once the mechanism is framed as cross-cell flow.** Δ(decoupled_nods − ff_matched) is **significantly
+   negative on BOTH token-acc and EM in all 3 widths** (acc −0.039/−0.126/−0.095; EM −0.229/−0.254/
+   −0.101; all 0/10, p=.002). Removing the joint state drops the recurrent model strictly *below* the
+   §4a feedforward control, so the recurrence's value here is contingent on the joint multi-output state;
+   without it the loop is the worst param-matched arm (the M6a "never-worst is false" reading, sharpened
+   — it is the joint coupling, not the loop, that was carrying the value). **Caveat (adversarial review,
+   do not overclaim this as a shock):** `ff_matched` is NOT a pure per-cell baseline — its output layer
+   maps a shared hidden representation to all `w` cells jointly, so it *too* has cross-cell mixing.
+   `trm_decoupled` is the **only** arm with literally zero cross-cell mixing. So "the zero-mixing arm
+   loses to a some-mixing MLP" is partly definitional given the mechanism, not an independent surprise;
+   the load-bearing evidence remains point 1 (joint loop ≫ decoupled at matched everything-else), not
+   "below even an MLP."
+3. **Not an optimization artifact of the fragile `nods` arm — the step-aligned pair controls for it.**
+   `trm_decoupled_nods` is **optimization-fragile** (high seed variance, e.g. w=24 seed-7 partial
+   collapse 0.596; std up to ±0.085) because per-cell identity must be learned from final-loss-only
+   supervision against a shared `X`. This *could* inflate the `nods` Δ. But **step-aligned DS makes the
+   decoupled arm train stably** (`trm_decoupled_stepDS` std ≤ ±0.024, no collapses) — and the joint
+   advantage **persists at equal step-aligned supervision**: Δ(stepDS − decoupled_stepDS) EM +0.321 /
+   +0.317 / +0.138 (10/0, p=.002). So the coherence gap holds where both arms optimize well; it is the
+   architecture (joint vs per-cell state), not the decoupled arm failing to train.
+4. **Anchors reproduce M9 / M8c.** Joint `trm_nods` vs `ff_matched`: w=24 Δacc +0.003 (ns, *matched*
+   token-acc) / ΔEM +0.133 (10/0) — the M9 mechanism cell, bit-consistent. Joint > `untied_matched`
+   (the tying-positive) on EM in all 3 widths (+0.364/+0.318/+0.069, 10/0, p=.002). The token-acc
+   crossover (loop loses ff on token-acc by w=32, −0.021, 0/10) reproduces M9's "EM is the durable
+   edge, token-acc crosses ~w=24." DS-mode behaviour is consistent with M9 (step-aligned helps EM here
+   because the converge trajectory gives genuine per-step targets).
+
+**Net.** M10 isolates the one pro-loop result in the project to its actual cause: **whole-row coherence
+on multi-output fixed-point targets comes from the JOINT refinement state** — all `w` cells sharing one
+latent and conditioning on each other's running answer — **not** from weight-tied recurrence per se.
+The clean proof is two-sided: (a) a budget/recurrence/supervision-matched model that refines cells
+*independently* loses the coherence (ΔEM +0.09…+0.51, 10/0, and still +0.14…+0.32 at equal step-aligned
+supervision where it trains stably); (b) that same decoupled model falls *below* the shallow §4a MLP on
+both metrics (0/10), so the joint state is not a bonus on top of recurrence — it is the thing carrying
+the loop's value. This sharpens the loop's earned value statement to: **tied recurrence with a JOINT
+multi-output state buys whole-row coherence**; the "joint" qualifier is now load-bearing and demonstrated.
+
+**Caveats / open gaps.** (i) **One rule (78), one model size, n_train=4000, `w∈{16,24,32}`** — same
+single-family scope as M9; the mechanism is shown on rule-78 converge, not swept over rule/size.
+(ii) `trm_decoupled_nods` is optimization-fragile under final-loss-only supervision; the *defensible*
+controlled comparison is the **step-aligned pair** (both train stably) — lean on that, not the noisier
+`nods` Δ, when the trainability objection is raised. (iii) Token-acc is **not** matched between joint
+and decoupled (the joint trains to higher acc), so the joint-vs-decoupled EM gap is not a pure matched-
+acc coherence measurement the way M9's loop-vs-ff @ w=24 is; the clean mechanism statement rests on
+(a)+(b) together (decoupled loses coherence *and* falls below ff). (iv) `untied_matched` is +2.5%/+3.1%
+OVER budget at w=24/32 (the carried-forward M9 width-quantization breach, surfaced in the params CSV);
+it loses, so over-budget is conservative. The decoupled arm itself is budget-clean (0.992–1.001).
+
+---
+
 ## Infra — Training/eval performance (no scientific change). Bit-identical, ~2.5× faster.
 
 Not a milestone — a perf pass on the model/training/eval path. **All run outputs are byte-for-byte
