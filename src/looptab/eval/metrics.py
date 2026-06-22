@@ -59,7 +59,29 @@ def evaluate(
         if targets.ndim == 1:
             out["exact_match"] = out["accuracy"]  # whole-row == per-row for single-output
         else:
-            out["exact_match"] = float((preds == targets).all(axis=-1).mean())
+            correct = preds == targets  # (N, W) per-cell correctness
+            out["exact_match"] = float(correct.all(axis=-1).mean())
+            # --- Coherence descriptor (M9) -------------------------------------------------
+            # `coherence_excess` = EM − token_acc**W, where token_acc**W is the whole-row score
+            # expected if per-cell errors were i.i.d. at the arm's GLOBAL token-accuracy. It is a
+            # PER-ARM descriptor of how much more coherent an arm's rows are than that i.i.d.
+            # reference. IMPORTANT (M9 adversarial review): do NOT use the *cross-arm* Δ of this
+            # metric as evidence. Two reasons:
+            #   (1) Jensen / per-row-dispersion confound. EM = mean_row(row_acc**W) ≥
+            #       (mean_row row_acc)**W, so heterogeneous per-row difficulty inflates
+            #       coherence_excess even with NO clustering. Matching two arms' *mean* token-acc
+            #       does not match the *variance* of their per-row accuracy, so it does not control
+            #       this — a per-row baseline mean_row(row_acc**W) would, but it also cancels the
+            #       cross-row clustering that is the actual signal, so it is not used.
+            #   (2) At matched token-acc the token_acc**W term is identical across arms, so
+            #       Δ(coherence_excess) ≡ Δ(exact_match) — it adds nothing beyond EM.
+            # The clean, unconfounded cross-arm mechanism statistic is therefore EM AT MATCHED
+            # token-acc (e.g. loop vs ff @ w=24), NOT a coherence_excess Δ. `mean_wrong_per_row`
+            # (mean wrong cells per row) is a companion descriptor for the narrative.
+            w_out = targets.shape[-1]
+            token_acc = out["accuracy"]
+            out["coherence_excess"] = out["exact_match"] - float(token_acc**w_out)
+            out["mean_wrong_per_row"] = float((~correct).sum(axis=-1).mean())
     return out
 
 

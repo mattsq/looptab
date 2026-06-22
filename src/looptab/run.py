@@ -173,6 +173,9 @@ def run_point(cfg: ExperimentConfig, task_params: dict, seed: int) -> tuple[dict
         }
         if multi_output:
             metrics["exact_match"] = test_metrics["exact_match"]
+            # M9 coherence diagnostic (whole-row coherence vs raw token-acc); see eval.metrics.
+            metrics["coherence_excess"] = test_metrics["coherence_excess"]
+            metrics["mean_wrong_per_row"] = test_metrics["mean_wrong_per_row"]
         results[arm.resolved_label()] = metrics
         models[arm.resolved_label()] = m
 
@@ -203,6 +206,13 @@ def _aggregate(per_seed: list[dict], labels: list[str]) -> dict:
             ems = [s[lbl]["exact_match"] for s in per_seed]
             stats["exact_match_mean"] = float(np.mean(ems))
             stats["exact_match_std"] = _std(ems)
+        if "coherence_excess" in per_seed[0][lbl]:
+            ces = [s[lbl]["coherence_excess"] for s in per_seed]
+            stats["coherence_excess_mean"] = float(np.mean(ces))
+            stats["coherence_excess_std"] = _std(ces)
+            mwr = [s[lbl]["mean_wrong_per_row"] for s in per_seed]
+            stats["mean_wrong_per_row_mean"] = float(np.mean(mwr))
+            stats["mean_wrong_per_row_std"] = _std(mwr)
         out[lbl] = stats
 
     if "baseline" in per_seed[0]:
@@ -479,6 +489,14 @@ def main():
                 )
                 deltas[f"{a}-{b}"]["exact_match"] = em_rep
                 line += f"  [EM {em_rep['delta_mean']:+.4f} ± {em_rep['delta_std']:.4f}]"
+                if "coherence_excess" in per_seed[0][a]:
+                    ce_rep = delta_report(
+                        [s[a]["coherence_excess"] for s in per_seed],
+                        [s[b]["coherence_excess"] for s in per_seed],
+                        label="coherence_excess",
+                    )
+                    deltas[f"{a}-{b}"]["coherence_excess"] = ce_rep
+                    line += f"  [coh {ce_rep['delta_mean']:+.4f} ± {ce_rep['delta_std']:.4f}]"
             print(line)
 
         # Aggregate extrapolation results across seeds
@@ -593,6 +611,27 @@ def main():
                             "exact_match",
                             a["exact_match_mean"],
                             a["exact_match_std"],
+                            a["n_params"],
+                        ]
+                    )
+                if "coherence_excess_mean" in a:
+                    w.writerow(
+                        [
+                            p["label"],
+                            lbl,
+                            "coherence_excess",
+                            a["coherence_excess_mean"],
+                            a["coherence_excess_std"],
+                            a["n_params"],
+                        ]
+                    )
+                    w.writerow(
+                        [
+                            p["label"],
+                            lbl,
+                            "mean_wrong_per_row",
+                            a["mean_wrong_per_row_mean"],
+                            a["mean_wrong_per_row_std"],
                             a["n_params"],
                         ]
                     )

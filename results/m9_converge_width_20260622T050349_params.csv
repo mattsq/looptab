@@ -1,0 +1,26 @@
+config,arm,n_params,ref_params,ratio,role,within_tol
+"rule=78, w=12",trm_stepDS,12760,12760,1.0000,matched,True
+"rule=78, w=12",trm_nods,12760,12760,1.0000,reference,True
+"rule=78, w=12",ff_matched,12720,12760,0.9969,matched,True
+"rule=78, w=12",untied_matched,12475,12760,0.9777,matched,False
+"rule=78, w=12",untied_stepDS,12475,12760,0.9777,matched,False
+"rule=78, w=16",trm_stepDS,14048,14048,1.0000,matched,True
+"rule=78, w=16",trm_nods,14048,14048,1.0000,reference,True
+"rule=78, w=16",ff_matched,14075,14048,1.0019,matched,True
+"rule=78, w=16",untied_matched,13818,14048,0.9836,matched,True
+"rule=78, w=16",untied_stepDS,13818,14048,0.9836,matched,True
+"rule=78, w=24",trm_stepDS,16624,16624,1.0000,matched,True
+"rule=78, w=24",trm_nods,16624,16624,1.0000,reference,True
+"rule=78, w=24",ff_matched,16592,16624,0.9981,matched,True
+"rule=78, w=24",untied_matched,17033,16624,1.0246,matched,False
+"rule=78, w=24",untied_stepDS,17033,16624,1.0246,matched,False
+"rule=78, w=32",trm_stepDS,19200,19200,1.0000,matched,True
+"rule=78, w=32",trm_nods,19200,19200,1.0000,reference,True
+"rule=78, w=32",ff_matched,19159,19200,0.9979,matched,True
+"rule=78, w=32",untied_matched,19792,19200,1.0308,matched,False
+"rule=78, w=32",untied_stepDS,19792,19200,1.0308,matched,False
+"rule=78, w=48",trm_stepDS,24352,24352,1.0000,matched,True
+"rule=78, w=48",trm_nods,24352,24352,1.0000,reference,True
+"rule=78, w=48",ff_matched,24443,24352,1.0037,matched,True
+"rule=78, w=48",untied_matched,23942,24352,0.9832,matched,True
+"rule=78, w=48",untied_stepDS,23942,24352,0.9832,matched,True
