@@ -14,8 +14,11 @@ refinement. Everything else is held identical to ``TRM`` — weight-tied recurre
 update net reused every step *and* across cells), the same input ``X`` re-injected each step
 ("recall"), the same per-step readout interface (deep supervision), and the **same total
 parameter budget** (the per-cell latent width is solved to the loop's budget exactly as
-``FFMatched`` / ``UntiedStackMatched`` do). The ONLY axis that differs is joint-state vs
-per-cell-state refinement.
+``FFMatched`` / ``UntiedStackMatched`` do). The axis that differs is joint-state vs
+per-cell-state refinement — total budget matched and capacity not handicapped (the per-cell
+net is wider: m≈73-80 vs the joint 64), though the parameter *allocation* necessarily differs
+(the per-cell ``z0`` below costs ~8-13% of budget vs ~0.4% for the joint loop's single ``z0``).
+So it isolates the mechanism (cross-cell information flow), not a single-knob weight edit.
 
 Pre-registered honesty fork (CLAUDE.md §8), tested by M10:
   - decoupled collapses to ff-like coherence  ⇒  the JOINT state is the mechanism

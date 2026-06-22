@@ -1075,8 +1075,14 @@ each output cell carries its **own** latent slice and sees **only its own** answ
 recurrence (one shared update net reused every step **and** across cells), the same input `X`
 re-injected each step (recall), the same per-step readout interface (deep supervision), and the
 **same total parameter budget** (per-cell latent width `m` solved to the loop's budget exactly as
-`UntiedStackMatched`/`FFMatched`; realized ratios 0.992–1.001, all within ±2%). The ONLY axis that
-differs is joint-state vs per-cell-state refinement. Per-cell identity comes from a small *randomly
+`UntiedStackMatched`/`FFMatched`; realized ratios 0.992–1.001, all within ±2%). The axis that differs
+is joint-state vs per-cell-state refinement — with one **inherent budget-allocation asymmetry** (not a
+hidden confound, but worth stating): to distinguish cells the decoupled head needs a per-cell init
+latent `z0` of shape `(w, m)`, which consumes **8–13%** of its budget (vs ~0.4% for the joint loop's
+single `z0`), compensated by a wider per-cell net (m≈73–80 vs the joint 64). So "only jointness differs"
+is true of the *mechanism* (cross-cell info flow) but the parameter *allocation* necessarily differs;
+total budget is matched, capacity is not handicapped (the decoupled net is wider), but it is not a
+single-knob byte-for-byte edit. Per-cell identity comes from a small *randomly
 initialized* per-cell init latent `z0` (`(w, m)`): with a fully shared net and `X` shared across
 cells, a zero `z0` (TRM's choice for its single latent) leaves every cell computing the identical
 update forever — the inter-cell symmetry then breaks only slowly through per-cell gradients and the
@@ -1095,9 +1101,9 @@ plus `ff_matched`/`untied_matched` grounding), 10 seeds, 100 epochs. Tracked:
 
 | w | trm_nods EM/acc | trm_decoupled_nods EM/acc | trm_stepDS EM/acc | trm_decoupled_stepDS EM/acc | ff_matched EM/acc | untied_matched EM/acc |
 |---|---|---|---|---|---|---|
-| 16 | 0.793 / 0.981 | 0.286 / 0.913 | 0.762 / 0.974 | 0.441 / 0.941 | 0.515 / 0.952 | 0.430 / 0.929 |
-| 24 | 0.444 / 0.944 | 0.057 / 0.816 | 0.427 / 0.947 | 0.110 / 0.893 | 0.311 / 0.941 | 0.126 / 0.867 |
-| 32 | 0.107 / 0.899 | 0.020 / 0.825 | 0.169 / 0.923 | 0.031 / 0.865 | 0.121 / 0.921 | 0.040 / 0.834 |
+| 16 | 0.828 / 0.981 | 0.320 / 0.913 | 0.759 / 0.974 | 0.438 / 0.941 | 0.549 / 0.952 | 0.464 / 0.929 |
+| 24 | 0.444 / 0.944 | 0.058 / 0.816 | 0.427 / 0.947 | 0.110 / 0.893 | 0.311 / 0.941 | 0.126 / 0.867 |
+| 32 | 0.107 / 0.899 | 0.019 / 0.825 | 0.169 / 0.923 | 0.031 / 0.865 | 0.121 / 0.921 | 0.037 / 0.834 |
 
 **Headline paired Δs (sign-test p, 10 seeds):**
 
@@ -1116,13 +1122,19 @@ plus `ff_matched`/`untied_matched` grounding), 10 seeds, 100 epochs. Tracked:
    **rejected**: per-cell-independent recurrence does *not* reproduce the coherence. So the M9 "whole-
    row coherence" is specifically a property of **refining all cells together through one shared latent
    with cross-cell answer feedback**, not of weight-tied recurrence in the abstract.
-2. **STRONGER than the fork required — decoupled recurrence is WORSE than a plain MLP.** Δ(decoupled_nods
-   − ff_matched) is **significantly negative on BOTH token-acc and EM in all 3 widths** (acc −0.039/
-   −0.126/−0.095; EM −0.229/−0.254/−0.101; all 0/10, p=.002). Removing the joint state doesn't merely
-   erase the loop's coherence edge — it drops the recurrent model strictly *below* the §4a feedforward
-   control. The recurrence's entire value here is contingent on the joint multi-output state; without
-   it, the loop is the worst param-matched arm (the M6a "never-worst is false" reading, sharpened — it
-   is the joint coupling, not the loop, that was carrying the value).
+2. **Decoupled recurrence is WORSE than a plain MLP — though this is closer to expected than surprising
+   once the mechanism is framed as cross-cell flow.** Δ(decoupled_nods − ff_matched) is **significantly
+   negative on BOTH token-acc and EM in all 3 widths** (acc −0.039/−0.126/−0.095; EM −0.229/−0.254/
+   −0.101; all 0/10, p=.002). Removing the joint state drops the recurrent model strictly *below* the
+   §4a feedforward control, so the recurrence's value here is contingent on the joint multi-output state;
+   without it the loop is the worst param-matched arm (the M6a "never-worst is false" reading, sharpened
+   — it is the joint coupling, not the loop, that was carrying the value). **Caveat (adversarial review,
+   do not overclaim this as a shock):** `ff_matched` is NOT a pure per-cell baseline — its output layer
+   maps a shared hidden representation to all `w` cells jointly, so it *too* has cross-cell mixing.
+   `trm_decoupled` is the **only** arm with literally zero cross-cell mixing. So "the zero-mixing arm
+   loses to a some-mixing MLP" is partly definitional given the mechanism, not an independent surprise;
+   the load-bearing evidence remains point 1 (joint loop ≫ decoupled at matched everything-else), not
+   "below even an MLP."
 3. **Not an optimization artifact of the fragile `nods` arm — the step-aligned pair controls for it.**
    `trm_decoupled_nods` is **optimization-fragile** (high seed variance, e.g. w=24 seed-7 partial
    collapse 0.596; std up to ±0.085) because per-cell identity must be learned from final-loss-only
