@@ -999,48 +999,63 @@ ff EM 0.311/0.121, untied EM 0.126/0.037), confirming the additive metric pertur
    loop's durable edge, extending its competitiveness one width-step past where token-acc crosses.**
    With step-aligned DS the loop>ff EM edge stretches to w=32 (Δ(stepDS−ff) EM +0.048, 9/1, p=.021)
    — the *supervision-carried* half M8c flagged; the clean (equal-supervision) regime is w≤24.
-3. **P3 (mechanism) — CONFIRMED at the M8 operating point, with a metric caveat; the "whole-row
-   coherence" framing SURVIVES the honesty fork.** The cleanest evidence is **loop vs ff at w=24,
-   where token-acc is matched** (Δ(nods−ff) acc +0.003, ns): at *equal per-cell accuracy* the loop
-   wins EM by +0.133 (10/0, p=.002) and has **+0.107 higher `coherence_excess`** (10/0, p=.002;
-   nods 0.182 vs ff 0.075). With no token-acc confound, recurrence/tying produces coherent whole
-   rows the shallow MLP cannot — the direct mechanism demonstration the project lacked. vs untied at
-   w=24, Δ(coh) = +0.090 (10/0, p=.002) on top of a token-acc gap. **The coherence advantage is
-   width-localized: it PEAKS at w=24** (loop coh_excess 0.182, vs 0.044/0.097 at w=12/16 and
-   0.072/0.008 at w=32/48) — exactly where loop-beats-both holds cleanly. **Caveat (the metric's
-   limit):** `coherence_excess` is confounded by token-acc *level* across arms (a lower-acc arm has a
-   lower independence baseline, hence more "room" for excess) — this is why at w=16 `untied` shows a
-   *higher* coh_excess (0.153) than the loop (0.097) despite far lower EM, and why Δ(coh:nods−untied)
-   is ns/negative at w=12/16. So the coherence Δ is only clean where token-acc is comparable (loop vs
-   ff at w=24 is the gold case, acc matched). The "→0 as w grows" half holds at the top end (w=48 all
-   arms ≈0.004–0.012, EM collapsed) but the curve is **non-monotonic** — it rises to a w=24 peak then
-   decays, rather than decaying throughout.
+3. **P3 (mechanism) — the clean, unconfounded statistic is EM-AT-MATCHED-TOKEN-ACC, and on that
+   statistic the mechanism holds. The `coherence_excess` metric is DEMOTED to a per-arm descriptor
+   after an adversarial review (see below).** The load-bearing evidence is **loop vs ff at w=24,
+   where token-acc is matched** (Δ(nods−ff) acc +0.003, **ns**): at *equal per-cell accuracy* the
+   loop wins whole-row **EM by +0.133 (10/0, p=.002)**. With per-cell accuracy held equal, the only
+   thing left to differ is how errors are distributed across rows — so the loop is producing coherent
+   whole rows the shallow MLP cannot. This is the direct mechanism demonstration the project lacked,
+   and it needs **no coherence metric** — it is a plain EM comparison at matched token-acc.
+   **Adversarial-review correction (do not repeat the original framing):** the first write-up also
+   cited Δ(`coherence_excess`) = +0.107 (loop−ff) as a *second, independent* confirmation. It is
+   **not independent** — `coherence_excess = EM − token_acc**w`, so at matched token-acc the baseline
+   term cancels and Δ(coh) ≡ Δ(EM); it is the same fact counted twice. Worse, the **cross-arm Δ of
+   `coherence_excess` is confounded two ways** and must not be used as evidence: (a) *level* — a
+   lower-acc arm has a lower independence baseline, hence more "room" (this is why at w=16 `untied`
+   shows coh 0.153 > loop 0.097 despite far lower EM); (b) *per-row dispersion (Jensen)* — since
+   EM = mean_row(row_acc**w) ≥ (mean_row row_acc)**w, heterogeneous per-row difficulty inflates
+   `coherence_excess` *even with no clustering*, and matching the *mean* token-acc does not match the
+   *variance*, so the anchor does not control it. (A per-row baseline mean_row(row_acc**w) removes
+   the Jensen bias but also cancels the cross-row clustering that is the signal, so it was not
+   adopted.) **Net on P3:** the mechanism — recurrence/tying buys whole-row coherence — is supported
+   *by the EM-at-matched-acc comparison at w=24*, the one clean cell; `coherence_excess` is retained
+   only as a per-arm descriptor (its width profile peaks at w≈24 for mechanical reasons — EM
+   saturates near 1 at small w and collapses to 0 at large w, so any EM-minus-baseline quantity must
+   peak in between). The honesty fork does not fire (the matched-acc EM edge is real), but the
+   stronger "two independent signals" reading is **withdrawn**.
 
 **Net.** M9 **strengthens** the M8 tying-positive on both axes it set out to probe. (1) The
 tying-over-fair-untied advantage is **width-robust** (token-acc 10/10 cells; EM 9/10), confirming
 it is the project's durable architectural pro-loop fact. (2) The clean **loop-beats-both** regime is
 **w≤24** (broader than M8c's single w=24 snapshot), bounded above between w=24 and w=32 by the wide
 shallow MLP overtaking the loop on token-acc as outputs multiply. (3) The hypothesized **mechanism —
-whole-row coherence from recurrence/tying — is confirmed at matched token-accuracy** (loop vs ff,
-w=24: +0.107 coherence_excess at equal acc), and it is shown to be **width-localized** (peaks at
-w≈24, where EM is mid-range so coherence can differentiate; confounded at small-w saturation,
-dissolved at large-w EM collapse). The honesty fork did **not** fire: coherence_excess(loop) ≠
-coherence_excess(control) where token-acc is comparable. The loop's value statement is now sharper:
-**weight-tied recurrence buys whole-row coherence on multi-output fixed-point targets at a fixed
-budget — robustly over a fair untied stack across width, and over a shallow MLP at matched token-acc
-in a w≤24 regime — but NOT a token-accuracy edge at large `w`, NOT adaptive compute (M8), NOT
+whole-row coherence from recurrence/tying — is supported by the EM-at-matched-token-acc comparison**
+(loop vs ff @ w=24: token-acc tied, ΔEM +0.133, 10/0, p=.002): at equal per-cell accuracy the loop
+makes coherent whole rows the MLP can't. **[Corrected after adversarial review]** the `coherence_excess`
+metric does **not** add an independent confirmation — at matched acc Δ(coh) ≡ Δ(EM), and its cross-arm
+Δ is confounded by token-acc *level* and per-row *dispersion* (Jensen), so it is demoted to a per-arm
+descriptor and its width "peak" at w≈24 is mechanical. The loop's value statement: **weight-tied
+recurrence buys whole-row coherence on multi-output fixed-point targets at a fixed budget — robustly
+over a fair untied stack across width (P1), and over a shallow MLP at matched token-acc in a w≤24
+regime (rule 78; P2/P3) — but NOT a token-accuracy edge at large `w`, NOT adaptive compute (M8), NOT
 depth-extrapolation (M1/M3b/M7).** Still does not satisfy the *literal* §9 gate (names Tasks A/B).
 
-**Caveats / open gaps.** (i) One rule (78), one model size, n_train=4000 — the width axis is now
-well-resolved but the rule/size axes are not (M8c covered rules {13,78,92} at w∈{24,32}). (ii)
-`coherence_excess` is token-acc-confounded across arms (above) — interpret cross-arm coherence Δs
-only where token-acc is comparable; the loop-vs-ff @ w=24 matched-acc cell is the clean anchor.
-(iii) **Budget breach carried forward:** `untied_matched`/`untied_stepDS` land ratio 1.025/1.031
-(OVER budget) at w=24/32 and 0.978 (under) at w=12 — width-quantization, flagged `within_tol=False`
-in the params CSV; over-budget *handicaps* the control where it matters (w≥16), so the tying-positive
-is conservative. The strictly-budget-clean fix (§11(c)(i)) is still deferred (it would only weaken
-the control further). (iv) A **decoupled-head ablation** (does the *joint* multi-output readout, vs
-per-cell-independent heads, drive the coherence?) is the natural M10 follow-up — it needs new model
+**Caveats / open gaps.** (i) **One rule (78), one model size, n_train=4000** — the width axis is now
+well-resolved but the rule/size axes are not (M8c covered rules {13,78,92} at w∈{24,32}). So "w≤24
+regime" and "boundary between w=24 and w=32" are **rule-78 statements**; the boundary is not swept
+over rule or model size. (ii) **`coherence_excess` is for per-arm description only** — its cross-arm
+Δ is confounded by token-acc level *and* per-row dispersion (P3), so the cross-arm mechanism claim
+rests on EM-at-matched-token-acc (loop-vs-ff @ w=24), not on any coherence Δ. (iii) **Budget breach
+carried forward, and it is NOT uniformly conservative:** `untied` lands ratio 1.025/1.031 (OVER
+budget) at w=24/32 — there over-budget *handicaps* the control, so the tying-positive is conservative
+— but **0.978 (UNDER budget) at w=12** and 0.983 at w=48, where the control has *fewer* params, so
+the w=12 Δ(nods−untied) EM +0.057 is mildly **anti-conservative** (partly a capacity gap favouring
+the loop). Since w=12 is load-bearing for "regime wider than M8c," note it: the w=16/24 cells (where
+`untied` is at/over budget) are the clean support for that claim, not w=12 alone. The strictly-budget-
+clean fix (§11(c)(i)) is still deferred. (iv) A **decoupled-head ablation** (does the *joint*
+multi-output readout, vs per-cell-independent heads, drive the coherence?) is the natural M10
+follow-up — it needs new model
 code, so it was kept out of this single-knob milestone.
 
 ---

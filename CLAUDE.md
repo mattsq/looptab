@@ -267,7 +267,7 @@ behaviour-changing conclusions, and the next pointer. Append detail to LOG.md, n
   errors would give; >0 = errors clustered) with a `mean_wrong_per_row` companion — all in
   `src/looptab/eval/metrics.py`; paired Δ with variance + sign test is `delta_report`.
 - **Tests:** `tests/` — generator determinism, model shapes/param-ratios, runner
-  determinism/independence, coherence-metric math. Run `uv run --extra dev pytest -q` (97 tests);
+  determinism/independence, coherence-metric math. Run `uv run --extra dev pytest -q` (98 tests);
   lint `uv run ruff check`.
 
 ### (b) Behaviour-changing conclusions to date (read before re-running anything)
@@ -387,15 +387,18 @@ behaviour-changing conclusions, and the next pointer. Append detail to LOG.md, n
   supervision, EM) is a w≤24 REGIME** (holds w=12/16/24, broader than M8c's single w=24 snapshot) and
   **vanishes by w≥32**, where the wide shallow `ff_matched` overtakes the loop on token-acc (Δ(nods−ff)
   acc +0.038→+0.003(ns)→−0.021→−0.031, crossover ~w=24; EM is the loop's *durable* edge, lasting one
-  width-step longer). (3) **Mechanism confirmed:** at **matched token-acc** (loop vs ff @ w=24, Δacc ns)
-  the loop wins EM +0.133 (10/0, p=.002) with **+0.107 higher coherence_excess** (10/0, p=.002) — at
-  equal per-cell accuracy, recurrence/tying makes coherent whole rows the MLP can't. The edge is
-  **width-localized** (coh_excess peaks at w=24, dissolves by w=48 as EM→0). **Caveat:** coherence_excess
-  is token-acc-confounded across arms (lower-acc arm → lower independence baseline → more "room"), so
-  cross-arm coh Δs are only clean where token-acc matches (loop-vs-ff @ w=24 is the gold anchor). Loop's
-  sharpened value: **tied recurrence buys whole-row coherence on multi-output fixed-point targets — width-
-  robust over a fair untied stack, and over a shallow MLP at matched token-acc for w≤24 — NOT a token-acc
-  edge at large w, NOT adaptive compute, NOT depth-extrapolation.**
+  width-step longer). *(rule 78 only — the w≤24 boundary is not swept over rule or model size.)* (3)
+  **Mechanism — the clean statistic is EM-at-matched-token-acc:** loop vs ff @ w=24 (token-acc tied,
+  Δacc +0.003 ns) wins EM +0.133 (10/0, p=.002) — at equal per-cell accuracy, recurrence/tying makes
+  coherent whole rows the MLP can't. **[Adversarial-review correction]** the `coherence_excess` metric
+  does NOT add an independent confirmation: at matched acc Δ(coh) ≡ Δ(EM) (same fact twice), and its
+  *cross-arm* Δ is confounded by token-acc *level* AND per-row *dispersion* (Jensen: EM =
+  mean_row(row_acc**w) ≥ (mean row_acc)**w inflates it without clustering). So `coherence_excess` is a
+  **per-arm descriptor only** (its w≈24 "peak" is mechanical — EM saturates at small w, collapses at
+  large w); the cross-arm mechanism claim rests on EM-at-matched-acc, not a coh Δ. Loop's sharpened
+  value: **tied recurrence buys whole-row coherence on multi-output fixed-point targets — width-robust
+  over a fair untied stack, and over a shallow MLP at matched token-acc for w≤24 (rule 78) — NOT a
+  token-acc edge at large w, NOT adaptive compute, NOT depth-extrapolation.**
 - Each leg still rests on few configs: Task A now multi-`d`/multi-`k` (M4) and the d≥40 wall has
   been swept over `n_train` (M5 — it is sample-bound and lifts to all-solve, except d=80,k=5 which
   is capacity-bound); Task B depth swept (M3a) but unlearnable past T=4 one-shot; M3b on one rule

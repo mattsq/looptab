@@ -121,6 +121,33 @@ def test_coherence_excess_absent_for_single_output():
     assert out["exact_match"] == out["accuracy"]
 
 
+def test_coherence_excess_dispersion_confound_m9():
+    """M9 review guard: coherence_excess's CROSS-ARM Δ is confounded by per-row difficulty
+    dispersion, NOT just by token-acc level. Two arms at IDENTICAL mean token-acc (0.875, w=8)
+    — one with homogeneous rows (1 wrong/row), one dispersed (half rows perfect, half with 2
+    wrong/row) — give very different coherence_excess, purely from the Jensen gap (EM =
+    mean_row(row_acc**w) ≥ (mean row_acc)**w). Because the token_acc**w baseline is identical at
+    matched acc, Δ(coherence_excess) == Δ(exact_match): the metric adds NOTHING beyond EM here.
+    This documents why the clean cross-arm statistic is EM-at-matched-token-acc, not a coh Δ."""
+    targets = [[0] * 8 for _ in range(4)]
+    homogeneous = _FixedPredModel([[1] + [0] * 7 for _ in range(4)])  # every row 1 wrong
+    dispersed = _FixedPredModel(  # 2 perfect rows + 2 rows with 2 wrong
+        [[0] * 8, [0] * 8, [1, 1] + [0] * 6, [1, 1] + [0] * 6]
+    )
+    out_h = evaluate(homogeneous, _one_batch_loader(targets), want_exact_match=True)
+    out_d = evaluate(dispersed, _one_batch_loader(targets), want_exact_match=True)
+
+    # (a) matched mean token-acc
+    assert out_h["accuracy"] == pytest.approx(0.875)
+    assert out_d["accuracy"] == pytest.approx(0.875)
+    # (b) at matched acc, Δ(coherence_excess) is exactly Δ(exact_match) (baseline cancels)
+    assert (out_d["coherence_excess"] - out_h["coherence_excess"]) == pytest.approx(
+        out_d["exact_match"] - out_h["exact_match"]
+    )
+    # (c) dispersed arm shows far higher coherence_excess despite no clustering — the confound
+    assert out_d["coherence_excess"] - out_h["coherence_excess"] == pytest.approx(0.5)
+
+
 def test_run_point_deterministic():
     """C3/§5.3: same seed => identical metrics, bit for bit."""
     cfg = _cfg()
