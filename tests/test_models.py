@@ -88,6 +88,41 @@ def test_trm_step_override():
     assert len(all_logits) == 5
 
 
+def test_trm_return_state_composition_bit_identical():
+    """M7: unrolling n+m steps == unrolling n (return_state) then resuming m. Bit-identical.
+
+    This is the invariant the progressive-loss detach relies on (Deep Thinking, M7).
+    """
+    for out_features in (None, 7):
+        m = TRM(
+            in_features=12,
+            num_classes=2,
+            hidden_dim=32,
+            latent_dim=32,
+            n_steps=4,
+            deep_supervision=False,
+            out_features=out_features,
+        )
+        m.eval()
+        X = torch.randn(8, 12)
+        with torch.no_grad():
+            full, _ = m(X, n_steps=7)
+            part, _, state = m(X, n_steps=3, return_state=True)
+            resumed, _ = m(X, n_steps=4, init_state=state)
+        torch.testing.assert_close(resumed, full, rtol=0, atol=0)
+
+
+def test_trm_init_state_none_unchanged():
+    """A fresh forward (init_state=None) is identical with and without return_state."""
+    m = TRM(in_features=10, num_classes=2, hidden_dim=16, latent_dim=16, n_steps=4)
+    m.eval()
+    X = torch.randn(6, 10)
+    with torch.no_grad():
+        a, _ = m(X, n_steps=4)
+        b, _, _ = m(X, n_steps=4, return_state=True)
+    torch.testing.assert_close(a, b, rtol=0, atol=0)
+
+
 def test_ff_multi_output_shape():
     m = FFMatched(
         in_features=16,

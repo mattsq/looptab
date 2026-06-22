@@ -651,6 +651,295 @@ the highest-value live question** (do NOT build Task C on this evidence).
 
 ---
 
+## M6a — DONE. The both-axes probe (multi_parity). §9 gate is empirically UNSATISFIABLE by the generalist; loop is depth-positive, NOT a robust generalist (the "never-worst" property is falsified).
+
+The §11(c)(i) lever, run as an experiment rather than settled by fiat. After M0–M5 the §9
+gate ("loop beats BOTH controls on A AND B") was unmet for a *structural* reason: each
+canonical task needs exactly ONE axis (A→depth, B→width), so the single-axis control owning
+that axis always TIES the loop. M6a builds the one task that needs **both depth and width at a
+fixed tiny budget** — exactly where a generalist *should* beat both specialists — and asks
+empirically whether a loop-beats-both cell exists at all.
+
+**Task = `multi_parity`** (new generator, determinism-tested): predict `w` **independent**
+k-parities in parallel from the same `d` bits. Depth axis = each output is order-`k` (shallow
+`ff_matched` should fail at k≥4, per M4); width axis = `w` parallel computations (narrow
+`untied_matched` blocks should bottleneck). NOT Task C — the `w` parities are independent, no
+sub-problem feeds another; `w=1` reduces exactly to Task A (sanity anchor, asserted in tests).
+Grid **k∈{3,4} × w∈{1,4,8}** at d=20, 5 arms (4 required + `untied_stack` ceiling), 10 seeds,
+hyperparameters inherited verbatim from `m4_parity_grid.yaml` (no per-cell tuning, §8). New
+code: `make_multi_parity` (+6 tests), one `make_splits` branch, the `TaskConfig.name` literal,
+one config. 80 tests, ruff clean. Tracked:
+`results/m6a_multi_parity_grid_20260622T080206_{curve,deltas,params}.csv` (+ JSON).
+**Budget parity CLEAN** — all matched arms within ±0.7% in every cell (no width-quantization
+breach; the answer rides on no confound).
+
+**Per-arm test accuracy (token-acc, 10 seeds; us = untied_stack ceiling) and the two headline Δs:**
+
+| k | w | baseline | loop (nods) | ff_matched | untied_matched | us (ceiling) | Δ(loop−ff) | Δ(loop−um) |
+|---|---|---|---|---|---|---|---|---|
+| 3 | 1 | .512 | 1.000 | 1.000 | 1.000 | 1.000 | 0.000 (tie) | 0.000 (tie) |
+| 3 | 4 | .506 | 0.852 | **1.000** | 0.901 | 0.950 | **−0.148** (0/9, p=.004) | −0.049 (4/5, ns) |
+| 3 | 8 | .503 | 0.793 | **0.982** | 0.733 | 0.843 | **−0.189** (0/10, p=.002) | +0.059 (7/3, ns) |
+| 4 | 1 | .513 | 1.000 | 0.772 | 1.000 | 1.000 | **+0.228** (6/0, p=.031) | 0.000 (tie) |
+| 4 | 4 | .508 | 0.827 | 0.557 | 0.810 | 0.931 | **+0.269** (10/0, p=.002) | +0.016 (7/3, ns) |
+| 4 | 8 | .504 | 0.715 | 0.533 | 0.680 | 0.775 | **+0.182** (10/0, p=.002) | +0.035 (7/3, ns) |
+
+**Reading (per §2/§8 — the pre-registered honesty clause fires; outcome (b)).**
+
+1. **ZERO loop-beats-both cells.** The pre-registered condition (Δ(loop−ff) > 0 AND Δ(loop−um) > 0,
+   *both* sign-test p<.05) is met in **no cell**. Where Δ(loop−ff) is strongly significant (k=4,
+   all w: +0.18…+0.27, 10/0, p=.002), Δ(loop−um) is +0.016…+0.035, **ns** (7/3, p=.34) — the loop
+   ties the deep control even with the width axis maximally stressed (w=8). Stressing both axes at
+   once did **not** create the regime where tying pays; the two deep arms (loop, um) degrade
+   *together* as w grows.
+2. **`multi_parity` UNIFIES Task A and Task B into one task; k is the axis dial.** k=4
+   (depth-demanding) reproduces the **Task A** pattern — loop beats shallow ff (depth), ties deep
+   um (tying neutral) — and now **extends it to multi-output** (w=4, w=8). k=3 (easy parity, depth
+   *not* needed) reproduces the **Task B** pattern — the wide shallow `ff_matched` is the **best**
+   arm and the loop is **significantly beaten by it** (−0.148/−0.189, p≤.004). So at every tested
+   operating point one single-axis specialist matches-or-beats the loop on the axis that matters
+   and the other specialist is irrelevant. **In no tested cell does the generalist beat both**, and
+   the k-dial argument *explains why*. **Caveat (adversarial review, do not overclaim):** this is
+   "unsatisfied in every tested cell," NOT a proof of impossibility. In the k=4 cells the loop does
+   edge `untied_matched` in the *predicted* direction (+0.016 w=4, +0.035 w=8) but
+   **non-significantly** (7/3 seeds, p=.34) — under-powered, not a demonstrated tie-in-principle;
+   and the grid is coarse (`w` 1→4→8, one d, one budget, one model size). Higher seeds on the
+   k=4/w≥4 cells (or finer/larger `w`) would settle whether the gate is truly unsatisfiable or
+   merely unmet here. The defensible reading: the gate is **unsatisfied in every tested cell with a
+   structural reason (the k-dial)** — strengthening, not proving, the M2-confirm suspicion that the
+   wording should change.
+3. **The "tying buys width" half of the M2 synthesis does NOT replicate on the parity family.**
+   Δ(loop−um) is ns in every multi-output cell — adding width pressure to parity does **not** make
+   the fair untied stack fail relative to the loop, unlike CA (M2-confirm, where um was worst in
+   6/6). So the CA tying advantage was **CA-specific**, not a general "tied recurrence buys width";
+   on parity tying is neutral whether w=1 (M4) or w=8 (M6a). Both halves of the M2 synthesis are
+   now retracted on parity (depth half already softened in M3a; width half here).
+4. **The loop's last defensible property — "never the worst param-matched arm" (M2-confirm/M4) —
+   is FALSIFIED.** At k=3,w∈{4,8} the loop is *significantly* beaten by `ff_matched` (a mandatory
+   param-matched control), and at k=3,w=4 it is nominally the worst of the three param-matched arms
+   (0.852 < um 0.901 < ff 1.000). Once depth is unneeded and width dominates, the loop is a
+   middling generalist, not Pareto-safe. The honest residual claim is narrower than "robust":
+   **the loop owns the *depth* axis** (beats shallow ff when interaction order is high; replicated
+   M0/M2/M4 and extended to multi-output here) and is **tying-neutral** — it is depth-positive, not
+   a robust all-rounder.
+5. **DS inert, ceiling behaves.** |Δ(trm_ds − trm_nods)| ≤ 0.036, never significant (consistent
+   M0–M5). The 4× `untied_stack` ceiling is the best arm in the hard k=4,w≥4 cells (capacity helps,
+   as expected) — a labelled reference, not a control.
+
+**Net (§9).** The user-chosen "resolve empirically first" path is resolved as far as 6 cells can:
+a task built to need both axes yields **zero loop-beats-both cells in every tested cell**, because
+its difficulty collapses onto a single dial (k) that hands the relevant specialist a tie (k=4) or a
+win (k=3). This is **strong (not conclusive) evidence** the literal §9 gate is unsatisfiable by a
+single-loop generalist judged against single-axis specialists — enough to motivate **relaxing the
+wording**, with the under-powered k=4 width cells (finding above) the place to push if a stricter
+proof is wanted. M6a additionally shows the natural fallback ("loop never significantly worse across
+both tasks") is **definitively unmet** (k=3 wide, p≤.004 — this one IS conclusive). The earned,
+defensible statement of the loop's value is: **depth-positive on high-order parity, tying-neutral,
+no depth-extrapolation (M1/M3b/M7), not a robust generalist.** Do **not** build Task C on this.
+
+**Caveats / open gaps.** (i) Token-acc is the meaningful metric at w=8 (whole-row EM is low for
+all arms, ~0.05, over 8 outputs). (ii) One architecture size; the regime is below the
+overfit/sample walls of M4/M5 (no all-arms-at-chance cell here, so every cell carries a verdict).
+(iii) The remaining §11(c) levers (broaden M3b across rules/widths; a PonderNet/ACT halting
+objective vs the extrapolation null) are untouched and now lower-value, since M6a settles the
+top lever (i) negatively.
+
+---
+
+## M7 — DONE. Progressive-loss training (Deep Thinking) vs the depth-extrapolation null (Task B). New mechanism, clean NEGATIVE — and a principled reason: CA is non-convergent, so path-independence is the wrong bias.
+
+First **new-mechanism** milestone (post-M6a, after a literature search added §12's depth-extrapolation
+references). The target is the project's most stubborn null (M1/M3b): over-unrolling R′>R decays to
+baseline and OOD depth T_test>T_train collapses for every arm — "the loop never settles a stable step
+operator." The literature names this **"overthinking"** and a targeted fix: **Deep Thinking nets**
+(Bansal et al. 2022, arXiv 2202.05826) = **recall** (re-inject the input every step — TRM already does
+via `cat[X,z,a]`) + **progressive loss** (per batch run `(T−k)` steps with gradients **detached**, then
+`k` steps **with** gradient, supervising only the grad steps; forces an *iteration-count-independent /
+path-independent* operator, the property Anil et al. 2022, arXiv 2211.09961 tie to upward generalization).
+
+New substrate (additive, bit-identical when unused): `TRM.forward(init_state=, return_state=)` so a
+rollout can be detached and resumed (composition test: `n+m` steps == `n` then resume `m`, atol=0);
+`train_progressive` with two alignments — `progressive_final` (k grad steps ↔ s_T) and
+`progressive_step` (k grad steps ↔ s_{T−k+1..T}, combining M3b step-alignment with the DT detach);
+`ModelConfig.ds_mode` + `progressive_alpha` (mix of the progressive and standard full-T terms, 0.5).
+Task config = M1/M3b **exactly** (rule 30, w=9, distractors=4, curriculum T~{1..8}), so the
+extrapolation curves are directly comparable to M3b's collapse. Six arms (4 loop variants isolating
+each knob + ff/um grounding), 10 seeds, 100 epochs. 87 tests, ruff clean, budget within ±1.6%. Tracked:
+`results/m7_progressive_extrapolation_20260622T084111_{curve,deltas,extrapolation,extrapolation_deltas,params}.csv`.
+
+**Extrapolation diagonal (R′=T) test accuracy, 10 seeds (baseline ≈ .505):**
+
+| T = R′ | baseline | trm_prog_step | trm_prog_final | trm_stepDS | trm_nods | ff | um |
+|---|---|---|---|---|---|---|---|
+| 4  | .505 | 0.837 | 0.686 | 0.840 | 0.675 | 0.517 | 0.503 |
+| 8  | .508 | 0.578 | 0.627 | 0.586 | 0.645 | 0.543 | 0.592 |
+| 12 | .508 | 0.511 | 0.522 | 0.509 | 0.524 | 0.520 | 0.524 |
+| 16 | .504 | 0.501 | 0.510 | 0.499 | 0.512 | 0.530 | 0.514 |
+
+(The `trm_stepDS` arm reproduces M3b's step-alignment effect **within noise** — it is an independent
+re-run with a different arm roster, so the RNG stream differs; numbers are close but not bit-identical
+to M3b's, and should not be read as such.)
+
+**Key paired diagonal Δs (sign-test p, 10 seeds):** Δ(prog_final − nods) = **+0.011 (7/3, p=.34, ns)** at
+T=4 and **−0.018 (2/8, p=.11, ns)** at T=8; Δ(prog_step − stepDS) = **−0.003 (4/6, p=.75, ns)** at T=4.
+At OOD T=12/16: Δ(prog_step − nods) = −0.013 / −0.011 (ns), Δ(prog_final − nods) = −0.002 / −0.002 (ns).
+
+**Reading (per §8 — the honesty clause; the mechanism is INERT here).**
+
+1. **The progressive detach adds NOTHING — and this holds IN-DISTRIBUTION, which needs no extrapolation
+   or convergence argument to interpret.** Δ(prog_final − nods) is ns at T=4 *and* T=8; Δ(prog_step −
+   stepDS) is ns at T=4. The progressive arms **collapse onto their non-detach counterparts**
+   (prog_final ≈ nods, prog_step ≈ stepDS) — operator fidelity is unchanged (prog_step T=4 0.837 ≈
+   stepDS 0.840). The lone significant positive, Δ(prog_step − nods)=+0.162 at T=4 (10/0, p=.002), is
+   **purely the M3b step-alignment effect**, reproduced within noise — not the new mechanism. *This is
+   the load-bearing negative: the detach is inert wherever we can measure it, full stop.*
+2. **Progressive loss does NOT crack the OOD collapse either — the M1/M3b null STANDS.** At T=12 and
+   T=16 *every* arm, both progressive variants included, sits at baseline (~0.50–0.52); no Δ significant.
+3. **Over-unrolling still decays for the progressive arms too** (T=4 task at R′=8: prog 0.49 = nods 0.49).
+   Progressive loss did **not** instill a stable fixed point in this setting.
+4. **A HYPOTHESIS for *why* (NOT tested in this milestone).** Deep Thinking's progressive loss is
+   designed to instill **path-independence** — converge to a fixed *attractor* and stay there under
+   over-unrolling. Task B's CA is a **non-convergent** map: `s_T` is a *moving* target (`s_{T+1} ≠ s_T`,
+   no attractor), so over-unrolling *should* move away from `s_T` and a steady-state bias may be
+   **mismatched to the task** (the mechanism's home turf is mazes/Sudoku, which have a stable answer).
+   **This is a plausible rationalization, not a demonstrated mechanism** — M7 has no convergent-target
+   control to contrast against, so it cannot distinguish "wrong bias for this task" from "mechanism
+   inert at this scale/tuning." It is offered as the lead hypothesis to test next (see Net), and it is
+   *consistent with* but not proven by the over-unroll decay in point 3. The simpler, sufficient
+   statement of the result is point 1: **the detach is inert here.**
+
+**Net (§9 unmoved).** A clean negative for a genuinely new mechanism: the progressive detach is inert
+in-distribution and fails to crack the OOD collapse. The leading (untested) hypothesis for *why* — the
+CA target is non-convergent, so path-independence is the wrong bias — yields a concrete next lever: to
+fairly test a path-independence mechanism, build a **fixed-point-target** task (iterate-to-convergence:
+connectivity / shortest-path / a *converging* CA) where over-unrolling SHOULD hold, then re-apply
+`train_progressive` and compare. Until that control exists the non-convergence claim is a hypothesis,
+not a finding. The loop's verdict is unchanged: depth-positive on parity (M4), tying-neutral, **no
+depth-extrapolation**, not a robust generalist (M6a).
+
+**M7b — α=1 (pure progressive, no anchor term) CONFIRMS the null (adversarial-review follow-up).**
+Re-ran M7 with `progressive_alpha: 1.0` on both progressive arms (baselines bit-identical — nods
+0.645, stepDS 0.586, um 0.592 reproduce exactly, re-anchoring the comparison). Config
+`m7b_progressive_alpha1.yaml`; tracked
+`results/m7b_progressive_alpha1_20260622T090114_*`. **α=1 is strictly WORSE, not better:** diagonal
+prog_step T=4 0.759 (vs 0.837 at α=0.5), prog_final T=8 0.594 (vs 0.627); removing the full-T anchor
+*hurt*. In-distribution the pure-progressive detach now **significantly underperforms** its non-detach
+counterpart — Δ(prog_step − stepDS) = **−0.082 (0/10, p=.002)** at T=4 (was ns at α=0.5) and
+Δ(prog_final − nods) = **−0.051 (0/10, p=.002)** at T=8. **OOD still collapses to baseline** (T=12/16:
+all Δ ns, arms at 0.50–0.52). So the one untested knob the review flagged does not rescue
+extrapolation — it makes the mechanism actively harmful in-distribution while leaving the OOD null
+intact. The "you didn't tune α" objection is **closed**: both α∈{0.5, 1.0} give an OOD null, and the
+more-faithful pure-progressive variant is worse, not better.
+
+**Remaining caveats.** (i) Still one rule (30) / one width (9) / 100 epochs; α now swept {0.5,1.0}.
+(ii) **Unequal compute, not disclosed in v1:** the progressive arms run ~2× the gradient
+forwards per batch (a `k`-step progressive forward *and* a full-`T` anchor forward) vs the single
+`T`-step forward of `nods`/`stepDS`. This cuts *toward* the null (progressive had more signal and still
+tied), so it does not threaten the conclusion, but the comparison is not compute-matched. (iii) Budget:
+`untied_matched` sits at **+1.59%** over the loop's budget (params CSV) — over budget, which (as in
+M3a/M4) handicaps the control, not the loop. (iv) `progressive_step` needs `deep_supervision: true`
+(per-step readouts); `progressive_final` does not.
+
+---
+
+## M8 / M8b — DONE. Variable-compute FIXED-POINT task (converging CA). Adaptive compute FAILS (falsifies the M7 hypothesis); but the FIRST (replicated) loop-beats-both surfaces — on whole-row exact-match.
+
+The adaptive-computation angle. Every prior task has a **fixed** required depth, so a fixed-depth
+`untied_matched` always matches the loop and tying is neutral (M2…M6a). M8 builds the one regime never
+tested: required compute **varies per instance and can exceed any fixed depth** — an
+iterate-to-convergence / fixed-point task, where only the loop can spend variable compute (unroll more
+at test). Two payoffs: (a) the first real shot at the loop beating BOTH fixed-compute controls via
+adaptive computation; (b) a direct test of the M7 hypothesis (on a CONVERGENT target, over-unrolling
+should HOLD and progressive loss should fire).
+
+New task `converge` (generator `make_converge`, determinism + fixed-point + trajectory tests): map s0
+to the CA's **fixed point** s_inf (iterate a *converging* rule until `ca_step(s)==s`). Verified
+non-degenerate (rule 92, w=32: majority baseline 0.562; ~99% of rows need >1 step; convergence depth
+varies per instance — ~45% need >4 steps, ~13% >6, max ~19). `make_trajectory_dataset` now dispatches
+to `make_converge`; one `make_splits` branch; `TaskConfig.name` literal extended. 92 tests, ruff clean.
+Tracked: `results/m8_converge_adaptive_20260622T102356_*` (rule 92, w=32, the R′ over-unroll sweep),
+`results/m8b_converge_grid_20260622T120355_*` (replication grid rule∈{13,78,92}×w∈{24,32}), and
+`results/m8c_converge_fair_*` (the FAIR-supervision re-analysis that isolates tying from the step-aligned
+DS confound flagged in adversarial review — adds `untied_stepDS` and the clean `nods−untied` delta).
+94 tests after the M8c hardening (assert the fixed point; parametrize the test over rules 13/78/92).
+
+**M8 — over-unrolling DECAYS even on a convergent target (the adaptive-compute headline FAILS):**
+
+| R′ (test unroll) | trm_stepDS | trm_prog_step | trm_nods | ff_matched | untied_matched |
+|---|---|---|---|---|---|
+| 6 (trained) | 0.922 | 0.919 | 0.896 | 0.920 (flat) | 0.834 (flat) |
+| 8  | 0.909 | 0.905 | 0.884 | 0.920 | 0.834 |
+| 12 | 0.885 | 0.878 | 0.862 | 0.920 | 0.834 |
+| 16 | 0.871 | 0.860 | 0.847 | 0.920 | 0.834 |
+| 24 | 0.857 | 0.842 | 0.828 | 0.920 | 0.834 |
+
+**M8b — the trained-depth EXACT-MATCH picture, replicated across the grid (10 seeds; maj baseline 0.562):**
+
+| cell | stepDS EM | ff EM | untied EM | Δ(stepDS−ff) EM | Δ(stepDS−untied) EM | Δ(stepDS−ff) acc |
+|---|---|---|---|---|---|---|
+| rule13,w24 | 0.403 | 0.307 | 0.100 | +0.096 (8/2, p=.11 ns) | +0.303 (10/0, p=.002) | +0.003 ns |
+| rule13,w32 | 0.102 | 0.101 | 0.038 | +0.001 (ns) | +0.064 (10/0, p=.002) | −0.007 (1/9, p=.02 *worse*) |
+| rule78,w24 | 0.427 | 0.311 | 0.126 | **+0.116 (10/0, p=.002)** | +0.301 (10/0, p=.002) | +0.005 (10/0, p=.002) |
+| rule78,w32 | 0.169 | 0.121 | 0.037 | **+0.048 (9/1, p=.021)** | +0.132 (10/0, p=.002) | +0.002 (ns) |
+| rule92,w24 | 0.418 | 0.331 | 0.115 | **+0.087 (9/1, p=.021)** | +0.303 (10/0, p=.002) | +0.003 (ns) |
+| rule92,w32 | 0.162 | 0.112 | 0.037 | **+0.050 (10/0, p=.002)** | +0.125 (10/0, p=.002) | +0.002 (ns) |
+
+**Reading (per §2/§8).**
+
+1. **Adaptive computation FAILS — and it FALSIFIES the M7 non-convergence hypothesis.** Over-unrolling
+   the loop **decays** (stepDS 0.922→0.857 as R′ 6→24) **even though the target is a genuine fixed
+   point**. The loop does not hold the fixed point and cannot turn extra test-time steps into solving
+   the deep tail. Critically, M7 had *hypothesized* the rule-30 over-unroll decay was caused by CA
+   being non-convergent — M8 shows the decay happens on a CONVERGENT target too, so it is **intrinsic
+   to how the loop bakes in its trained depth, NOT a property of task convergence.** The M7
+   rationalization is dead (correctly, it was labelled untested). Adaptive compute is not a free lunch
+   the loop can exploit here.
+2. **A robust, properly-isolated TYING-POSITIVE: the weight-tied loop beats a FAIR untied stack on
+   whole-row coherence, 6/6 cells, at EQUAL supervision (M8c).** [M8b first reported this through
+   `trm_stepDS` vs `untied_matched` — a §8 confound, since stepDS got step-aligned DS (6 targets/batch)
+   and untied got only final loss; flagged by adversarial review.] **M8c** (`m8c_converge_fair.yaml`)
+   computes the clean isolation: `Δ(trm_nods − untied_matched)` (both final-loss) AND
+   `Δ(trm_stepDS − untied_stepDS)` (both step-aligned — `untied_stepDS` = the fair untied stack *given*
+   the same step-aligned DS). Both are positive **10/0, p=.002 in ALL 6 cells**: nods−untied EM +0.05…
+   **+0.37** (token-acc +0.06…+0.09), stepDS−untied_stepDS EM +0.07…+0.30. So tying buys whole-row
+   coherence at equal supervision, robustly — the cleanest tying-positive in the project (parity was
+   tying-neutral, M4/M6a). It is **tying, not depth**: `untied_matched` is *deep* (6 blocks) yet WORST
+   on EM everywhere — depth alone doesn't buy coherence, the weight-tied reuse does.
+3. **The loop beats BOTH controls only in 3/6 cells (all w=24), and only on EM — the w=32 "ff win" was
+   SUPERVISION, not architecture.** The clean loop-beats-both is `trm_nods` (equal supervision) >
+   *both* ff and untied: it holds at **w=24 for all 3 rules** (nods−ff EM +0.11…+0.17 p≤.021;
+   nods−untied EM +0.32…+0.37 p=.002) but **fails at w=32**, where nods−ff is ns/negative on EM and
+   *significantly negative on token-acc* (−0.015…−0.024, p=.002 — the plain loop LOSES to wide shallow
+   ff at w=32). M8b's "4/6 via stepDS" over-counted: at w=32 only the step-DS arm clears ff, i.e. that
+   half was carried by richer supervision the controls weren't given, not by the architecture. Honest
+   count: **clean loop-beats-both = 3/6 (w=24); robust tying-over-untied = 6/6.**
+4. **Progressive loss still adds nothing** (Δ(prog_step − stepDS) ns in all 6 cells, M8b) — consistent
+   with M7/M7b: the progressive detach is inert wherever measured.
+
+**Net (corrected after M8c).** A layered result. The headline angle (adaptive computation) is a **clean
+negative** that **kills the M7 hypothesis** (over-unroll decay is intrinsic, not convergence-related).
+But pursuing it surfaced a genuine, properly-isolated **tying-positive**: the weight-tied loop beats a
+*fair untied stack* on whole-row coherence in **all 6 cells at equal supervision** (the cleanest such
+result in the project; parity was tying-neutral). The stronger "loop beats **both** controls" claim is
+real but **narrower than M8b stated** once the supervision confound is removed: clean (plain loop, equal
+supervision) it holds in **3/6 cells, all w=24, on exact-match only**. So there *is* a regime
+(fixed-point multi-output, whole-row metric, w=24) where the loop beats both param-matched controls — a
+concrete counterexample to "the loop never beats both anywhere" — but it does not generalize to w=32
+(where the plain loop loses to wide shallow ff) and is EM-only. It does not satisfy the literal §9 gate
+(names Tasks A/B).
+
+**Caveats (adversarial-proofed; S1/S2 resolved by M8c).** (i) **EM-only**; on token-acc the loop ties
+ff at w=24 and *loses* to ff at w=32 — not a both-metric dominance. (ii) **Width-dependent**: clean
+loop-beats-both is w=24 only (3/6); at w=32 the ff-axis win needs step-aligned DS the controls weren't
+given. (iii) The robust claim is **tying > fair untied (6/6)**, isolated at equal supervision two ways
+(M8c) — *that* is the defensible architectural finding; "beats both" is the narrower corollary.
+(iv) **`untied_matched` is +2.5%/+3.1% OVER budget** (width-quantization, flagged `within_tol=False`) —
+but it loses, so over-budget is conservative; the loop>ff comparisons are budget-clean (ff ≤0.2%).
+(v) One model size, one operator family (majority-type converging ECAs), n_train=4000. (vi) The
+mechanism is whole-row coherence from recurrence/tying, **not** adaptive computation — do not conflate.
+
+---
+
 ## Infra — Training/eval performance (no scientific change). Bit-identical, ~2.5× faster.
 
 Not a milestone — a perf pass on the model/training/eval path. **All run outputs are byte-for-byte

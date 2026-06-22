@@ -144,3 +144,98 @@ def train_curriculum(
             print(f"  epoch {epoch:3d}  loss={avg:.4f}")
 
     return losses
+
+
+def train_progressive(
+    model: nn.Module,
+    traj_loader: DataLoader,
+    *,
+    T_min: int,
+    T_max: int,
+    ds_mode: str = "progressive_final",
+    alpha: float = 0.5,
+    epochs: int = 100,
+    lr: float = 1e-3,
+    weight_decay: float = 1e-4,
+    device: str = "cpu",
+    seed: int = 0,
+    verbose: bool = False,
+) -> list[float]:
+    """Deep Thinking progressive-loss training (M7; Bansal et al. 2022, arXiv 2202.05826).
+
+    The depth-extrapolation lever. Each batch samples a depth ``T ~ Uniform{T_min..T_max}``
+    (the same curriculum as ``train_curriculum``) and a gradient budget ``k ~ Uniform{1..T}``.
+    It then runs the recurrent loop for ``(T−k)`` steps with **gradients detached**, and ``k``
+    further steps **with** gradient resuming from that detached state — supervising only the
+    grad steps. This penalizes iteration-count-specific behaviour (the operator must make
+    progress from an *arbitrary* intermediate state, not only from ``s_0``), pushing the loop
+    toward a repeatable step operator / path-independent steady state. "Recall" (re-injecting
+    the input every step) is already built into ``TRM`` (``cat[X, z, a]``).
+
+    Two target alignments:
+      - ``"progressive_final"``: the k grad steps are supervised against the final state ``s_T``.
+      - ``"progressive_step"``: step-aligned — the k grad steps are supervised against the CA
+        states ``s_{T−k+1..T}`` (combines M3b's step-alignment with the progressive detach).
+
+    Loss = ``alpha·L_progressive + (1−alpha)·L_full``, where ``L_full`` is the standard full-T
+    forward (with gradient) supervised the same way — Deep Thinking keeps both so the model
+    stays anchored. Depth/k sampling uses a dedicated seeded generator so the schedule is
+    identical across arms and reproducible.
+    """
+    if ds_mode not in ("progressive_final", "progressive_step"):
+        raise ValueError(f"train_progressive expects a progressive ds_mode, got {ds_mode!r}")
+    model = model.to(device)
+    opt = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=weight_decay)
+    gen = torch.Generator()
+    gen.manual_seed(seed)
+    losses = []
+
+    for epoch in range(epochs):
+        model.train()
+        epoch_loss = 0.0
+        n_batches = 0
+        for X, traj in traj_loader:
+            X = X.to(device)
+            traj = traj.to(device)  # (B, T_max, w) int64
+            T = int(torch.randint(T_min, T_max + 1, (1,), generator=gen).item())
+            k = int(torch.randint(1, T + 1, (1,), generator=gen).item())  # grad steps, 1..T
+
+            opt.zero_grad()
+
+            # (T−k) detached warmup steps, then k gradient steps resuming from that state.
+            init = None
+            if T - k > 0:
+                with torch.no_grad():
+                    _, _, state = model(X, n_steps=T - k, return_state=True)
+                init = (state[0].detach(), state[1].detach())
+            out_prog, logits_prog, _ = model(X, n_steps=k, init_state=init, return_state=True)
+
+            # Standard full-T term (with gradient), supervised the same way (the anchor term).
+            out_full, logits_full, _ = model(X, n_steps=T, return_state=True)
+
+            if ds_mode == "progressive_step":
+                if logits_prog is None or logits_full is None:
+                    raise ValueError(
+                        "progressive_step DS requires a model emitting per-step readouts"
+                    )
+                # The k grad steps map to CA depths (T−k+1 .. T) → traj indices (T−k .. T−1).
+                loss_prog = sum(
+                    _loss_fn(logits_prog[i], traj[:, (T - k) + i, :]) for i in range(k)
+                ) / k
+                loss_full = sum(_loss_fn(logits_full[i], traj[:, i, :]) for i in range(T)) / T
+            else:  # progressive_final
+                s_T = traj[:, T - 1, :]
+                loss_prog = _loss_fn(out_prog, s_T)
+                loss_full = _loss_fn(out_full, s_T)
+
+            loss = alpha * loss_prog + (1.0 - alpha) * loss_full
+            loss.backward()
+            opt.step()
+            epoch_loss += loss.item()
+            n_batches += 1
+        avg = epoch_loss / max(n_batches, 1)
+        losses.append(avg)
+        if verbose and (epoch % 10 == 0 or epoch == epochs - 1):
+            print(f"  epoch {epoch:3d}  loss={avg:.4f}")
+
+    return losses

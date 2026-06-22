@@ -1,8 +1,16 @@
 """Determinism tests for every task generator. Same seeds => identical bytes."""
 
 import numpy as np
+import pytest
 
-from looptab.data.generators import ca_step, make_iterated, make_linear, make_parity
+from looptab.data.generators import (
+    ca_step,
+    make_converge,
+    make_iterated,
+    make_linear,
+    make_multi_parity,
+    make_parity,
+)
 
 
 def test_linear_determinism():
@@ -60,6 +68,100 @@ def test_parity_noise():
     X, y, _ = make_parity(n=100, d=8, k=2, task_seed=0, sample_seed=0, noise=0.5)
     assert y.dtype == np.int64
     assert X.shape == (100, 8)
+
+
+def test_multi_parity_determinism():
+    a = make_multi_parity(n=200, d=20, k=4, w=4, task_seed=5, sample_seed=9)
+    b = make_multi_parity(n=200, d=20, k=4, w=4, task_seed=5, sample_seed=9)
+    np.testing.assert_array_equal(a[0], b[0])
+    np.testing.assert_array_equal(a[1], b[1])
+    np.testing.assert_array_equal(a[2], b[2])
+
+
+def test_multi_parity_shapes():
+    X, y, informative = make_multi_parity(n=50, d=20, k=3, w=8, task_seed=0, sample_seed=0)
+    assert X.shape == (50, 20)
+    assert y.shape == (50, 8)
+    assert informative.shape == (8, 3)
+    assert y.dtype == np.int64
+
+
+def test_multi_parity_informative_shared_across_splits():
+    """Train and test share task_seed => same w informative subsets (§3)."""
+    _, _, inf_train = make_multi_parity(n=100, d=20, k=4, w=4, task_seed=42, sample_seed=1)
+    _, _, inf_test = make_multi_parity(n=100, d=20, k=4, w=4, task_seed=42, sample_seed=2)
+    np.testing.assert_array_equal(inf_train, inf_test)
+
+
+def test_multi_parity_labels_correct():
+    X, y, informative = make_multi_parity(n=300, d=16, k=3, w=5, task_seed=1, sample_seed=2)
+    for j in range(informative.shape[0]):
+        expected = X[:, informative[j]].sum(axis=1).astype(int) % 2
+        np.testing.assert_array_equal(y[:, j], expected)
+
+
+def test_multi_parity_w1_reduces_to_parity():
+    """w=1 reduces exactly to make_parity, modulo the trailing output axis."""
+    Xm, ym, infm = make_multi_parity(n=120, d=20, k=4, w=1, task_seed=7, sample_seed=3)
+    Xp, yp, infp = make_parity(n=120, d=20, k=4, task_seed=7, sample_seed=3)
+    np.testing.assert_array_equal(Xm, Xp)
+    np.testing.assert_array_equal(ym[:, 0], yp)
+    np.testing.assert_array_equal(infm[0], infp)
+
+
+def test_multi_parity_symmetric():
+    X, _, _ = make_multi_parity(n=50, d=12, k=2, w=3, task_seed=0, sample_seed=0, symmetric=True)
+    assert X.min() == -1
+    assert X.max() == 1
+
+
+def test_multi_parity_determinism_noise_and_symmetric_paths():
+    """§5.8: the optional noise/symmetric RNG paths are also a pure function of the seeds."""
+    kw = dict(n=150, d=14, k=3, w=4, task_seed=11, sample_seed=23, noise=0.2, symmetric=True)
+    a = make_multi_parity(**kw)
+    b = make_multi_parity(**kw)
+    for x, y in zip(a, b):
+        np.testing.assert_array_equal(x, y)
+
+
+def test_converge_determinism():
+    a = make_converge(n=200, w=16, task_seed=5, sample_seed=9, rule=92, distractors=4)
+    b = make_converge(n=200, w=16, task_seed=5, sample_seed=9, rule=92, distractors=4)
+    np.testing.assert_array_equal(a[0], b[0])
+    np.testing.assert_array_equal(a[1], b[1])
+
+
+@pytest.mark.parametrize("rule", [13, 78, 92])
+def test_converge_target_is_a_fixed_point(rule):
+    """The target s_inf must satisfy ca_step(s_inf)==s_inf for every M8/M8b rule used."""
+    X, s_inf = make_converge(n=300, w=32, task_seed=1, sample_seed=2, rule=rule)
+    np.testing.assert_array_equal(ca_step(s_inf, rule), s_inf)
+
+
+def test_converge_raises_on_non_converging_rule():
+    """A non-converging rule must fail loudly, not return a non-fixed state as the target."""
+    # rule 184 (traffic) reaches a period-2 shift on a ring, never a fixed point => must raise.
+    with pytest.raises(ValueError):
+        make_converge(n=64, w=16, task_seed=0, sample_seed=0, rule=184, max_steps=40)
+
+
+def test_converge_shapes_and_distractors():
+    X, y = make_converge(n=50, w=32, task_seed=0, sample_seed=0, rule=92, distractors=8)
+    assert X.shape == (50, 40)  # w + distractors
+    assert y.shape == (50, 32)  # fixed point is over the w CA cells only
+    assert y.dtype == np.int64
+
+
+def test_converge_trajectory_chains_to_fixed_point_tail():
+    """Trajectory frames are successive CA steps; once at the fixed point they stay there."""
+    X, s_inf, traj = make_converge(
+        n=40, w=16, task_seed=3, sample_seed=4, rule=92, T=20, return_trajectory=True
+    )
+    assert traj.shape == (40, 20, 16)
+    for i in range(1, traj.shape[1]):
+        np.testing.assert_array_equal(traj[:, i, :], ca_step(traj[:, i - 1, :], 92))
+    # T=20 exceeds the convergence cap for w=16, so the last frame has reached s_inf.
+    np.testing.assert_array_equal(traj[:, -1, :], s_inf)
 
 
 def test_ca_step_rule90():

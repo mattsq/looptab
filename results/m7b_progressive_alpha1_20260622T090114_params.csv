@@ -1,0 +1,7 @@
+config,arm,n_params,ref_params,ratio,role,within_tol
+single,trm_prog_step,11538,11538,1.0000,matched,True
+single,trm_prog_final,11538,11538,1.0000,matched,True
+single,trm_stepDS,11538,11538,1.0000,matched,True
+single,trm_nods,11538,11538,1.0000,reference,True
+single,ff_matched,11518,11538,0.9983,matched,True
+single,untied_matched,11721,11538,1.0159,matched,True

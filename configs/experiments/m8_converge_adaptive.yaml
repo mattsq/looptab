@@ -1,0 +1,111 @@
+# M8 — Variable-compute FIXED-POINT task (converging CA). The adaptive-computation angle.
+#
+# WHY. Every prior task has a FIXED required depth (parity-k ≈ constant; CA-at-T needs exactly T
+# steps), so a fixed-depth `untied_matched` always matches the loop → tying is neutral and the loop
+# never beats both controls (M2…M6a). The one regime never tested: the required compute VARIES per
+# instance and can EXCEED any fixed depth — an iterate-to-convergence / fixed-point task. There, only
+# the loop can spend variable compute (unroll more at test); both fixed-compute controls plateau. This
+# is the adaptive-computation thesis (Universal Transformers / Deep Thinking) and the most plausible
+# place the loop could FINALLY beat both controls (a fresh §9 attempt). It simultaneously tests the M7
+# hypothesis: on a CONVERGENT target, over-unrolling should HOLD (vs rule-30 decay) and progressive
+# loss should fire (its home turf).
+#
+# TASK = `converge` (rule 92 = a converging ECA): target is the FIXED POINT s_inf reached by iterating
+# the rule until ca_step(s)==s. Verified non-degenerate at w=32: majority baseline 0.562 (balanced),
+# ~99% of rows need >1 step (genuinely multi-step), convergence depth varies per instance — ~45% need
+# >4 steps, ~13% need >6, max ~19. The per-instance depth spread is the adaptive-compute axis.
+#
+# DESIGN. Build/train every arm at depth 6 (curriculum T~{1..6}); `untied_matched` is the fair fixed-
+# depth-6 §4b control (it physically cannot unroll past its 6 blocks). At TEST, over-unroll the loop
+# R' ∈ {6,8,12,16,24} against the FIXED target s_inf (make_converge ignores T for the target, so the
+# harness's T_test axis is held at 6 and only R' varies).
+#
+# HEADLINE (pre-registered, §8). Read accuracy-vs-R' at T_test=6:
+#   (1) Adaptive compute + stability: does the loop's accuracy RISE and HOLD as R'↑ (catching the
+#       deep tail, then staying at the fixed point)? That is the OPPOSITE of rule-30 decay (M7) and
+#       would validate the M7 non-convergence hypothesis empirically.
+#   (2) Loop-beats-both: at large R', does the loop (stepDS) significantly exceed BOTH ff_matched and
+#       the depth-6-capped untied_matched? If yes → the first loop-beats-both cell, via adaptive
+#       compute. If the loop's accuracy is flat/decays and ties the controls → the "no transferable
+#       operator" null holds even on convergent dynamics (report plainly), and the M7 hypothesis dies.
+#   (3) Does progressive loss (prog_step) beat plain step-aligned DS here, unlike on rule 30 (M7)?
+
+task:
+  name: converge
+  params:
+    w: 32           # CA width; verified balanced + wide convergence-depth spread for rule 92
+    T: 6            # reference / curriculum top (the target ignores T — always the fixed point)
+    rule: 92        # a converging ECA (fixed point, non-degenerate)
+    distractors: 8  # static uninformative bits (in_features = 40)
+  n_train: 4000
+  n_test: 1000
+  task_seed: 42
+  train_sample_seed: 1
+  test_sample_seed: 2
+
+curriculum:
+  param: T
+  T_min: 1
+  T_max: 6
+
+couple_n_steps_to_param: T   # build every arm at depth T_max=6
+
+arms:
+  - name: trm
+    label: trm_stepDS          # step-aligned DS — the operator learner; the hypothesis
+    hidden_dim: 64
+    latent_dim: 64
+    n_steps: 6
+    deep_supervision: true
+    ds_mode: step_aligned
+  - name: trm
+    label: trm_prog_step       # progressive loss on a CONVERGENT target (M7's home-turf test)
+    hidden_dim: 64
+    latent_dim: 64
+    n_steps: 6
+    deep_supervision: true
+    ds_mode: progressive_step
+    progressive_alpha: 0.5
+  - name: trm
+    label: trm_nods            # loop, final-step loss, curriculum — baseline
+    hidden_dim: 64
+    latent_dim: 64
+    n_steps: 6
+    deep_supervision: false
+    ds_mode: final
+  - name: ff_matched
+    label: ff_matched          # §4a depthless control (fixed compute)
+    hidden_dim: 64
+    latent_dim: 64
+    n_steps: 6
+  - name: untied_matched
+    label: untied_matched      # §4b fair fixed-depth-6 control — CANNOT unroll past 6 (the key contrast)
+    hidden_dim: 64
+    latent_dim: 64
+    n_steps: 6
+    deep_supervision: false
+    ds_mode: final
+
+deltas:
+  - [trm_stepDS, untied_matched]   # adaptive-compute loop vs fixed-depth §4b control (THE headline)
+  - [trm_stepDS, ff_matched]       # vs §4a control
+  - [trm_prog_step, trm_stepDS]    # does progressive loss add on a convergent target?
+  - [trm_nods, untied_matched]     # plain loop vs untied
+
+budget_reference: trm_nods
+budget_tol: 0.02
+
+train:
+  epochs: 100
+  lr: 1e-3
+  weight_decay: 1e-4
+  batch_size: 256
+  device: cpu
+
+extrapolation:
+  T_values: [6]                  # target is the fixed point (T-independent); hold T, sweep R'
+  R_values: [6, 8, 12, 16, 24]   # over-unroll the loop at test; controls are flat (fixed depth)
+
+seeds: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
+parallel_workers: 4
+results_dir: results

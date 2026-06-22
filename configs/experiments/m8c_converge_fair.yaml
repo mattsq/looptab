@@ -1,0 +1,99 @@
+# M8c — FAIR-supervision re-analysis of the M8/M8b "loop beats both on exact-match" result.
+# (Adversarial-review follow-up: resolves the S1/S2 training-signal confound.)
+#
+# WHY. M8b reported the loop-beats-both via `trm_stepDS` (step-aligned DS, 6 supervision targets/batch)
+# vs `untied_matched` (final loss only, 1 target/batch) — confounding TYING with SUPERVISION RICHNESS
+# (a §8 trap). And the loop>ff half at w=32 was actually carried by step-aligned DS (`trm_nods` does NOT
+# beat ff at w=32). This run computes the CLEAN comparisons, sign-tested:
+#   - trm_nods vs untied_matched : tying isolated at EQUAL (final-loss) supervision.
+#   - trm_stepDS vs untied_stepDS: tying isolated at EQUAL (step-aligned) supervision — gold standard
+#     (untied_stepDS = the fair untied stack GIVEN the same step-aligned DS; it emits per-step readouts).
+#   - trm_nods vs ff_matched     : the architectural loop>§4a test at equal supervision (shows where the
+#     ff-axis win is real vs supervision-driven).
+# Same task/grid/hyperparameters as M8b (rules{13,78,92}×w{24,32}, curriculum T~{1..6}, 10 seeds). Each
+# arm reseeds independently, so the shared arms reproduce M8b bit-for-bit; this only ADDS the fair deltas.
+#
+# PRE-REGISTERED reading (§8): the defensible architectural claim is "tied recurrence beats a fair untied
+# stack on whole-row EM at EQUAL supervision" — require Δ(nods−untied) AND Δ(stepDS−untied_stepDS) both
+# >0, sign-test p<.05. "Loop beats BOTH controls" only counts in a cell where Δ(nods−ff) AND Δ(nods−untied)
+# are both significant at equal supervision (the clean, unconfounded loop-beats-both). Report where the
+# ff-axis win needs step-DS (expected: w=32) plainly.
+
+task:
+  name: converge
+  params:
+    T: 6
+    distractors: 8
+  n_train: 4000
+  n_test: 1000
+  task_seed: 42
+  train_sample_seed: 1
+  test_sample_seed: 2
+
+grid:
+  params:
+    rule: [13, 78, 92]
+    w: [24, 32]
+
+curriculum:
+  param: T
+  T_min: 1
+  T_max: 6
+
+couple_n_steps_to_param: T
+
+arms:
+  - name: trm
+    label: trm_stepDS
+    hidden_dim: 64
+    latent_dim: 64
+    n_steps: 6
+    deep_supervision: true
+    ds_mode: step_aligned
+  - name: trm
+    label: trm_nods
+    hidden_dim: 64
+    latent_dim: 64
+    n_steps: 6
+    deep_supervision: false
+    ds_mode: final
+  - name: ff_matched
+    label: ff_matched
+    hidden_dim: 64
+    latent_dim: 64
+    n_steps: 6
+  - name: untied_matched
+    label: untied_matched      # fair §4b control, FINAL loss (matches trm_nods's supervision)
+    hidden_dim: 64
+    latent_dim: 64
+    n_steps: 6
+    deep_supervision: false
+    ds_mode: final
+  - name: untied_matched
+    label: untied_stepDS        # fair §4b control GIVEN step-aligned DS (matches trm_stepDS's supervision)
+    hidden_dim: 64
+    latent_dim: 64
+    n_steps: 6
+    deep_supervision: true
+    ds_mode: step_aligned
+
+deltas:
+  - [trm_nods, untied_matched]       # CLEAN tying isolation @ equal final-loss supervision (the key fix)
+  - [trm_stepDS, untied_stepDS]      # CLEAN tying isolation @ equal step-aligned supervision (gold std)
+  - [trm_nods, ff_matched]           # architectural loop vs §4a @ equal supervision (S2: where it holds)
+  - [trm_stepDS, ff_matched]         # best-loop vs §4a (ff cannot take step-DS — for continuity w/ M8b)
+  - [trm_stepDS, untied_matched]     # the OLD (confounded) delta — kept to show the confound's size
+
+budget_reference: trm_nods
+budget_tol: 0.02
+
+train:
+  epochs: 100
+  lr: 1e-3
+  weight_decay: 1e-4
+  batch_size: 256
+  device: cpu
+
+seeds: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
+parallel_workers: 4
+results_dir: results

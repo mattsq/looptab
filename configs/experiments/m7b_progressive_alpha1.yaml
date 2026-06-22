@@ -1,0 +1,116 @@
+# M7b — α=1 (PURE progressive loss, no full-T anchor term). Adversarial-review follow-up to M7.
+#
+# WHY. M1 and M3b left a clean, stubborn null: over-unrolling R'>R decays to baseline, and OOD
+# depth T_test > T_train collapses to baseline for EVERY arm — "the loop does not settle a stable
+# step operator / fixed point." The literature names this exact failure ("overthinking") and a
+# targeted fix: Deep Thinking nets (Bansal et al. 2022, arXiv 2202.05826) = RECALL (re-inject the
+# input every step — TRM already does via cat[X,z,a]) + PROGRESSIVE LOSS (per batch run (T−k) steps
+# with gradients DETACHED, then k steps WITH gradient, supervising only the grad steps). The
+# detach-from-an-arbitrary-state structure penalizes iteration-count-specific behaviour and pushes
+# the loop toward a REPEATABLE / path-independent step operator — the property Anil et al. 2022
+# (arXiv 2211.09961) show correlates with upward (harder-than-trained) generalization.
+#
+# Task config = M1/M3b EXACTLY (rule 30, w=9, distractors=4, curriculum T~{1..8}) so the
+# extrapolation curves are directly comparable to M3b's documented collapse.
+#
+# HEADLINE QUESTION: does progressive loss crack the OOD T≥12 collapse that M3b's step-aligned DS
+# could not? Read the extrapolation diagonal (R'=T) at T∈{4,8,12,16}; T∈{12,16} is OOD (beyond the
+# curriculum's T_max=8). Pre-registered: a *significant* lift over baseline at T≥12 on the diagonal
+# (paired sign test, 10 seeds) = the first transferable-operator signal; flat-at-baseline = the
+# null STANDS and Deep Thinking's recipe does not transfer to this CA setting (report plainly, §8).
+#
+# Arms — four loop variants (each isolates one training knob) + two grounding controls:
+#   trm_prog_step  - progressive loss, STEP-ALIGNED targets (combines M3b step-align + DT detach) ← hypothesis
+#   trm_prog_final - progressive loss, FINAL-state targets (the faithful Deep Thinking recipe)
+#   trm_stepDS     - step-aligned DS, no detach (M3b's best loop) — the comparison
+#   trm_nods       - loop, final-step loss, curriculum — the baseline
+#   ff_matched / untied_matched - §4a/§4b grounding (curriculum, final loss)
+
+task:
+  name: iterated
+  params:
+    w: 9
+    T: 8            # reference eval depth (= curriculum T_max)
+    rule: 30
+    distractors: 4
+  n_train: 4000
+  n_test: 1000
+  task_seed: 42
+  train_sample_seed: 1
+  test_sample_seed: 2
+
+curriculum:
+  param: T
+  T_min: 1
+  T_max: 8
+
+couple_n_steps_to_param: T   # build every arm at depth T_max (the deepest unroll)
+
+arms:
+  - name: trm
+    label: trm_prog_step       # HYPOTHESIS: step-aligned progressive loss
+    hidden_dim: 64
+    latent_dim: 64
+    n_steps: 8
+    deep_supervision: true     # progressive_step needs per-step readouts
+    ds_mode: progressive_step
+    progressive_alpha: 1.0
+  - name: trm
+    label: trm_prog_final      # faithful Deep Thinking recipe (final-state targets)
+    hidden_dim: 64
+    latent_dim: 64
+    n_steps: 8
+    deep_supervision: false
+    ds_mode: progressive_final
+    progressive_alpha: 1.0
+  - name: trm
+    label: trm_stepDS          # M3b's step-aligned DS (no detach) — the comparison
+    hidden_dim: 64
+    latent_dim: 64
+    n_steps: 8
+    deep_supervision: true
+    ds_mode: step_aligned
+  - name: trm
+    label: trm_nods            # loop, final-step loss, curriculum — baseline
+    hidden_dim: 64
+    latent_dim: 64
+    n_steps: 8
+    deep_supervision: false
+    ds_mode: final
+  - name: ff_matched
+    label: ff_matched          # §4a grounding (depthless; ill-posed under variable T — expected weak)
+    hidden_dim: 64
+    latent_dim: 64
+    n_steps: 8
+  - name: untied_matched
+    label: untied_matched      # §4b grounding (fixed depth; cannot extrapolate past T_max)
+    hidden_dim: 64
+    latent_dim: 64
+    n_steps: 8
+    deep_supervision: false
+    ds_mode: final
+
+deltas:
+  - [trm_prog_final, trm_nods]        # progressive (final) vs plain loop — the DT detach effect
+  - [trm_prog_step, trm_stepDS]       # does the progressive detach ADD to step-alignment?
+  - [trm_prog_step, trm_prog_final]   # does step-alignment add to progressive?
+  - [trm_prog_step, trm_nods]         # combined mechanism vs baseline
+  - [trm_prog_step, untied_matched]   # combined mechanism vs §4b grounding
+
+budget_reference: trm_nods
+budget_tol: 0.02
+
+train:
+  epochs: 100
+  lr: 1e-3
+  weight_decay: 1e-4
+  batch_size: 256
+  device: cpu
+
+extrapolation:
+  T_values: [4, 8, 12, 16]   # 8 = curriculum top (in-dist); 12,16 = OOD extrapolation
+  R_values: [4, 8, 12, 16]   # over-unroll R' >= R to recover longer computations
+
+seeds: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
+parallel_workers: 4          # = core count; bit-identical to serial (§Infra)
+results_dir: results
