@@ -1,0 +1,84 @@
+# M14 screen — does a LOCAL-but-non-CA fixed-point map exist that is ff-HARD?
+#
+# M13 left one open scientific question (CLAUDE.md §11(c)): the joint-state coherence result
+# (M8-M12) holds on LOCAL-update CA hard-convergence targets but VANISHES on a DENSE (fully
+# coupled) Hopfield net — so the loop's edge may need *locality*, not just any hard-convergence
+# fixed point. M14 tests this with a single knob: `bandwidth` on the M13 threshold net. On a ring
+# of w cells, bandwidth b zeros every coupling beyond ring distance b — b small = spatially LOCAL
+# (but per-position irregular weights => NON-CA), b = w//2 = dense (= M13). It separates LOCALITY
+# (the knob) from TRANSLATION-INVARIANCE/uniformity (absent at every b), the two properties that
+# distinguish the ECA from M13's dense net.
+#
+# THE CONFOUND THIS SCREEN GUARDS (numpy pre-screen, committed in the M14 LOG entry): reducing
+# bandwidth raises TRIVIALITY (fraction of inputs already at a fixed point => identity map =>
+# ff-EASY), because guaranteed convergence needs large self-coupling gamma, which dominates sparse
+# local couplings. The pre-screen found a clean regime ONLY at w=48: gamma=10 gives bandwidth
+# {2,4,8} all 10/10-convergent (both sample seeds, n=5000) AND non-trivial (triv <=5%), depth
+# median 1-2 (>=99% settle in <=6 steps so n_steps=6 is ample). This screen confirms the REMAINING
+# precondition — ff-HARDNESS (M11: the loop's edge only appears where a shallow per-cell map FAILS
+# on coherence; we want ff EM ~0.3 with trm_nods showing a gap above it). Light: 3 seeds.
+
+task:
+  name: hopfield
+  params:
+    weights: hebbian
+    n_patterns: 12
+    gamma: 10          # the local-ladder self-coupling (dense anchor uses gamma=16, separate)
+    distractors: 8
+    T: 6
+  n_train: 4000
+  n_test: 1000
+  task_seed: 42
+  train_sample_seed: 1
+  test_sample_seed: 2
+
+grid:
+  params:
+    w: [48]
+    bandwidth: [2, 4, 8]   # local ladder (b=2 clearly local on a 48-ring; b=8 ~1/3 of the ring)
+
+curriculum:
+  param: T
+  T_min: 1
+  T_max: 6
+
+couple_n_steps_to_param: T
+
+arms:
+  - name: ff_matched
+    label: ff_matched               # the hardness probe — want EM ~0.3 (hard regime)
+    hidden_dim: 64
+    latent_dim: 64
+    n_steps: 6
+  - name: trm
+    label: trm_nods                 # does the joint loop show a coherence gap above ff at low b?
+    hidden_dim: 64
+    latent_dim: 64
+    n_steps: 6
+    deep_supervision: false
+    ds_mode: final
+  - name: untied_matched
+    label: untied_matched           # §4b fair untied grounding (the regime-independent P1)
+    hidden_dim: 64
+    latent_dim: 64
+    n_steps: 6
+    deep_supervision: false
+    ds_mode: final
+
+deltas:
+  - [trm_nods, ff_matched]          # the coherence gap the main grid will test (locality signal)
+  - [trm_nods, untied_matched]      # tying-positive P1
+
+budget_reference: trm_nods
+budget_tol: 0.02
+
+train:
+  epochs: 100
+  lr: 1e-3
+  weight_decay: 1e-4
+  batch_size: 256
+  device: cpu
+
+seeds: [0, 1, 2]
+parallel_workers: 3
+results_dir: results

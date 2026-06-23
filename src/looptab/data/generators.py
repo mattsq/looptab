@@ -182,6 +182,21 @@ def make_converge(
     return X.astype(np.float32), s_inf.astype(np.int64)
 
 
+def _ring_band_mask(w: int, bandwidth: int) -> np.ndarray:
+    """Boolean (w, w) mask: True where the ring distance min(|i-j|, w-|i-j|) ≤ bandwidth.
+
+    The M14 locality knob. On a ring of ``w`` cells, ``bandwidth`` controls how far a cell's
+    coupling reaches: ``1`` = nearest-neighbour only (spatially LOCAL, like a CA's 3-neighbour
+    stencil — but with per-position irregular weights, so NON-CA), ``w//2`` = fully dense (no
+    masking, the M13 regime). The mask is symmetric (ring distance is symmetric) so it preserves
+    W's symmetry, and keeps the diagonal (distance 0), which is zeroed separately.
+    """
+    idx = np.arange(w)
+    dist = np.abs(idx[:, None] - idx[None, :])
+    ring = np.minimum(dist, w - dist)
+    return ring <= bandwidth
+
+
 def _build_hopfield_weights(
     w: int,
     task_seed: int,
@@ -189,6 +204,7 @@ def _build_hopfield_weights(
     n_patterns: int,
     weight_scale: int,
     density: float,
+    bandwidth: int | None = None,
 ) -> np.ndarray:
     """Integer symmetric zero-diagonal weight matrix W (the 'function', fixed by task_seed).
 
@@ -200,6 +216,12 @@ def _build_hopfield_weights(
         attractors + complex basins → ff-hard.
       - ``"random"``: symmetric integer matrix, entries in {-weight_scale..weight_scale} at the
         given off-diagonal ``density``. ``weight_scale``/``density`` are the hardness dials.
+
+    ``bandwidth`` (M14 locality probe): if not None, zero every coupling with ring distance
+    > ``bandwidth`` (see ``_ring_band_mask``), turning the dense net into a *local-but-non-CA*
+    threshold net. ``None`` = dense = the M13 regime. The mask is applied to the already-built
+    integer W, preserving symmetry and the all-integer (bit-exact) property; the PSD-guaranteeing
+    ``gamma`` in ``make_hopfield`` is derived from the *masked* W, so convergence still holds.
     """
     fn_rng = np.random.default_rng(task_seed)
     if weights == "hebbian":
@@ -213,6 +235,8 @@ def _build_hopfield_weights(
         W = U + U.T
     else:
         raise ValueError(f"make_hopfield: unknown weights mode {weights!r} (use hebbian|random)")
+    if bandwidth is not None:
+        W = W * _ring_band_mask(w, bandwidth)
     np.fill_diagonal(W, 0)
     return W.astype(np.int64)
 
@@ -237,6 +261,7 @@ def make_hopfield(
     n_patterns: int = 8,
     weight_scale: int = 1,
     density: float = 1.0,
+    bandwidth: int | None = None,
     gamma: int | None = None,
     gamma_margin: int = 1,
     distractors: int = 0,
@@ -260,12 +285,18 @@ def make_hopfield(
     s0 ∈ {-1,+1}^(n,w), iterated synchronously to the global fixed point. Outputs are mapped to
     {0,1} to match the binary readout heads and the ``coherence_excess`` metric.
 
+    ``bandwidth`` (M14 locality probe): zero couplings beyond ring distance ``bandwidth`` to make
+    the net *local-but-non-CA* (``1`` = nearest-neighbour, ``None``/``w//2`` = dense = M13) — the
+    knob that tests whether the M8–M12 joint-state coherence edge needs *locality* or the full CA.
+
     ``gamma``: pass an explicit int for committed runs (keeps the generator purely integer ⇒
     bit-exact). ``None`` auto-derives ``ceil(-λ_min(W)) + gamma_margin`` (guarantees synchronous
     convergence by making W+γI PSD) — this path uses a float eigen-solve, so it is for *screening*;
     the loud guard + a multi-seed screen (M12 lesson) verify the pinned int gamma converges.
     """
-    W = _build_hopfield_weights(w, task_seed, weights, n_patterns, weight_scale, density)
+    W = _build_hopfield_weights(
+        w, task_seed, weights, n_patterns, weight_scale, density, bandwidth
+    )
     if gamma is None:
         lam_min = float(np.linalg.eigvalsh(W.astype(np.float64)).min())
         gamma = max(int(np.ceil(-lam_min - 1e-9)) + gamma_margin, 0)

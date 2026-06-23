@@ -5,6 +5,7 @@ import pytest
 
 from looptab.data.generators import (
     _build_hopfield_weights,
+    _ring_band_mask,
     _threshold_step,
     ca_step,
     make_converge,
@@ -267,6 +268,65 @@ def test_hopfield_trajectory_chains_to_fixed_point_tail():
         )
     # T=40 exceeds the convergence depth, so the last frame has reached s_inf.
     np.testing.assert_array_equal(traj[:, -1, :], s_inf)
+
+
+# --- M14: bandwidth / locality knob -------------------------------------------------
+
+
+@pytest.mark.parametrize("bandwidth", [1, 2, 4])
+def test_hopfield_bandwidth_determinism(bandwidth):
+    """Banded weights keep the generator bit-exact: same seeds + bandwidth => identical bytes."""
+    a = make_hopfield(
+        n=200, w=24, task_seed=5, sample_seed=9, n_patterns=12, gamma=16, bandwidth=bandwidth
+    )
+    b = make_hopfield(
+        n=200, w=24, task_seed=5, sample_seed=9, n_patterns=12, gamma=16, bandwidth=bandwidth
+    )
+    np.testing.assert_array_equal(a[0], b[0])
+    np.testing.assert_array_equal(a[1], b[1])
+
+
+@pytest.mark.parametrize("bandwidth", [1, 3, 5])
+def test_hopfield_bandwidth_zeros_distant_couplings(bandwidth):
+    """W must be exactly zero beyond ring distance `bandwidth`, and symmetric, diagonal zeroed."""
+    w = 24
+    W = _build_hopfield_weights(
+        w, task_seed=1, weights="hebbian", n_patterns=12, weight_scale=1, density=1.0,
+        bandwidth=bandwidth,
+    )
+    mask = _ring_band_mask(w, bandwidth)
+    assert np.all(W[~mask] == 0)  # nothing leaks past the band
+    np.testing.assert_array_equal(W, W.T)  # still symmetric
+    assert np.all(np.diag(W) == 0)
+
+
+def test_hopfield_bandwidth_half_equals_dense():
+    """bandwidth = w//2 spans the whole ring => identical to the dense (M13) net."""
+    w = 24
+    dense = _build_hopfield_weights(
+        w, task_seed=2, weights="hebbian", n_patterns=12, weight_scale=1, density=1.0
+    )
+    full = _build_hopfield_weights(
+        w, task_seed=2, weights="hebbian", n_patterns=12, weight_scale=1, density=1.0,
+        bandwidth=w // 2,
+    )
+    np.testing.assert_array_equal(dense, full)
+
+
+@pytest.mark.parametrize("bandwidth", [1, 2, 4])
+def test_hopfield_banded_target_is_a_fixed_point(bandwidth):
+    """The banded net still settles to a genuine fixed point (auto-gamma keeps W+γI PSD)."""
+    w = 24
+    W = _build_hopfield_weights(
+        w, task_seed=3, weights="hebbian", n_patterns=12, weight_scale=1, density=1.0,
+        bandwidth=bandwidth,
+    )
+    lam_min = float(np.linalg.eigvalsh(W.astype(np.float64)).min())
+    gamma = max(int(np.ceil(-lam_min - 1e-9)) + 1, 0)
+    X, s_inf = make_hopfield(
+        n=300, w=w, task_seed=3, sample_seed=4, n_patterns=12, bandwidth=bandwidth, gamma=None
+    )
+    np.testing.assert_array_equal(_hopfield_update01(s_inf, W, gamma), s_inf)
 
 
 def test_ca_step_rule90():
