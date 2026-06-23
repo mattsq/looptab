@@ -1416,3 +1416,129 @@ representative configs (d∈{20,40,80}, steps 4–8, threads=1):
     reaching into `update_net` internals on the canonical model. Reject.
 So the model is left as-is; the wins all live at the harness level (1)–(4). Don't re-litigate these
 without first changing the regime (much larger models, or accepting a numerics re-baseline).
+
+---
+
+## M13 — DONE. Leave the ECA family (threshold/Hopfield attractor net). The joint-state coherence result is CA/local-update-specific; only the tying-positive P1 generalizes. Clean NEGATIVE.
+
+M12 closed within-ECA generality: the balanced+deep-converging ECAs are *exactly* two symmetry
+orbits, so every `converge` test is dynamically a mirror/complement of {13,78,92}. The one open
+scientific question (§11(c) thread 2): **is the joint-state whole-row-coherence result (M8–M12) a
+property of the hard-convergence REGIME, or of cellular automata specifically?** Answering it
+requires a *dynamically independent* hard-convergence target — i.e. leaving the ECA family.
+
+M13 builds `make_hopfield` (`src/looptab/data/generators.py`, dispatched in `dataset.py`,
+exported in `data/__init__.py`, task literal added in `config.py`, determinism-tested in
+`tests/test_generators.py`): a **dense, fully-coupled binary threshold / Hopfield attractor net**
+— maximally unlike a local 3-neighbour CA, and basin-of-attraction is *intrinsically* a whole-row
+property, the strongest possible probe of the joint-state hypothesis. The function (fixed by
+`task_seed`) is an **all-integer** symmetric zero-diagonal weight matrix `W` (Hebbian
+`Σ_μ ξ^μ ξ^μᵀ` over `n_patterns` random ±1 patterns, or a random integer mode) plus integer
+self-coupling `γ`; rows (fixed by `sample_seed`) are `s0 ∈ {-1,+1}^w` iterated synchronously
+`s_{t+1}=sign(W·s + γ·s)` (tie→keep) to the global fixed point. **Synchronous convergence is
+guaranteed by construction:** `γ ≥ -λ_min(W)` makes `W+γI` PSD ⇒ the parallel energy is
+non-increasing ⇒ a fixed point, no 2-cycles (committed runs pin an explicit integer `γ`, so the
+generator is purely integer ⇒ **bit-exact**, no float-matmul determinism risk; the loud guard +
+a multi-seed screen enforce it). Outputs map to {0,1} for the binary heads / `coherence_excess`.
+The contract mirrors `make_converge` exactly, so the M10 arm set, curriculum, step-aligned DS, and
+trajectory machinery run unchanged. 121 tests, ruff clean.
+
+**Screen (`m13_hopfield_screen.yaml`) — the regime is balanced + ff-HARD.** Multi-seed over
+the real task_seeds 42..51 (M12 lesson): at the locked `weights=hebbian, n_patterns=12, γ=16,
+distractors=8` setting, **0/10 non-convergence raises** at w∈{24,32}, balanced (majority ~0.50),
+and **ff-HARD** — a shallow `ff_matched` lands at **EM ~0.26 @ w=24 / ~0.14 @ w=32** (token-acc
+~0.93), numerically the same hard regime as the hard-convergence ECAs (ff EM ~0.31, M11). So the
+substrate clears the precondition the result needs: a genuine multi-output fixed point on which the
+per-cell MLP fails to make whole rows. **Convergence depth (a precondition to state HONESTLY — an
+adversarial review caught the first draft overstating it):** per-row depth is **typical median ~2–3**
+(mean 2.4/3.0, p90 4/5, batch-max ~10 ≪ the 8·w cap); >87% of rows settle in ≤4 steps, so the loop's
+`n_steps=6` is **ample, not starving** — and this is **comparable to rule 78's median ~3 where the loop
+WON**, so depth is roughly controlled across the CA/non-CA comparison and is NOT the distinguishing
+axis. (The earlier "deep ~9–10" was the batch-maximum settling time, not a typical difficulty.)
+
+**The experiment (`m13_hopfield_converge.yaml` base hidden=64, `m13_hopfield_large.yaml` hidden=128;
+the M10 six-arm set, 10 seeds, w∈{24,32}).** Per-arm EM, base, w=24:
+**`ff_matched` 0.256 > `trm_nods` 0.193 > `trm_decoupled_nods` 0.148 > `untied_matched` 0.113**
+(`trm_stepDS` 0.224). **The shallow MLP is the BEST arm on whole-row coherence — the exact inverse
+of the hard-convergence ECAs, where ff was worst and the loop topped it.**
+
+**The four load-bearing EM deltas across size × width (paired, 10 seeds; sign-test p):**
+
+| Δ (exact-match) | base w24 | base w32 | large w24 | large w32 |
+|---|---|---|---|---|
+| nods − decoupled_nods  (joint mech, final loss) | +0.044 (9/1, p=.021) | +0.033 (8/1, p=.039) | +0.064 (9/1, p=.021) | +0.037 (9/1, p=.021) |
+| **stepDS − decoupled_stepDS  (trainability-clean mech)** | +0.025 (8/2, **p=.109 ns**) | +0.030 (8/2, **p=.109 ns**) | +0.012 (5/5, **p=1.0 ns**) | +0.020 (6/4, **p=.75 ns**) |
+| **nods − ff_matched  (loop-beats-both)** | **−0.063 (0/10, p=.002)** | −0.020 (3/7, p=.34 ns) | −0.053 (2/8, p=.11 ns) | **−0.029 (1/9, p=.021)** |
+| nods − untied_matched  (tying-positive P1) | +0.080 (10/0, p=.002) | +0.050 (10/0, p=.002) | +0.047 (10/0, p=.002) | +0.004 (6/4, p=.75 ns) |
+
+**Reading (per §8 — the honesty clause fires; the result is BOUNDED to the CA/local-update regime).**
+
+- **Loop-beats-both does NOT transfer.** The loop never beats `ff_matched` on coherence; it is
+  *significantly worse* at base/w24 (−0.063, 0/10, p=.002) and large/w32 (−0.029, p=.021), and
+  ns-negative elsewhere. It also loses on token-acc (base/w24 Δacc −0.018, p=.002). This is the
+  **opposite** of the hard-convergence ECAs, where the loop beat ff at base/w24 (M9, ΔEM +0.133).
+- **The JOINT-STATE MECHANISM (M10's core) essentially does NOT transfer.** The trainability-clean
+  Δ(stepDS − decoupled_stepDS) — the comparison M10 said to lean on (the decoupled arm trains
+  stably under step-aligned DS) — is **non-significant in ALL FOUR size×width cells** (p = .11,
+  .11, 1.0, .75). The final-loss Δ(nods − decoupled) is weakly positive (EM +0.03…+0.06, p≈.02–.04)
+  but small, on the fragile arm, and — decisively — **does NOT grow with model size** (base ≈
+  large), whereas on the ECAs it grew +0.37→+0.66 from base to large (M11). So on a dense
+  (non-local) target, severing the joint multi-output state barely dents coherence: whatever
+  coherence exists is not coming from the joint state.
+- **CAPACITY DOES NOT REVIVE IT — the decisive M11 contrast.** On the ECAs, scaling 64→128
+  *strengthened* the whole result (mechanism and loop-beats-both both grew). Here, scaling does
+  nothing: loop-beats-both stays negative, the clean mechanism stays null. So the failure to
+  transfer is **intrinsic to the substrate, not a tiny-model artifact** — the obvious "you only
+  tested base size" objection is closed.
+- **The tying-positive P1 is the one survivor (and it too weakens).** Δ(nods − untied_matched) is
+  strongly positive at base both widths and at large/w24 (10/0, p=.002) — the loop beats the fair
+  untied stack on coherence in 3/4 cells — but it **vanishes at large/w32** (+0.004, ns). P1 is the
+  project's durable architectural fact and it broadly generalizes off-CA, though it is no longer
+  uniform. **Budget-parity status of the P1 control (stated explicitly — the committed
+  `*_params.csv` flags it, so do not consume P1 as uniformly "budget-clean"):** at BASE,
+  `untied_matched` is the integer-width-quantization breach the audit names — **+2.46% (w24) /
+  +3.08% (w32) OVER the declared ±2% budget** (`within_tol=False`), the same M3a/M4 width-quantization
+  effect. The breach is **one-directional (over-budget ⇒ the control has MORE capacity)**, so the
+  base P1 cells are **conservative, not clean**: the loop beats an untied stack that is handed a
+  small capacity *advantage*. The strictly-clean P1 evidence is the **LARGE run, where
+  `untied_matched` is WITHIN tol and in fact slightly UNDER budget (ratio 0.988 w24 / 0.998 w32):
+  at large/w24 P1 = +0.047 (10/0, p=.002) on a budget-clean, under-budget control.** So P1 survives
+  both a conservative over-budget control (base) AND a strictly-matched one (large/w24); it is not an
+  artifact of the breach. Note `trm_decoupled_nods` *also* beats `untied_matched` on EM at base
+  (decoupled 0.148 > untied 0.113), so even the per-cell loop out-coheres the untied stack — the
+  untied stack, not the decoupled head, is the coherence-floor here.
+
+**Net — a clean, well-controlled NEGATIVE that bounds M8–M12.** Despite being a genuine multi-output
+fixed point with globally-coupled (whole-row) basin structure AND ff-hard (ff EM ~0.26/0.14), the
+threshold net does **not** reproduce the loop's coherence story: loop-beats-both fails (ff is the
+*best* coherence arm), and the joint-state mechanism is absent under the trainability control — at
+base AND large size. **So the M8–M12 result is CA / LOCAL-UPDATE specific, not a property of
+hard-convergence multi-output fixed points in general.** The loop's coherence edge on ECAs came from
+something specific to *local, spatially-structured* CA dynamics — where a shallow per-cell map
+makes spatially-correlated errors that the joint cross-cell state repairs — not from "multi-output
+fixed point with global dependencies" per se, and **NOT from depth** (per-row depth here is median
+~2–3, comparable to rule 78 where the loop won). On the dense threshold net the shallow MLP (full
+row in its receptive field) already realizes the achievable whole-row coherence (equal
+`coherence_excess` to the loop, ~0.08), leaving no gap for the joint loop to fill — indeed the loop
+is a strictly *worse* per-cell model here (lower token-acc AND train-acc than ff). The lone
+regime-independent survivor is the **tying-positive P1** (tied loop > fair untied stack), broad but
+no longer uniform.
+
+**Robustness — the negative is NOT depth/compute starvation (adversarial-review probe).** The
+obvious objection is that the loop runs `n_steps=6` while the slowest rows take ~10 steps. Re-running
+base/w24 at `n_steps=12` with a `T_max=12` curriculum (4 seeds) leaves the loop still losing to ff —
+Δacc −0.041, ΔEM −0.124, no better than (slightly worse than) the n_steps=6 result. Doubling the
+loop's compute does not close the gap: the loop is genuinely outclassed, not starved.
+
+**Hypothesis (NOT tested here, §8):** the loop's coherence gain requires a target whose per-cell map
+is *local* with *spatial* error structure (the CA case), so that a shallow MLP's errors are
+correlated in a way the joint refinement state can correct; a target where the shallow MLP already
+sees the whole row and captures the cell correlations (the dense-net case) leaves no gap. Testing
+this would need an intermediate substrate (e.g. a local-but-non-CA fixed-point map), out of scope here.
+
+**Consequence for §9.** M13 *sharpens* the scope for the pending §9-gate rewrite rather than widening
+it: the loop's defensible value is **whole-row coherence via the joint state on LOCAL-UPDATE (CA)
+hard-convergence targets** (M8–M12), plus the broader-but-not-uniform **tying-positive P1** (beats a
+fair untied stack), now tested off-CA. It is NOT a property of hard-convergence fixed points in
+general. Tracked summaries: `results/m13_hopfield_screen_*.{json,csv}`,
+`results/m13_hopfield_converge_*.{json,csv}` (base), `results/m13_hopfield_large_*.{json,csv}` (large).

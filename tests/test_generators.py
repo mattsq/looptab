@@ -4,8 +4,11 @@ import numpy as np
 import pytest
 
 from looptab.data.generators import (
+    _build_hopfield_weights,
+    _threshold_step,
     ca_step,
     make_converge,
+    make_hopfield,
     make_iterated,
     make_linear,
     make_multi_parity,
@@ -167,6 +170,102 @@ def test_converge_trajectory_chains_to_fixed_point_tail():
     for i in range(1, traj.shape[1]):
         np.testing.assert_array_equal(traj[:, i, :], ca_step(traj[:, i - 1, :], 92))
     # T=20 exceeds the convergence cap for w=16, so the last frame has reached s_inf.
+    np.testing.assert_array_equal(traj[:, -1, :], s_inf)
+
+
+def _hopfield_update01(s01, W, gamma):
+    """Reference threshold update in {0,1} coding, for the fixed-point assertion."""
+    s = s01.astype(np.int64) * 2 - 1
+    return (_threshold_step(s, W, gamma) + 1) // 2
+
+
+@pytest.mark.parametrize("weights,kw", [("hebbian", {"n_patterns": 8}), ("random", {})])
+def test_hopfield_determinism(weights, kw):
+    a = make_hopfield(
+        n=200, w=24, task_seed=5, sample_seed=9, weights=weights, gamma=12, distractors=4, **kw
+    )
+    b = make_hopfield(
+        n=200, w=24, task_seed=5, sample_seed=9, weights=weights, gamma=12, distractors=4, **kw
+    )
+    np.testing.assert_array_equal(a[0], b[0])
+    np.testing.assert_array_equal(a[1], b[1])
+
+
+@pytest.mark.parametrize("w", [24, 32])
+def test_hopfield_target_is_a_fixed_point(w):
+    """s_inf must satisfy threshold_update(s_inf)==s_inf for every row (the defining property)."""
+    W = _build_hopfield_weights(
+        w, task_seed=1, weights="hebbian", n_patterns=8, weight_scale=1, density=1.0
+    )
+    gamma = 12
+    X, s_inf = make_hopfield(n=300, w=w, task_seed=1, sample_seed=2, n_patterns=8, gamma=gamma)
+    np.testing.assert_array_equal(_hopfield_update01(s_inf, W, gamma), s_inf)
+
+
+def test_hopfield_auto_gamma_converges_and_is_a_fixed_point():
+    """gamma=None auto-derives a PSD-guaranteeing self-coupling; the result is a fixed point."""
+    W = _build_hopfield_weights(
+        20, task_seed=7, weights="hebbian", n_patterns=6, weight_scale=1, density=1.0
+    )
+    lam_min = float(np.linalg.eigvalsh(W.astype(np.float64)).min())
+    gamma = max(int(np.ceil(-lam_min - 1e-9)) + 1, 0)
+    X, s_inf = make_hopfield(n=200, w=20, task_seed=7, sample_seed=3, n_patterns=6, gamma=None)
+    np.testing.assert_array_equal(_hopfield_update01(s_inf, W, gamma), s_inf)
+
+
+def test_hopfield_raises_on_nonconverging():
+    """Too small a gamma can leave a 2-cycle; the generator must fail loudly, not return it."""
+    with pytest.raises(ValueError):
+        make_hopfield(
+            n=64,
+            w=24,
+            task_seed=0,
+            sample_seed=0,
+            weights="random",
+            weight_scale=4,
+            gamma=0,
+            max_steps=30,
+        )
+
+
+def test_hopfield_shapes_distractors_and_coding():
+    X, y = make_hopfield(
+        n=50, w=32, task_seed=0, sample_seed=0, n_patterns=10, gamma=15, distractors=8
+    )
+    assert X.shape == (50, 40)  # w + distractors
+    assert y.shape == (50, 32)  # fixed point over the w net cells only
+    assert y.dtype == np.int64
+    assert set(np.unique(y)).issubset({0, 1})  # mapped to {0,1} for the binary heads
+
+
+def test_hopfield_balance():
+    """The ±1/zero-bias symmetry => each output cell is ~balanced across rows (majority near .5)."""
+    X, y = make_hopfield(n=4000, w=32, task_seed=3, sample_seed=4, n_patterns=12, gamma=15)
+    cell_means = y.mean(axis=0)
+    assert np.all((cell_means > 0.25) & (cell_means < 0.75))
+
+
+def test_hopfield_trajectory_chains_to_fixed_point_tail():
+    W = _build_hopfield_weights(
+        20, task_seed=3, weights="hebbian", n_patterns=6, weight_scale=1, density=1.0
+    )
+    gamma = 12
+    X, s_inf, traj = make_hopfield(
+        n=40,
+        w=20,
+        task_seed=3,
+        sample_seed=4,
+        n_patterns=6,
+        gamma=gamma,
+        T=40,
+        return_trajectory=True,
+    )
+    assert traj.shape == (40, 40, 20)
+    for i in range(1, traj.shape[1]):
+        np.testing.assert_array_equal(
+            traj[:, i, :], _hopfield_update01(traj[:, i - 1, :], W, gamma)
+        )
+    # T=40 exceeds the convergence depth, so the last frame has reached s_inf.
     np.testing.assert_array_equal(traj[:, -1, :], s_inf)
 
 

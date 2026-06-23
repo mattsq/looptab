@@ -17,7 +17,7 @@ from pydantic import BaseModel, Field, model_validator
 
 
 class TaskConfig(BaseModel):
-    name: Literal["linear", "parity", "multi_parity", "iterated", "converge"]
+    name: Literal["linear", "parity", "multi_parity", "iterated", "converge", "hopfield"]
     params: dict = Field(default_factory=dict)
     n_train: int = 4000
     n_test: int = 1000
