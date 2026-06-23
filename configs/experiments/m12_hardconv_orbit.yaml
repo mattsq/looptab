@@ -1,0 +1,108 @@
+# M12 — Confirm the "hard-convergence" boundary: run the M10/M11 arm set on the 5 UNTESTED
+# balanced+deep converging rules, to show the joint-state coherence mechanism is a property of the
+# regime (not idiosyncratic to the 3 hand-picked {13,78,92}).
+#
+# M11 found the loop's joint-state coherence edge appears ONLY where a shallow per-cell MLP fails on
+# coherence (ff EM ~0.31 on {13,78,92}); the two M11 new families (140 deep/unbalanced/ff-easy, 232
+# shallow/balanced/ff-easy) were ff-EASY (ff EM 0.82-0.83) and showed NO mechanism. §11(c) follow-up:
+# find a NEW balanced+deep+ff-hard converging rule and confirm the mechanism reproduces.
+#
+# Structural screen over ALL 256 ECA rules (convergence at w=24/32 + balanced maj≈0.56 + deep spread
+# maxd≥12, frac>4≥0.10) returns EXACTLY 8 rules, forming TWO symmetry orbits:
+#   orbit 0 = {13, 69, 79, 93}   (only rule 13 tested before)
+#   orbit 1 = {78, 92, 141, 197} (rules 78, 92 tested before)
+# So "balanced+deep convergence" is the complete closure of two ECA symmetry classes; {13,78,92}
+# already sampled both. The 5 rules here are the UNTESTED mirror/complement orbit-mates. Predict:
+# all 5 are ff-hard (ff EM ~0.31) and reproduce loop-beats-both (Δ(nods−ff) EM>0 at w=24) + the
+# joint-state mechanism (Δ(nods−decoupled)>0, decoupled<ff) — confirming the result is a property of
+# the hard-convergence regime, with ff-hardness the operative axis (vs depth or balance alone).
+#
+# Identical to m11_size_base.yaml except the rule grid (one knob). Base size (hidden=latent=64), the
+# cell where M11's clean loop-beats-both lives. w∈{24,32} per M11.
+
+task:
+  name: converge
+  params:
+    T: 6
+    distractors: 8
+  n_train: 4000
+  n_test: 1000
+  task_seed: 42
+  train_sample_seed: 1
+  test_sample_seed: 2
+
+grid:
+  params:
+    rule: [69, 79, 93, 141, 197]   # the 5 untested orbit-mates of {13,78,92} (orbit0: 69/79/93; orbit1: 141/197)
+    w: [24, 32]
+
+curriculum:
+  param: T
+  T_min: 1
+  T_max: 6
+
+couple_n_steps_to_param: T
+
+arms:
+  - name: trm
+    label: trm_nods
+    hidden_dim: 64
+    latent_dim: 64
+    n_steps: 6
+    deep_supervision: false
+    ds_mode: final
+  - name: trm_decoupled
+    label: trm_decoupled_nods
+    hidden_dim: 64
+    latent_dim: 64
+    n_steps: 6
+    deep_supervision: false
+    ds_mode: final
+  - name: trm
+    label: trm_stepDS
+    hidden_dim: 64
+    latent_dim: 64
+    n_steps: 6
+    deep_supervision: true
+    ds_mode: step_aligned
+  - name: trm_decoupled
+    label: trm_decoupled_stepDS
+    hidden_dim: 64
+    latent_dim: 64
+    n_steps: 6
+    deep_supervision: true
+    ds_mode: step_aligned
+  - name: ff_matched
+    label: ff_matched
+    hidden_dim: 64
+    latent_dim: 64
+    n_steps: 6
+  - name: untied_matched
+    label: untied_matched
+    hidden_dim: 64
+    latent_dim: 64
+    n_steps: 6
+    deep_supervision: false
+    ds_mode: final
+
+deltas:
+  - [trm_nods, trm_decoupled_nods]
+  - [trm_stepDS, trm_decoupled_stepDS]
+  - [trm_nods, ff_matched]
+  - [trm_nods, untied_matched]
+  - [trm_decoupled_nods, ff_matched]
+  - [trm_decoupled_nods, untied_matched]
+
+budget_reference: trm_nods
+budget_tol: 0.02
+
+train:
+  epochs: 100
+  lr: 1e-3
+  weight_decay: 1e-4
+  batch_size: 256
+  device: cpu
+
+seeds: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
+parallel_workers: 4
+results_dir: results

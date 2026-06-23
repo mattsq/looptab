@@ -1,0 +1,109 @@
+# M11 (base size) — Generalize the M8/M9/M10 coherence result across the OPERATOR-FAMILY axis.
+#
+# The project's sole positive finding (tied recurrence + JOINT multi-output state buys whole-row
+# coherence on the `converge` fixed-point task) is rule-78 / one-size. M11 tests whether it is a
+# general property or an artifact, across the two never-jointly-tested axes: model size (3 separate
+# configs, since hidden/latent are per-arm scalars, not grid-able) and operator family (rule).
+#
+# This BASE-size config (hidden=latent=64, the M8/M9/M10 status quo) carries the RULE axis: the 3
+# verified converging families {13,78,92} PLUS 2 newly-screened families — 232 (majority; perfectly
+# balanced maj≈0.50, shallow/fast-converging) and 140 (deep spread, max-depth ~17, moderately
+# unbalanced maj≈0.75). New rules screened for: reaches a true fixed point (generator self-asserts),
+# non-degenerate baseline, and non-trivial convergence-depth spread (see results/LOG.md M11).
+#
+# Arms / deltas / curriculum / seeds are IDENTICAL to m10_decoupled_converge.yaml — only the rule
+# grid is broadened. So the rule-78/w-24 cell reproduces M9/M10 BIT-FOR-BIT for the 2-D arms
+# (trm_nods/stepDS, ff, untied: sanity anchor — each arm self-reseeds, sizes/rules don't perturb each
+# other). EXCEPTION: the `trm_decoupled` arms do NOT reproduce M10 bit-for-bit (EM 0.0722 vs M10's
+# 0.0576) — their 3-D batched matmul has thread/BLAS-order-sensitive float reductions, so EM carries
+# ~±0.015 numerical noise across environments (the collapse effect is +0.37…+0.66, ~30–50× that, so
+# conclusions hold; see M11 caveats in LOG.md). Run this config FIRST to verify the 2-D anchor early.
+
+task:
+  name: converge
+  params:
+    T: 6
+    distractors: 8
+  n_train: 4000
+  n_test: 1000
+  task_seed: 42
+  train_sample_seed: 1
+  test_sample_seed: 2
+
+grid:
+  params:
+    rule: [13, 78, 92, 140, 232]   # 3 verified + 2 new screened families (232 balanced/shallow, 140 deep)
+    w: [24, 32]                    # w=24 inside M9's loop-beats-both regime; w=32 brackets its boundary.
+                                   # (w=16 dropped: rules 13 & 232 have limit-cycle rows on a w=16 ring —
+                                   #  they never reach a fixed point there; w=24/32 are clean for all 5 rules.)
+
+curriculum:
+  param: T
+  T_min: 1
+  T_max: 6
+
+couple_n_steps_to_param: T
+
+arms:
+  - name: trm
+    label: trm_nods                 # joint loop, final loss (budget reference)
+    hidden_dim: 64
+    latent_dim: 64
+    n_steps: 6
+    deep_supervision: false
+    ds_mode: final
+  - name: trm_decoupled
+    label: trm_decoupled_nods       # per-cell refinement, equal (final) supervision — THE M10 ablation
+    hidden_dim: 64
+    latent_dim: 64
+    n_steps: 6
+    deep_supervision: false
+    ds_mode: final
+  - name: trm
+    label: trm_stepDS               # joint loop, step-aligned DS
+    hidden_dim: 64
+    latent_dim: 64
+    n_steps: 6
+    deep_supervision: true
+    ds_mode: step_aligned
+  - name: trm_decoupled
+    label: trm_decoupled_stepDS     # per-cell refinement, equal step-aligned supervision (trainability-clean)
+    hidden_dim: 64
+    latent_dim: 64
+    n_steps: 6
+    deep_supervision: true
+    ds_mode: step_aligned
+  - name: ff_matched
+    label: ff_matched               # §4a shallow MLP grounding
+    hidden_dim: 64
+    latent_dim: 64
+    n_steps: 6
+  - name: untied_matched
+    label: untied_matched           # §4b fair untied stack, final loss
+    hidden_dim: 64
+    latent_dim: 64
+    n_steps: 6
+    deep_supervision: false
+    ds_mode: final
+
+deltas:
+  - [trm_nods, trm_decoupled_nods]      # M10 headline: joint vs decoupled @ equal final loss (mechanism)
+  - [trm_stepDS, trm_decoupled_stepDS]  # joint vs decoupled @ equal step-aligned supervision (trainability-clean)
+  - [trm_nods, ff_matched]              # loop vs §4a (P2 loop-beats-both / EM-at-matched-acc)
+  - [trm_nods, untied_matched]          # loop vs §4b (P1 tying-positive)
+  - [trm_decoupled_nods, ff_matched]    # does the decoupled head still beat the shallow MLP?
+  - [trm_decoupled_nods, untied_matched]  # does the decoupled head still beat the fair untied?
+
+budget_reference: trm_nods
+budget_tol: 0.02
+
+train:
+  epochs: 100
+  lr: 1e-3
+  weight_decay: 1e-4
+  batch_size: 256
+  device: cpu
+
+seeds: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
+parallel_workers: 4
+results_dir: results
