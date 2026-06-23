@@ -1494,10 +1494,19 @@ of the hard-convergence ECAs, where ff was worst and the loop topped it.**
   strongly positive at base both widths and at large/w24 (10/0, p=.002) — the loop beats the fair
   untied stack on coherence in 3/4 cells — but it **vanishes at large/w32** (+0.004, ns). P1 is the
   project's durable architectural fact and it broadly generalizes off-CA, though it is no longer
-  uniform. (`untied_matched` is again the worst arm; its +2.5% budget drift is over-budget, so P1
-  is conservative — same as M4/M10.) Note `trm_decoupled_nods` *also* beats `untied_matched` on EM
-  at base (decoupled 0.148 > untied 0.113), so even the per-cell loop out-coheres the untied stack
-  — the untied stack, not the decoupled head, is the coherence-floor here.
+  uniform. **Budget-parity status of the P1 control (stated explicitly — the committed
+  `*_params.csv` flags it, so do not consume P1 as uniformly "budget-clean"):** at BASE,
+  `untied_matched` is the integer-width-quantization breach the audit names — **+2.46% (w24) /
+  +3.08% (w32) OVER the declared ±2% budget** (`within_tol=False`), the same M3a/M4 width-quantization
+  effect. The breach is **one-directional (over-budget ⇒ the control has MORE capacity)**, so the
+  base P1 cells are **conservative, not clean**: the loop beats an untied stack that is handed a
+  small capacity *advantage*. The strictly-clean P1 evidence is the **LARGE run, where
+  `untied_matched` is WITHIN tol and in fact slightly UNDER budget (ratio 0.988 w24 / 0.998 w32):
+  at large/w24 P1 = +0.047 (10/0, p=.002) on a budget-clean, under-budget control.** So P1 survives
+  both a conservative over-budget control (base) AND a strictly-matched one (large/w24); it is not an
+  artifact of the breach. Note `trm_decoupled_nods` *also* beats `untied_matched` on EM at base
+  (decoupled 0.148 > untied 0.113), so even the per-cell loop out-coheres the untied stack — the
+  untied stack, not the decoupled head, is the coherence-floor here.
 
 **Net — a clean, well-controlled NEGATIVE that bounds M8–M12.** Despite being a genuine multi-output
 fixed point with globally-coupled (whole-row) basin structure AND ff-hard (ff EM ~0.26/0.14), the

@@ -493,7 +493,11 @@ behaviour-changing conclusions, and the next pointer. Append detail to LOG.md, n
   nothing (loop-beats-both stays negative, clean mechanism stays null), so the failure is **intrinsic to
   the substrate, not a tiny-model artifact**. **(4) The tying-positive P1 SURVIVES** (Δ(nods−untied) EM
   10/0, p=.002 at base both widths + large/w24; vanishes only at large/w32) — the loop beats a fair
-  untied stack on coherence in 3/4 cells. So **the M8–M12 result is CA/local-update specific, NOT a
+  untied stack on coherence in 3/4 cells. **Budget caveat (do NOT call base P1 "budget-clean"):** at
+  BASE the `untied_matched` control is the width-quantization breach the audit flags — **+2.46%/+3.08%
+  OVER budget** (`within_tol=False`), so those cells are **conservative** (the loop beats a control with
+  a small capacity *advantage*), not clean; the strictly-budget-clean P1 evidence is the **LARGE run
+  (untied within tol, ratio 0.988/0.998), where large/w24 P1 = +0.047, 10/0, p=.002**. So **the M8–M12 result is CA/local-update specific, NOT a
   property of hard-convergence multi-output fixed points in general**; the loop's coherence edge appears
   to need a *local, spatially-structured* per-cell map (where the shallow MLP makes spatially-correlated
   errors the joint state repairs), absent on a dense net where the MLP already sees the whole row — and
