@@ -1173,6 +1173,183 @@ it loses, so over-budget is conservative. The decoupled arm itself is budget-cle
 
 ---
 
+## M11 — DONE. Generalize the coherence result across MODEL SIZE and OPERATOR FAMILY. Layered verdict: the joint-state mechanism + tying-positive GENERALIZE across size (and STRENGTHEN with it — NOT a tiny-model artifact); but the whole result is OPERATOR-FAMILY-SPECIFIC — it does NOT transfer to two new converging families, and "loop-beats-both" is capacity-contingent.
+
+The project's sole positive finding (M8/M9/M10: tied recurrence + JOINT multi-output state buys whole-row
+coherence on `converge`) was pinned to **rule 78 (M8c added 13/92), ONE model size (~14k, hidden=latent=64),
+n_train=4000**. Before any §9 reframing rests on it, M11 stress-tests it across the two never-tested axes.
+Model size (hidden/latent) is a per-arm scalar, not grid-able, so the size axis = **3 separate configs**
+(`m11_size_small` hidden=32 ~5–6k; `m11_size_base` hidden=64 ~14–17k; `m11_size_large` hidden=128 ~44–50k);
+the operator axis rides the base config's rule grid. Arms/deltas/curriculum mirror M10 (joint
+`trm_nods`/`trm_stepDS`, decoupled `trm_decoupled_nods`/`_stepDS`, `ff_matched`, `untied_matched`),
+10 seeds, 100 epochs, the M10 §4a/§4b grounding. Tracked:
+`results/m11_size_{small,base,large}_2026062*_{curve,deltas,params}.csv` (+ JSON).
+
+**New operator families screened first (read-only).** Candidate converging ECAs {4,12,36,44,76,104,128,
+132,140,200,232} screened over `make_converge` for: reaches a true fixed point, balanced-ish baseline,
+non-trivial convergence-depth spread. Most reject (collapse in 1–2 steps; near-degenerate maj 0.93–1.0;
+160 doesn't converge). Picked **232** (majority — perfectly balanced maj≈0.50, shallow ~depth≤10) and
+**140** (deep spread max≈17, but unbalanced maj≈0.75) as two genuinely-distinct families; added to the
+`test_converge_target_is_a_fixed_point` parametrize. **Gotcha (cost one failed run): w=16 is UNUSABLE for
+the full rule set** — rules 13 & 232 have **limit-cycle initial states on a w=16 ring** (never reach a
+fixed point; the generator correctly raises), which the original single-seed n=5000 screen missed (the
+n=4000 run draw hit a cycling row). M8b/M8c only ever ran rule 13 at w≥24 for this reason. Verified
+**w∈{24,32} clean for all 5 rules** (0 unconverged over 480k draws each, worst depth ≤22 ≪ the 4·w cap),
+so the width grid is **{24, 32}** — better than the planned {16,24} anyway: w=24 inside M9's loop-beats-both
+regime, w=32 brackets its boundary. **Anchor verified bit-for-bit (2-D arms):** base rule-78/w-24 reproduces
+M9/M10 exactly for the 2-D arms — `trm_nods` EM 0.444, `ff` 0.311, `untied` 0.126, `trm_stepDS` 0.427;
+Δ(nods−ff) +0.133, Δ(nods−untied) +0.318. **The `trm_decoupled` arms do NOT reproduce bit-for-bit** (M11 EM
+0.0722 / 0.0910 vs M10's 0.0576 / 0.1101) — see caveat (vi) below; the *effect* is unaffected.
+
+**Headline EM deltas (sign-test p; *=p<.05, 10 seeds). nods/decoup/ff/untied = equal (final-loss) supervision:**
+
+| size | rule, w | Δ(nods−ff) | Δ(nods−untied) [P1] | Δ(nods−decoup) [mech] | Δ(decoup−ff) |
+|---|---|---|---|---|---|
+| small | 78, 24 | **−0.055*** (ff wins) | +0.064* | +0.066* | −0.121* |
+| small | 92, 24 | **−0.065*** (ff wins) | +0.074* | +0.066* | −0.130* |
+| base | 78, 24 | +0.133* | +0.318* | +0.372* | −0.239* |
+| base | 92, 24 | +0.108* | +0.324* | +0.367* | −0.259* |
+| large | 78, 24 | **+0.251*** | +0.220* | +0.549* | −0.298* |
+| large | 92, 24 | **+0.232*** | +0.195* | +0.536* | −0.304* |
+| large | 78, 32 | **+0.118*** | +0.236* | +0.311* | −0.193* |
+| base | **140**, 24 | −0.005 (ns) | +0.786* † | **+0.010 (ns)** | −0.015 (ns) |
+| base | **232**, 24 | **−0.448*** (ff dominates) | +0.245* | **−0.111*** (reversed) | −0.337* |
+| base | **232**, 32 | **−0.516*** (ff dominates) | +0.201* | −0.078 (ns) | −0.438* |
+
+(† Δ(nods−untied) on rule 140 is huge only because `untied` totally collapses there, EM 0.028 — `untied`
+failing, not a coherence win.) The trainability-clean mechanism Δ(stepDS−decoupled_stepDS) EM tells the
+same story: positive 10/0 at **all three sizes** for {13,78,92} (small +0.025…+0.09, base +0.07…+0.34,
+large +0.19…+0.43), but **ns on rule 140** and **significantly NEGATIVE on rule 232** (−0.19/−0.22).
+
+**Reading (per §2/§8).**
+
+1. **MODEL SIZE — the joint-state mechanism and the tying-positive GENERALIZE, and "loop-beats-both"
+   STRENGTHENS with size (it is NOT a tiny-model artifact — the opposite).** For the original {13,78,92}
+   family: the **joint-state mechanism** (M10) is positive 10/0, p<.05 at **all three sizes** on both the
+   final-loss Δ(nods−decoupled) and the trainability-clean Δ(stepDS−decoupled_stepDS) — decoupling collapses
+   coherence regardless of capacity (and the gap *grows* with size: large Δ(nods−decoup) +0.53…+0.66 vs base
+   +0.37). The **tying-positive P1** (Δ(nods−untied) EM > 0) is positive 10/0 at all three sizes too. The
+   one **capacity-contingent** claim is **loop-beats-both (P2, Δ(nods−ff))**: **NEGATIVE at small** (ff
+   *beats* the loop on EM) — **−0.04…−0.07, p<.05 at w=24 (all 3 rules)**; at w=32 the same sign but
+   smaller/weaker (−0.009 ns for rule 13, −0.018/−0.020 p<.05 for rules 92/78) — positive **w≤24** at base (the M9 regime), and
+   **strongly positive at BOTH widths at large** (+0.12…+0.25*). So scaling the model up does **not** erase
+   the loop's edge — it amplifies it and extends it past the w=24 boundary. At small size the model simply
+   lacks the capacity for the joint refinement to overcome the shallow MLP. **Overfit guard (M5 lesson):**
+   at large, train−test gaps are small (train ~0.96–0.98 vs test ~0.94–0.97) — no overfit wall, so the size
+   signal is a real architecture effect, not a sample-bound artifact.
+2. **OPERATOR FAMILY — the whole result is SPECIFIC to the {13,78,92}-type "hard" convergence; it does NOT
+   generalize to the two new families.** On **rule 232** (majority, balanced, *shallow* per-instance depth)
+   the shallow `ff_matched` **dominates** — Δ(nods−ff) EM **−0.45…−0.52*** (ff EM 0.83 vs loop 0.24–0.39) —
+   and the joint-state mechanism is **absent/reversed** (decoupling neutral-to-helpful: Δ(nods−decoup)
+   −0.11*/ns, stepDS mechanism −0.19/−0.22*). On **rule 140** (deep but unbalanced, ff-easy) the loop merely
+   **ties** ff (ns) and decoupling does **not** collapse coherence (Δ(nods−decoup) +0.010 ns; stepDS ns) —
+   the mechanism is **absent**. The cause is legible: both new rules are per-cell *easy* (`ff_matched` reaches
+   EM 0.82–0.83 — the shallow MLP already makes coherent rows), so there is no coherence gap for the joint
+   state to fill. The loop's joint-state advantage appears **only where a shallow per-cell map fails on
+   coherence** — i.e. {13,78,92}, where `ff` EM is only ~0.31. So the M8/M9/M10 result is not about
+   "multi-output fixed-point targets" in general; it is about a **subclass of hard-convergence operators**.
+3. **Net for the §9 reframing.** Two of the three legs are now **size-robust and demonstrated across 3 sizes**:
+   (P1) tied recurrence beats a fair untied stack on EM, and (mechanism) the **JOINT** multi-output state is
+   what carries it (M10 generalizes; decoupling collapses coherence at every size). The "tiny-model artifact"
+   worry is **closed** — the edge strengthens with capacity. But the result is **narrower than 'fixed-point
+   targets'**: it is **operator-family-specific** (needs a per-cell-hard target; the two new families are
+   ff-dominated), and the headline **"loop-beats-both" is capacity-contingent** (ff wins at small; loop wins
+   and widens at large). Any §9 rewrite must scope the loop's value as *"whole-row coherence via the joint
+   multi-output state, on **hard** multi-output fixed-point targets, robust over a fair untied stack and
+   growing with model size — NOT universal across operator families, NOT a token-acc edge, NOT adaptive
+   compute, NOT depth-extrapolation."*
+
+**Caveats / open gaps.** (i) Three sizes (32/64/128), still all "tiny"; the size trend is monotonic but
+2 points × the base, not a fine sweep. (ii) New-family coverage is two rules (140 ff-easy/unbalanced, 232
+shallow/balanced) — both happen to be per-cell-easy, so M11 shows the result fails on *easy* converging
+operators but has **not** found a *hard* operator outside {13,78,92} to confirm the "hard-convergence"
+boundary is the real axis (vs something idiosyncratic to {13,78,92}); finding a balanced+deep+ff-hard
+new rule is the natural follow-up. (iii) `untied_matched` is OVER budget (1.02–1.07; small/w32 worst at
++7.1% from width-quantization) at small/base — conservative for P1 (it loses); large is budget-clean.
+(iv) n_train=4000 fixed across sizes; the large model shows no overfit wall, but a much larger model would
+need the M5 sample-scaling check. (v) w=16 dropped (limit cycles for rules 13/232); the width axis here is
+{24,32} only — M9 already resolved the fuller width sweep at base size. (vi) **`trm_decoupled` is NOT
+bit-reproducible across numerical environments** (adversarial-review finding): its 3-D batched matmul
+`(B,w,m)` has thread/BLAS-order-sensitive float reductions, unlike the 2-D arms — so its M11 EM (0.0722/
+0.0910 at rule78/w24) does **not** match M10's (0.0576/0.1101) even though every 2-D arm reproduces M9/M10
+to 4 decimals, and it is NOT bit-identical across `num_threads` (verified: 1-thread reproduces the committed
+value exactly, 4-thread gives 0.86267 vs 0.86263). The committed run is internally reproducible at
+`num_threads=1`; the EM noise is ~±0.015, dwarfed 30–50× by the +0.37…+0.66 collapse effect, so no
+conclusion is affected — but the "bit-identical" guarantees in §11(a) and the per-run determinism tests do
+**not** extend to the decoupled arm. (A reduction-order-pinned decoupled forward would fix it at the cost of
+re-baselining M10/M11; not worth it given the effect size.)
+
+---
+
+## M12 — DONE. Confirm the "hard-convergence" boundary. The joint-state coherence mechanism reproduces on ALL 5 untested orbit-mates: "balanced+deep convergence" is exactly two ECA symmetry orbits, the result is a property of the REGIME (ff-hardness the operative axis), NOT idiosyncratic to the 3 hand-picked {13,78,92}.
+
+The §11(c) follow-up M11 named. M11 showed the loop's joint-state coherence edge appears **only where a
+shallow per-cell MLP fails on coherence** (ff EM ~0.31 on {13,78,92}); M11's two new families (140
+deep/unbalanced, 232 shallow/balanced) were **ff-EASY** (ff EM 0.82–0.83) and showed **no** mechanism. So
+"ff-hardness" — not depth or balance alone — looked like the operative axis. M12 tests it: find a NEW
+balanced+deep+ff-hard converging rule and confirm the mechanism reproduces.
+
+**Screen (read-only, all 256 ECA rules).** Filter = converges cleanly at **both** w∈{24,32} (no
+limit-cycle rows over 6 seeds × 4000) **and** balanced (maj∈[0.48,0.62]) **and** deep (max-depth ≥12,
+frac>4-steps ≥0.10). Returns **EXACTLY 8 rules**, all with a near-identical profile (maj≈0.563, max-depth
+~18, frac>4 ~0.30–0.37), forming **exactly TWO symmetry orbits** (reflection + colour-complement):
+**orbit 0 = {13, 69, 79, 93}**, **orbit 1 = {78, 92, 141, 197}**. {13,78,92} already sampled both (13∈orbit0;
+78,92∈orbit1). So **"balanced+deep convergence" is the complete closure of two ECA symmetry classes — there
+is NO such operator outside it.** The 5 untested rules {69,79,93,141,197} are the mirror/complement
+orbit-mates. Config `m12_hardconv_orbit.yaml` = M11 base (hidden=latent=64) with this rule grid; M10 arm set,
+10 seeds, 100 epochs, w∈{24,32}. 112 tests (the 5 rules added to the converge fixed-point parametrize), ruff
+clean. Tracked: `results/m12_hardconv_orbit_20260623T151943_{curve,deltas,params}.csv` (+ JSON).
+
+**Per-arm EM / token-acc at w=24 (the decisive cell; baseline acc≈0.562) + headline EM deltas (sign-test; *=p<.05, 10 seeds):**
+
+| rule (orbit) | nods EM | ff EM | decoup EM | untied EM | Δ(nods−ff) | Δ(nods−untied) | Δ(nods−decoup) | Δ(stepDS−dec_sDS) | Δ(decoup−ff) |
+|---|---|---|---|---|---|---|---|---|---|
+| 69 (0)  | 0.496 | 0.304 | 0.059 | 0.097 | **+0.192*** | +0.399* | +0.436* | +0.278* | −0.245* |
+| 79 (0)  | 0.513 | 0.342 | 0.073 | 0.098 | **+0.170*** | +0.414* | +0.439* | +0.337* | −0.269* |
+| 93 (0)  | 0.517 | 0.328 | 0.072 | 0.102 | **+0.190*** | +0.416* | +0.445* | +0.280* | −0.256* |
+| 141 (1) | 0.443 | 0.299 | 0.090 | 0.124 | **+0.144*** | +0.319* | +0.353* | +0.344* | −0.209* |
+| 197 (1) | 0.467 | 0.310 | 0.071 | 0.120 | **+0.157*** | +0.347* | +0.396* | +0.349* | −0.239* |
+
+(w=32, as in M9/M11: the clean loop-beats-both fades — Δ(nods−ff) EM ns/≈0 — while the tying-positive and
+joint-state mechanism persist: Δ(nods−untied) +0.06…+0.08, Δ(nods−decoup) +0.08…+0.09, Δ(stepDS−dec_sDS)
++0.06…+0.13, all 10/0; decoup−ff negative 0/10. Same boundary as M11.)
+
+**Reading (per §2/§8 — the prediction is confirmed cleanly on every rule).**
+
+1. **ff-HARD confirmed.** ff EM is **0.30–0.34 at w=24** for all 5 rules — squarely the {13,78,92} range
+   (~0.31) and far below M11's ff-easy 140/232 (0.82–0.83). The orbit-mates have a per-cell-hard s0→s_inf
+   map, as predicted from their balanced+deep profile.
+2. **loop-beats-both reproduces (w≤24).** Δ(nods−ff) EM **+0.144…+0.192 (10/0, p<.05)** AND Δ(nods−untied)
+   **+0.32…+0.42 (10/0)** in **all 5 rules** at w=24 — the loop beats *both* param-matched controls on
+   whole-row EM, the M9/M11 base regime, now on rules never trained on. (token-acc stays matched, Δ(nods−ff)
+   acc ~0; the edge is coherence, not per-cell accuracy — the M9 mechanism statistic.)
+3. **The joint-state mechanism (M10) reproduces.** Δ(nods−decoupled) EM **+0.35…+0.45** and the
+   trainability-clean Δ(stepDS−decoupled_stepDS) EM **+0.28…+0.35** (both 10/0) in all 5; the decoupled arm
+   falls **below** the shallow §4a MLP everywhere (Δ(decoup−ff) 0/10). Severing the joint multi-output state
+   collapses the coherence — exactly M10 — on both orbits.
+4. **Both orbits confirmed, including the previously under-sampled orbit 0.** Before M12, orbit 0 had only
+   rule 13; now 69/79/93 reproduce it. Orbit 1 (78/92 before) reproduces on 141/197.
+
+**Net.** The project's one positive result is a property of the **hard-convergence regime**, not 3 lucky
+rule numbers: it holds on the **full untested membership of both ECA symmetry orbits**, with **ff-hardness**
+(a per-cell-hard fixed-point map a shallow MLP can't make coherent) the operative axis — M11's deep-but-easy
+140 and shallow 232 lacked it and showed nothing. Combined with M11 (size-robust, strengthens with capacity)
+and M10 (joint state is the cause), the loop's earned value is now well-characterised: **tied recurrence with
+a JOINT multi-output state buys whole-row coherence on hard multi-output fixed-point targets — robust over a
+fair untied stack, growing with model size, and holding across the entire hard-convergence ECA regime.**
+
+**Caveats / open gaps.** (i) **The orbit-mates are symmetry images (mirror/complement) of {13,78,92}** — to a
+non-equivariant model they are genuinely different, never-trained-on datasets (a real robustness test), but
+they are not a *dynamically independent* operator; the screen **proves none exists** among 3-neighbour ECAs
+(balanced+deep convergence = these two orbits, full stop). Exhibiting a truly independent hard-convergence
+operator requires **leaving the ECA family** (larger neighbourhoods, multi-state, or a non-CA fixed-point
+substrate) — the genuine open frontier, and the natural next probe if more generality is wanted. (ii) Base
+size only (M11 already established the size-amplification). (iii) `untied_matched` over budget (1.025/1.031,
+width-quantization) — conservative, it loses. (iv) The `trm_decoupled` cross-environment determinism caveat
+(M11 caveat vi) carries: its EM carries ~±0.015 reduction-order noise, dwarfed by the +0.35…+0.45 effect.
+
+---
+
 ## Infra — Training/eval performance (no scientific change). Bit-identical, ~2.5× faster.
 
 Not a milestone — a perf pass on the model/training/eval path. **All run outputs are byte-for-byte

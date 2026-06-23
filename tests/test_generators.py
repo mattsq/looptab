@@ -131,9 +131,15 @@ def test_converge_determinism():
     np.testing.assert_array_equal(a[1], b[1])
 
 
-@pytest.mark.parametrize("rule", [13, 78, 92])
+@pytest.mark.parametrize("rule", [13, 78, 92, 140, 232, 69, 79, 93, 141, 197])
 def test_converge_target_is_a_fixed_point(rule):
-    """The target s_inf must satisfy ca_step(s_inf)==s_inf for every M8/M8b rule used."""
+    """The target s_inf must satisfy ca_step(s_inf)==s_inf for every converge rule used.
+
+    13/78/92 are the M8/M8b families; 140/232 are the M11 additions (140 = deep-spread,
+    232 = majority/balanced). 69/79/93/141/197 are the M12 orbit-mates: the complete set of
+    balanced+deep converging ECAs is two symmetry orbits — {13,69,79,93} and {78,92,141,197} —
+    all screened for the fixed-point property at w∈{24,32} before being gridded.
+    """
     X, s_inf = make_converge(n=300, w=32, task_seed=1, sample_seed=2, rule=rule)
     np.testing.assert_array_equal(ca_step(s_inf, rule), s_inf)
 

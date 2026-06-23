@@ -1,0 +1,101 @@
+# M11 (small size) — Generalize the M8/M9/M10 coherence result across the MODEL-SIZE axis (downward).
+#
+# Companion to m11_size_base.yaml. Model size (hidden/latent) is a per-arm scalar and cannot be a
+# grid axis, so the size axis is realized as separate config files. This one shrinks the loop to
+# hidden=latent=32 (~1/4 the base width; ~4-5k params; all controls auto-rematched to that budget by
+# the runner's nearest-width search) at the 3 VERIFIED converging rules {13,78,92}. Together with
+# m11_size_base (64) and m11_size_large (128) this asks: is the joint-state coherence result
+# (P1 tying-positive, P2 loop-beats-both, the M10 joint-state mechanism) a tiny-model artifact, or
+# does it hold as the model shrinks/grows?
+#
+# Everything except hidden_dim/latent_dim and the rule grid is identical to m10_decoupled_converge.yaml
+# / m11_size_base.yaml (one knob per config: size). n_train=4000 held fixed across sizes — see the
+# overfit guard in results/LOG.md (M5 lesson): if train >> test for ALL arms in a cell, it is
+# sample-bound and carries no architecture verdict.
+
+task:
+  name: converge
+  params:
+    T: 6
+    distractors: 8
+  n_train: 4000
+  n_test: 1000
+  task_seed: 42
+  train_sample_seed: 1
+  test_sample_seed: 2
+
+grid:
+  params:
+    rule: [13, 78, 92]
+    w: [24, 32]   # w=16 dropped: rules 13 & 232 limit-cycle on a w=16 ring; w=24/32 clean for all rules
+
+curriculum:
+  param: T
+  T_min: 1
+  T_max: 6
+
+couple_n_steps_to_param: T
+
+arms:
+  - name: trm
+    label: trm_nods
+    hidden_dim: 32
+    latent_dim: 32
+    n_steps: 6
+    deep_supervision: false
+    ds_mode: final
+  - name: trm_decoupled
+    label: trm_decoupled_nods
+    hidden_dim: 32
+    latent_dim: 32
+    n_steps: 6
+    deep_supervision: false
+    ds_mode: final
+  - name: trm
+    label: trm_stepDS
+    hidden_dim: 32
+    latent_dim: 32
+    n_steps: 6
+    deep_supervision: true
+    ds_mode: step_aligned
+  - name: trm_decoupled
+    label: trm_decoupled_stepDS
+    hidden_dim: 32
+    latent_dim: 32
+    n_steps: 6
+    deep_supervision: true
+    ds_mode: step_aligned
+  - name: ff_matched
+    label: ff_matched
+    hidden_dim: 32
+    latent_dim: 32
+    n_steps: 6
+  - name: untied_matched
+    label: untied_matched
+    hidden_dim: 32
+    latent_dim: 32
+    n_steps: 6
+    deep_supervision: false
+    ds_mode: final
+
+deltas:
+  - [trm_nods, trm_decoupled_nods]
+  - [trm_stepDS, trm_decoupled_stepDS]
+  - [trm_nods, ff_matched]
+  - [trm_nods, untied_matched]
+  - [trm_decoupled_nods, ff_matched]
+  - [trm_decoupled_nods, untied_matched]
+
+budget_reference: trm_nods
+budget_tol: 0.02
+
+train:
+  epochs: 100
+  lr: 1e-3
+  weight_decay: 1e-4
+  batch_size: 256
+  device: cpu
+
+seeds: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
+parallel_workers: 4
+results_dir: results
