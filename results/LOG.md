@@ -1279,6 +1279,79 @@ conclusion is affected — but the "bit-identical" guarantees in §11(a) and the
 **not** extend to the decoupled arm. (A reduction-order-pinned decoupled forward would fix it at the cost of
 re-baselining M10/M11; not worth it given the effect size.)
 
+---
+
+## M12 — DONE. Confirm the "hard-convergence" boundary. The joint-state coherence mechanism reproduces on ALL 5 untested orbit-mates: "balanced+deep convergence" is exactly two ECA symmetry orbits, the result is a property of the REGIME (ff-hardness the operative axis), NOT idiosyncratic to the 3 hand-picked {13,78,92}.
+
+The §11(c) follow-up M11 named. M11 showed the loop's joint-state coherence edge appears **only where a
+shallow per-cell MLP fails on coherence** (ff EM ~0.31 on {13,78,92}); M11's two new families (140
+deep/unbalanced, 232 shallow/balanced) were **ff-EASY** (ff EM 0.82–0.83) and showed **no** mechanism. So
+"ff-hardness" — not depth or balance alone — looked like the operative axis. M12 tests it: find a NEW
+balanced+deep+ff-hard converging rule and confirm the mechanism reproduces.
+
+**Screen (read-only, all 256 ECA rules).** Filter = converges cleanly at **both** w∈{24,32} (no
+limit-cycle rows over 6 seeds × 4000) **and** balanced (maj∈[0.48,0.62]) **and** deep (max-depth ≥12,
+frac>4-steps ≥0.10). Returns **EXACTLY 8 rules**, all with a near-identical profile (maj≈0.563, max-depth
+~18, frac>4 ~0.30–0.37), forming **exactly TWO symmetry orbits** (reflection + colour-complement):
+**orbit 0 = {13, 69, 79, 93}**, **orbit 1 = {78, 92, 141, 197}**. {13,78,92} already sampled both (13∈orbit0;
+78,92∈orbit1). So **"balanced+deep convergence" is the complete closure of two ECA symmetry classes — there
+is NO such operator outside it.** The 5 untested rules {69,79,93,141,197} are the mirror/complement
+orbit-mates. Config `m12_hardconv_orbit.yaml` = M11 base (hidden=latent=64) with this rule grid; M10 arm set,
+10 seeds, 100 epochs, w∈{24,32}. 112 tests (the 5 rules added to the converge fixed-point parametrize), ruff
+clean. Tracked: `results/m12_hardconv_orbit_20260623T151943_{curve,deltas,params}.csv` (+ JSON).
+
+**Per-arm EM / token-acc at w=24 (the decisive cell; baseline acc≈0.562) + headline EM deltas (sign-test; *=p<.05, 10 seeds):**
+
+| rule (orbit) | nods EM | ff EM | decoup EM | untied EM | Δ(nods−ff) | Δ(nods−untied) | Δ(nods−decoup) | Δ(stepDS−dec_sDS) | Δ(decoup−ff) |
+|---|---|---|---|---|---|---|---|---|---|
+| 69 (0)  | 0.496 | 0.304 | 0.059 | 0.097 | **+0.192*** | +0.399* | +0.436* | +0.278* | −0.245* |
+| 79 (0)  | 0.513 | 0.342 | 0.073 | 0.098 | **+0.170*** | +0.414* | +0.439* | +0.337* | −0.269* |
+| 93 (0)  | 0.517 | 0.328 | 0.072 | 0.102 | **+0.190*** | +0.416* | +0.445* | +0.280* | −0.256* |
+| 141 (1) | 0.443 | 0.299 | 0.090 | 0.124 | **+0.144*** | +0.319* | +0.353* | +0.344* | −0.209* |
+| 197 (1) | 0.467 | 0.310 | 0.071 | 0.120 | **+0.157*** | +0.347* | +0.396* | +0.349* | −0.239* |
+
+(w=32, as in M9/M11: the clean loop-beats-both fades — Δ(nods−ff) EM ns/≈0 — while the tying-positive and
+joint-state mechanism persist: Δ(nods−untied) +0.06…+0.08, Δ(nods−decoup) +0.08…+0.09, Δ(stepDS−dec_sDS)
++0.06…+0.13, all 10/0; decoup−ff negative 0/10. Same boundary as M11.)
+
+**Reading (per §2/§8 — the prediction is confirmed cleanly on every rule).**
+
+1. **ff-HARD confirmed.** ff EM is **0.30–0.34 at w=24** for all 5 rules — squarely the {13,78,92} range
+   (~0.31) and far below M11's ff-easy 140/232 (0.82–0.83). The orbit-mates have a per-cell-hard s0→s_inf
+   map, as predicted from their balanced+deep profile.
+2. **loop-beats-both reproduces (w≤24).** Δ(nods−ff) EM **+0.144…+0.192 (10/0, p<.05)** AND Δ(nods−untied)
+   **+0.32…+0.42 (10/0)** in **all 5 rules** at w=24 — the loop beats *both* param-matched controls on
+   whole-row EM, the M9/M11 base regime, now on rules never trained on. (token-acc stays matched, Δ(nods−ff)
+   acc ~0; the edge is coherence, not per-cell accuracy — the M9 mechanism statistic.)
+3. **The joint-state mechanism (M10) reproduces.** Δ(nods−decoupled) EM **+0.35…+0.45** and the
+   trainability-clean Δ(stepDS−decoupled_stepDS) EM **+0.28…+0.35** (both 10/0) in all 5; the decoupled arm
+   falls **below** the shallow §4a MLP everywhere (Δ(decoup−ff) 0/10). Severing the joint multi-output state
+   collapses the coherence — exactly M10 — on both orbits.
+4. **Both orbits confirmed, including the previously under-sampled orbit 0.** Before M12, orbit 0 had only
+   rule 13; now 69/79/93 reproduce it. Orbit 1 (78/92 before) reproduces on 141/197.
+
+**Net.** The project's one positive result is a property of the **hard-convergence regime**, not 3 lucky
+rule numbers: it holds on the **full untested membership of both ECA symmetry orbits**, with **ff-hardness**
+(a per-cell-hard fixed-point map a shallow MLP can't make coherent) the operative axis — M11's deep-but-easy
+140 and shallow 232 lacked it and showed nothing. Combined with M11 (size-robust, strengthens with capacity)
+and M10 (joint state is the cause), the loop's earned value is now well-characterised: **tied recurrence with
+a JOINT multi-output state buys whole-row coherence on hard multi-output fixed-point targets — robust over a
+fair untied stack, growing with model size, and holding across the entire hard-convergence ECA regime.**
+
+**Caveats / open gaps.** (i) **The orbit-mates are symmetry images (mirror/complement) of {13,78,92}** — to a
+non-equivariant model they are genuinely different, never-trained-on datasets (a real robustness test), but
+they are not a *dynamically independent* operator; the screen **proves none exists** among 3-neighbour ECAs
+(balanced+deep convergence = these two orbits, full stop). Exhibiting a truly independent hard-convergence
+operator requires **leaving the ECA family** (larger neighbourhoods, multi-state, or a non-CA fixed-point
+substrate) — the genuine open frontier, and the natural next probe if more generality is wanted. (ii) Base
+size only (M11 already established the size-amplification). (iii) `untied_matched` over budget (1.025/1.031,
+width-quantization) — conservative, it loses. (iv) The `trm_decoupled` cross-environment determinism caveat
+(M11 caveat vi) carries: its EM carries ~±0.015 reduction-order noise, dwarfed by the +0.35…+0.45 effect.
+
+---
+
+## Infra — Training/eval performance (no scientific change). Bit-identical, ~2.5× faster.
+
 Not a milestone — a perf pass on the model/training/eval path. **All run outputs are byte-for-byte
 unchanged** (verified: parity single-output and iterated multi-output cells reproduce prior
 accuracies and exact-match exactly; 67/67 tests pass; ruff clean).
