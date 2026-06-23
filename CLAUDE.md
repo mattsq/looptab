@@ -514,22 +514,25 @@ behaviour-changing conclusions, and the next pointer. Append detail to LOG.md, n
   NEGATIVE).** Built the intermediate substrate M13 called for: a `bandwidth` knob on the threshold net
   giving a *local-but-non-CA* attractor (b small = nearest-neighbour but per-position-irregular, b=w//2 =
   dense). Ran the M10 arm set across a **local→dense ladder b∈{2,4,8,24} at w=48, 10 seeds**. **(1)
-  Locality makes the task ff-EASY, not loop-favourable:** Δ(loop−ff) is **negative at EVERY bandwidth on
-  accuracy** (all 0/10, p=.002), and the loop's EM deficit is **LARGEST at the most-local end** (b=2: ΔEM
-  **−0.80**, ff acc 0.999 ≈ solved) and shrinks toward dense — `ff_matched` is the **best arm across the
-  whole ladder**. A *local* per-cell map (output depends on few nearby inputs) is exactly what a shallow
-  MLP represents well, so **there is no local-AND-hard regime** here. **(2) The active ingredient is the
-  iterated translation-invariant local RULE of the CA, not spatial locality:** the ECA is local-but-hard
-  because composing a *uniform* rule over convergence depth builds a wide light-cone receptive field the
-  shallow map can't capture; the banded net has locality WITHOUT that depth-composition (median depth
-  1–2) ⇒ shallow-local ⇒ ff-easy. **(3) The joint-state mechanism does NOT transfer** (as M13): the
-  trainability-clean Δ(stepDS−decoupled_stepDS) is ns at both ladder extremes, tiny in between — nothing
-  like the ECA's +0.32…+0.66. **(4) The tying-positive P1 SURVIVES and is now BUDGET-CLEAN** across the
-  full local→dense ladder (Δ(loop−untied) acc 10/0 p=.002 at all four b; budget audit within ±2%, unlike
-  M13's over-budget base) — the one regime-independent leg, demonstrated off-CA at both ends. **Net: the
-  M8–M12 result is bounded to LOCAL-UPDATE (CA) hard-convergence — NOT coupling locality, NOT
-  hard-convergence fixed points in general; only P1 generalizes.** This CLOSES the last open experimental
-  thread (locality); the sole remaining §11(c) item is the §9-gate rewrite (a writing task).
+  Locality does NOT revive the loop's edge:** Δ(loop−ff) is **negative at EVERY bandwidth on accuracy**
+  (all 0/10, p=.002), `ff_matched` is the **best arm across the whole ladder**, and the direct test of
+  M13's hypothesis — the trainability-clean joint-state Δ(stepDS−decoupled_stepDS) — is **null at both the
+  local and dense ends** (ns), nothing like the ECA's +0.32…+0.66. (The dramatic b=2 ΔEM −0.80 is the
+  LEAST informative cell: an *easy* task, ff acc 0.999, where BOTH recurrent arms collapse — recurrence is
+  pointless there. The load-bearing cells are the hard end b=8/dense, where the loop still loses and the
+  mechanism Δ is null.) **(2) ff tracks per-cell FAN-IN, and bandwidth↔depth is CONFOUNDED:** ff-easiness
+  ⇔ small fan-in ≈ light-cone ≈ bandwidth × convergence-depth; the banded net drops the uniform rule AND
+  collapses depth (median 1–2 vs the ECA's tail to ~22) at once, so M14 **cannot separate** "iterated
+  translation-invariant local rule" from "deep convergence" as the loop-edge ingredient — the uniform-rule
+  reading is a HYPOTHESIS, not isolated here. **(3) The joint-state mechanism does NOT transfer** (as M13).
+  **(4) The tying-positive P1 SURVIVES** across the full local→dense ladder (Δ(loop−untied) acc 10/0 p=.002
+  at all four b; budget within ±2%, though `untied` is ~1.7% *under* budget so P1 is conservative not
+  exactly matched, and the local-ladder γ=10 is loud-guard-empirical not PSD-guaranteed) — the one
+  regime-independent leg, demonstrated off-CA at both ends. **Net: the M8–M12 result is bounded to
+  LOCAL-UPDATE (CA) hard-convergence — NOT explained by coupling locality, NOT hard-convergence fixed
+  points in general; only P1 generalizes. Whether the CA-specific ingredient is the uniform rule or the
+  deep convergence is NOT resolved by M14.** This CLOSES the last open experimental thread (locality); the
+  sole remaining §11(c) item is the §9-gate rewrite (a writing task).
 - Each leg still rests on few configs: Task A now multi-`d`/multi-`k` (M4) and the d≥40 wall has
   been swept over `n_train` (M5 — it is sample-bound and lifts to all-solve, except d=80,k=5 which
   is capacity-bound); Task B depth swept (M3a) but unlearnable past T=4 one-shot; M3b on one rule
@@ -574,10 +577,12 @@ specific** — at base AND large size it does NOT reproduce (loop-beats-both fai
 arm; the trainability-clean joint-state mechanism is ns in all 4 cells; scaling does not revive it), with only
 the tying-positive P1 surviving. The M8–M12 result is now BOUNDED to local-update (CA) hard-convergence.
 **M14** built the intermediate substrate M13 asked for (a `bandwidth` knob → a *local-but-non-CA* threshold
-net) and **FALSIFIED the locality hypothesis**: across a local→dense ladder (b∈{2,4,8,24}, w=48), locality
-makes the task **ff-EASY** (loop loses to ff at every b, worst at the most-local end, ΔEM −0.80) — so the
-loop's edge is the CA's *iterated translation-invariant local rule*, NOT coupling locality. Only the
-**budget-clean tying-positive P1** survives. This **closes the last open experimental thread**.
+net) and showed **a local-but-non-CA net does NOT revive the loop's edge**: across a local→dense ladder
+(b∈{2,4,8,24}, w=48) the loop loses to ff at every b and the trainability-clean joint-state Δ is null at
+the hard end — so the M8–M12 result is **not explained by coupling locality**. (M14 confounds bandwidth
+with convergence depth, so "it's the iterated uniform rule" vs "it's deep convergence" is NOT separated —
+a hypothesis, not isolated.) Only the conservative **tying-positive P1** survives off-CA. This **closes
+the last open experimental thread**.
 
 **No milestone is currently in flight.** Open threads, in rough priority:
 - **THE highest-value remaining action — relax the literal §9 gate wording (now even better-scoped after the
@@ -591,7 +596,8 @@ loop's edge is the CA's *iterated translation-invariant local rule*, NOT couplin
   CA/local-update specific (M13)**, NOT token-acc, NOT adaptive compute, NOT depth-extrapolation. Rewrite §9's
   gate around this; do **NOT** build Task C. *(This is a writing task — the experiments are done.)* Note
   M14 further tightens the scope: it is **not even about coupling locality** (a local non-CA net is
-  ff-easy) — it is the CA's *iterated translation-invariant local rule*. Fold that into the rewrite.
+  ff-easy and the loop loses) — the CA-specific ingredient is *either* the iterated translation-invariant
+  rule *or* the deep convergence (M14 confounds the two; do not assert one). Fold that into the rewrite.
 - **The experimental program is effectively complete.** No open experimental thread remains after M14
   closed the locality question. Lowest-value leftovers only: a finer/larger size sweep; an
   intermediate *local-AND-hard* non-CA substrate (would need depth-composed receptive fields without a
@@ -603,8 +609,10 @@ loop's edge is the CA's *iterated translation-invariant local rule*, NOT couplin
   the rule/operator generality within ECAs (M11/M12 — family-specific to hard-convergence = two symmetry
   orbits, all 8 members confirmed, no other balanced+deep ECA exists); LEAVING the ECA family (M13 — the
   joint-state result is CA/local-update specific, does not transfer to a dense threshold net at any size);
-  the LOCALITY hypothesis (M14 — a local-but-non-CA threshold net is ff-easy; the loop's edge needs the
-  CA's iterated uniform local rule, not coupling locality; only the budget-clean P1 survives off-CA).**
+  the LOCALITY hypothesis (M14 — a local-but-non-CA threshold net is ff-easy and the loop loses; the
+  M8–M12 edge is NOT explained by coupling locality. NB M14 confounds bandwidth with convergence depth,
+  so "uniform rule vs deep convergence" as the CA-specific ingredient is NOT separated; only the
+  conservative P1 survives off-CA).**
   A bigger-model probe of d=80,k=5 must scale the budget for *all* arms (M5).
 
 ## 12. Key references (for grounding a cold agent)

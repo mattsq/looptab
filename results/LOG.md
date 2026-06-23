@@ -1565,8 +1565,9 @@ regime, do not skip it.** A locality probe has an intrinsic confound: reducing b
 guaranteed convergence needs a large self-coupling γ that dominates sparse local couplings. The
 numpy pre-screen mapped (bandwidth × γ × w) for convergence (loud-guard pass over 10 task_seeds,
 both sample seeds, n=5000), balance, and triviality:
-- **w=24/32 have NO clean local regime** — at the clearly-local end (b≤2) you cannot get both 10/10
-  convergence AND low triviality (b=1 is ~84% identity or non-convergent).
+- **w=24/32 have a tight margin** — at the clearly-local end (b≤2) it is hard to get both 10/10
+  convergence AND low triviality (b=1 ~84% identity or non-convergent; b=2 ~15% trivial), so w=48 was
+  chosen for cleaner margins (not because a local regime is strictly impossible at w≤32).
 - **w=48 does:** a single **γ=10** gives bandwidth {2,4,8} all 10/10-convergent, balanced (~0.50),
   non-trivial (triv ≤5%), depth median 1–2 (≥99% settle in ≤6 steps ⇒ `n_steps=6` ample). The
   **dense** end (b=24) needs **γ=16** (γ=10 leaves it non-convergent on 3/10 seeds) — so a single γ
@@ -1587,41 +1588,51 @@ both sample seeds, n=5000), balance, and triviality:
 Joint-state mechanism (the M10 ablation), EM: Δ(loop−decoupled) final-loss +0.143/+0.033/+0.012/+0.019
 (b=2/4/8/24); the *trainability-clean* Δ(stepDS−decoupled_stepDS) EM is **ns at the local end**
 (b=2: +0.091, 8/2, p=.11) and **ns at dense** (b=24: +0.014, 8/1, p=.039≈borderline), significant but
-tiny at b=4/8 (+0.030/+0.010). Budget audit: **✓ within ±2% for every matched arm in every cell** —
-unlike M13's over-budget base `untied_matched`, so M14's P1 is **budget-clean**.
+tiny at b=4/8 (+0.030/+0.010). Budget audit: within ±2% for every matched arm in every cell
+(`untied_matched` ratio 0.983 — i.e. ~1.7% *under* budget, so P1 is **conservative** (the loop beats a
+marginally *smaller* control), within tol but not exactly matched; cf. M13's base which was *over*
+budget). The local ladder pins γ=10, which converges 10/10 by the loud guard but is **not** PSD-
+guaranteed for every seed (auto-γ reached ~12 on some functions) — empirical, not by-construction; the
+dense anchor's γ=16 is PSD-clean. A single γ cannot span local+dense, hence the split configs and the
+γ boundary between the b∈{2,4,8} sub-ladder and the b=24 anchor.
 
-**Reading (per §8 — the locality hypothesis is FALSIFIED, cleanly).**
-- **Locality does NOT revive the loop's edge — it does the OPPOSITE.** Δ(loop−ff) is **negative at
-  every bandwidth** on accuracy (all 0/10, p=.002), and the loop's EM deficit is **largest at the
-  most-local end** (b=2: ΔEM −0.80) and *shrinks* toward dense. `ff_matched` is the **best arm across
-  the entire ladder**. So a *local, non-CA* per-cell map is exactly where the loop does *worst* vs the
-  shallow control — the inverse of the M13 prediction.
-- **Why: locality makes the per-cell map EASY for a shallow MLP.** ff acc runs 0.999 (b=2,
-  near-solved) → 0.906 (dense). A *local* output cell depends on only a few nearby inputs, which is
-  precisely what a shallow MLP represents well — so there is **no local-AND-hard regime** in this
-  substrate. The very locality the hypothesis wanted to supply is what removes the coherence gap. The
-  ECA is local-but-HARD for a different reason: it iterates a *translation-invariant* rule over
-  convergence depth, building a wide effective (light-cone) receptive field that a shallow per-cell
-  map cannot capture but the loop (re-iterating the local step) can. Banding the Hopfield gives
-  locality *without* that depth-composed receptive field (median depth 1–2), so it stays
-  shallow-local = ff-easy. **The ECA's active ingredient is the iterated uniform local RULE, not
-  coupling locality.**
-- **The joint-state mechanism does NOT transfer** (consistent with M13, NOT the ECAs): the
-  trainability-clean Δ(stepDS−decoupled_stepDS) is ns at both extremes of the ladder and tiny in
-  between — nothing like the ECA's +0.32…+0.66 (M10/M11). Whatever small final-loss positive appears
-  is fragile, exactly as on M13's dense net.
-- **The tying-positive P1 SURVIVES, and is now budget-clean across a full local→dense ladder.**
-  Δ(loop−untied) is positive and significant at **all four bandwidths** (acc 10/0, p=.002 throughout;
-  EM 10/0 at b=2/4/8, 9/1 p=.021 at dense), strongest local (+0.22 acc) decaying to dense (+0.028),
-  with the budget audit within ±2% (so, unlike M13 base, no capacity caveat). P1 is the **one
-  regime-independent leg**, now demonstrated off-CA at both the local and dense ends.
+**Reading (per §8 — the locality hypothesis FAILS to revive the edge; mechanistic attribution is a hypothesis, not isolated).**
+- **Locality does NOT revive the loop's edge — if anything the reverse.** Δ(loop−ff) is **negative at
+  every bandwidth** on accuracy (all 0/10, p=.002); `ff_matched` is the **best arm across the entire
+  ladder**. The direct test of M13's hypothesis (does locality revive the *joint-state coherence
+  mechanism*?) is the trainability-clean Δ(stepDS−decoupled_stepDS), which is **null at both the local
+  and dense ends** (ns) and tiny in between — nothing like the ECA's +0.32…+0.66. So a *local, non-CA*
+  per-cell map does not bring the mechanism back: clean null on the hypothesis as posed.
+- **De-emphasise the b=2 ΔEM −0.80 — it is the LEAST informative cell.** b=2 is an *easy* task (ff acc
+  0.999, near-solved) where **both** recurrent arms collapse vs ff (loop ΔEM −0.80, decoupled −0.94) —
+  i.e. "recurrence is pointless on an easy task," not a joint-state result. The load-bearing cells are
+  the *hard* end (b=8, dense: ff acc 0.92/0.91, EM low for all arms) where the loop **still** fails to
+  beat ff and the mechanism delta is **null**. The headline is "no revival even where the task is hard,"
+  not the dramatic easy-task number.
+- **Why ff tracks bandwidth: per-cell FAN-IN, and the bandwidth↔depth CONFOUND (the key caveat).** ff
+  acc runs 0.999 (b=2) → 0.906 (dense). A shallow MLP is easy⇔each output cell has small fan-in, and
+  fan-in ≈ light-cone width ≈ **bandwidth × convergence-depth**. The banded net changes **two** things
+  vs the ECA at once: it drops the *uniform/translation-invariant* rule AND it collapses convergence
+  depth (median 1–2 here vs the ECA's 2–3 with a tail to ~22). So M14 **cannot cleanly separate**
+  "uniform local rule" from "deep convergence / wide light-cone" as the loop-edge ingredient — both are
+  removed together. The ECA achieves large fan-in via *depth* (radius-1 rule iterated deep); the dense
+  Hopfield via *bandwidth* at shallow depth; both are ff-hard, yet the loop won only on the ECA (M13).
+  **Hypothesis (NOT isolated by M14):** the loop's edge needs the *iterated translation-invariant local
+  rule* specifically — but "it's depth-composition, not the uniform rule" remains an equally-supported
+  alternative this experiment does not rule out.
+- **The tying-positive P1 SURVIVES across a full local→dense ladder.** Δ(loop−untied) is positive and
+  significant at **all four bandwidths** (acc 10/0, p=.002 throughout; EM 10/0 at b=2/4/8, 9/1 p=.021 at
+  dense), strongest local (+0.22 acc) decaying to dense (+0.028). Budget is within ±2% (untied ~1.7%
+  under, so conservative) — broader than M13's base P1 but with the under-budget/empirical-γ caveats
+  above. P1 remains the **one regime-independent leg**, now demonstrated off-CA at both ends.
 
-**Net — M14 CLOSES the locality thread (the last open experimental question in §11(c)).** The
-M8–M12 joint-state coherence result is **not about coupling locality** — both a *dense* (M13) and a
-*local* non-CA threshold net fail to revive it, and locality actually *helps the control*. The result
-is specific to the **iterated translation-invariant local RULE of a CA** (local-update + uniform rule
-composed over convergence depth), not to spatial locality per se nor to hard-convergence fixed points
-in general. The only survivor off-CA is the **budget-clean tying-positive P1**. After M14 the sole
-remaining §11(c) item is the **§9-gate rewrite** (a writing task; the experiments are done). Tracked
-summaries: `results/m14_local_screen_*.{json,csv}`, `results/m14_local_ladder_*.{json,csv}`,
+**Net — M14 CLOSES the locality thread (the last open experimental question in §11(c)).** A *local*
+non-CA threshold net fails to revive the loop's coherence mechanism (trainability-clean Δ null at the
+hard end; loop never beats ff), just as M13's *dense* net did — so the M8–M12 result is **not explained
+by coupling locality**. The remaining mechanistic question — *uniform local rule* vs *deep convergence*
+— is **not separated by this experiment** (the banded net removes both); the writeup states the
+uniform-rule reading as a hypothesis, not a result. The only survivor off-CA is the **tying-positive
+P1** (with the under-budget / empirical-γ caveats). After M14 the sole remaining §11(c) item is the
+**§9-gate rewrite** (a writing task; the experiments are done). Tracked summaries:
+`results/m14_local_screen_*.{json,csv}`, `results/m14_local_ladder_*.{json,csv}`,
 `results/m14_dense_anchor_*.{json,csv}`.
