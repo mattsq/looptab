@@ -1,5 +1,6 @@
 from .generators import (
     make_converge,
+    make_hopfield,
     make_iterated,
     make_linear,
     make_multi_parity,
@@ -12,4 +13,5 @@ __all__ = [
     "make_multi_parity",
     "make_iterated",
     "make_converge",
+    "make_hopfield",
 ]

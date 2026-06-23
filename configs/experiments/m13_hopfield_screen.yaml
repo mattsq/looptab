@@ -1,0 +1,77 @@
+# M13 screen — characterize the `hopfield` (threshold-net) regime before the main grid.
+#
+# Convergence is GUARANTEED BY CONSTRUCTION (γ self-coupling makes W+γI PSD ⇒ synchronous
+# threshold dynamics settle to a fixed point, no 2-cycles) and is enforced by the generator's
+# loud guard, multi-seed-verified at gamma=16 (0/10 raises over task_seeds 42..51 at w∈{24,32}).
+# So this screen tunes the REMAINING axis that decides whether the substrate can test the result:
+# FF-HARDNESS. The loop's joint-state edge only appears where a shallow per-cell map FAILS on
+# coherence (M11: ff-easy {140,232} give the loop no gap to fill). We sweep n_patterns (the
+# Hopfield-capacity / hardness dial) and read ff_matched EM: we want the HARD regime (ff EM ~0.3,
+# matching the hard-convergence ECAs), with trm_nods showing a coherence gap above it.
+#
+# Light by design (screen, not the experiment): w=24, 3 seeds. The main grid
+# (m13_hopfield_converge) locks n_patterns=12 — ff EM ~0.24, the hard regime.
+
+task:
+  name: hopfield
+  params:
+    weights: hebbian
+    gamma: 16
+    distractors: 8
+    T: 6
+  n_train: 4000
+  n_test: 1000
+  task_seed: 42
+  train_sample_seed: 1
+  test_sample_seed: 2
+
+grid:
+  params:
+    w: [24]
+    n_patterns: [8, 12, 16]
+
+curriculum:
+  param: T
+  T_min: 1
+  T_max: 6
+
+couple_n_steps_to_param: T
+
+arms:
+  - name: ff_matched
+    label: ff_matched               # the hardness probe — want EM ~0.3 (hard regime)
+    hidden_dim: 64
+    latent_dim: 64
+    n_steps: 6
+  - name: trm
+    label: trm_nods                 # does the joint loop show a coherence gap above ff?
+    hidden_dim: 64
+    latent_dim: 64
+    n_steps: 6
+    deep_supervision: false
+    ds_mode: final
+  - name: untied_matched
+    label: untied_matched           # §4b fair untied grounding
+    hidden_dim: 64
+    latent_dim: 64
+    n_steps: 6
+    deep_supervision: false
+    ds_mode: final
+
+deltas:
+  - [trm_nods, ff_matched]          # the coherence gap the main grid will test
+  - [trm_nods, untied_matched]
+
+budget_reference: trm_nods
+budget_tol: 0.02
+
+train:
+  epochs: 100
+  lr: 1e-3
+  weight_decay: 1e-4
+  batch_size: 256
+  device: cpu
+
+seeds: [0, 1, 2]
+parallel_workers: 3
+results_dir: results

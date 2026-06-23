@@ -180,3 +180,132 @@ def make_converge(
         traj = np.stack(frames, axis=1).astype(np.int64) if traj_len > 0 else s0[:, :0, :]
         return X.astype(np.float32), s_inf.astype(np.int64), traj
     return X.astype(np.float32), s_inf.astype(np.int64)
+
+
+def _build_hopfield_weights(
+    w: int,
+    task_seed: int,
+    weights: str,
+    n_patterns: int,
+    weight_scale: int,
+    density: float,
+) -> np.ndarray:
+    """Integer symmetric zero-diagonal weight matrix W (the 'function', fixed by task_seed).
+
+    Two families (both all-integer ⇒ the generator is bit-exact, no float matmul determinism
+    risk — contrast the M11 ``trm_decoupled`` caveat):
+      - ``"hebbian"``: classic Hopfield W = Σ_μ ξ^μ (ξ^μ)^T over ``n_patterns`` random ±1
+        patterns, diagonal zeroed. ``n_patterns`` is the ff-hardness dial — few patterns → few
+        attractors a shallow MLP can map; many (≳0.14·w, the Hopfield capacity) → spurious
+        attractors + complex basins → ff-hard.
+      - ``"random"``: symmetric integer matrix, entries in {-weight_scale..weight_scale} at the
+        given off-diagonal ``density``. ``weight_scale``/``density`` are the hardness dials.
+    """
+    fn_rng = np.random.default_rng(task_seed)
+    if weights == "hebbian":
+        patterns = fn_rng.integers(0, 2, size=(n_patterns, w)).astype(np.int64) * 2 - 1
+        W = patterns.T @ patterns  # (w, w) integer, symmetric, PSD
+    elif weights == "random":
+        M = fn_rng.integers(-weight_scale, weight_scale + 1, size=(w, w)).astype(np.int64)
+        if density < 1.0:
+            M = M * (fn_rng.random((w, w)) < density)
+        U = np.triu(M, 1)
+        W = U + U.T
+    else:
+        raise ValueError(f"make_hopfield: unknown weights mode {weights!r} (use hebbian|random)")
+    np.fill_diagonal(W, 0)
+    return W.astype(np.int64)
+
+
+def _threshold_step(s: np.ndarray, W: np.ndarray, gamma: int) -> np.ndarray:
+    """Synchronous threshold update with self-coupling; s in {-1,+1}. Tie (field==0) → keep.
+
+    ``field = s·W + γ·s`` (W symmetric ⇒ s·W == W·s per cell). The self-coupling γ·s damps
+    parallel 2-cycles: with γ ≥ -λ_min(W), W+γI is PSD and the parallel energy is non-increasing
+    ⇒ convergence to a fixed point. The 'keep current' tie-break is the convergence-safe choice.
+    """
+    field = s @ W + gamma * s  # integer (n, w)
+    return np.where(field > 0, 1, np.where(field < 0, -1, s))
+
+
+def make_hopfield(
+    n: int,
+    w: int,
+    task_seed: int,
+    sample_seed: int,
+    weights: str = "hebbian",
+    n_patterns: int = 8,
+    weight_scale: int = 1,
+    density: float = 1.0,
+    gamma: int | None = None,
+    gamma_margin: int = 1,
+    distractors: int = 0,
+    T: int | None = None,
+    return_trajectory: bool = False,
+    max_steps: int | None = None,
+):
+    """Non-ECA hard-convergence FIXED-POINT task (M13): map s0 → a threshold-net attractor.
+
+    The M13 substrate for testing whether the joint-state coherence result (M8–M12) is a property
+    of the hard-convergence *regime* or of cellular automata specifically. Unlike ``make_converge``
+    (a *local* 3-neighbour CA), here the update is a **dense, fully-coupled** binary threshold /
+    Hopfield network — maximally unlike a local CA, and basin-of-attraction is *intrinsically* a
+    whole-row property, the strongest possible probe of the joint-state hypothesis. The contract
+    (signature shape, ``(X, s_inf[, traj])`` return, loud non-convergence guard, and
+    ``return_trajectory``) mirrors ``make_converge`` so it slots into the existing
+    dataset/trajectory machinery unchanged.
+
+    Function (fixed by ``task_seed``): integer symmetric zero-diagonal ``W`` (see
+    ``_build_hopfield_weights``) + integer self-coupling ``gamma``. Rows (fixed by ``sample_seed``):
+    s0 ∈ {-1,+1}^(n,w), iterated synchronously to the global fixed point. Outputs are mapped to
+    {0,1} to match the binary readout heads and the ``coherence_excess`` metric.
+
+    ``gamma``: pass an explicit int for committed runs (keeps the generator purely integer ⇒
+    bit-exact). ``None`` auto-derives ``ceil(-λ_min(W)) + gamma_margin`` (guarantees synchronous
+    convergence by making W+γI PSD) — this path uses a float eigen-solve, so it is for *screening*;
+    the loud guard + a multi-seed screen (M12 lesson) verify the pinned int gamma converges.
+    """
+    W = _build_hopfield_weights(w, task_seed, weights, n_patterns, weight_scale, density)
+    if gamma is None:
+        lam_min = float(np.linalg.eigvalsh(W.astype(np.float64)).min())
+        gamma = max(int(np.ceil(-lam_min - 1e-9)) + gamma_margin, 0)
+
+    row_rng = np.random.default_rng(sample_seed)
+    s0 = row_rng.integers(0, 2, size=(n, w)).astype(np.int64) * 2 - 1  # {-1,+1}
+    if max_steps is None:
+        max_steps = 8 * w  # generous cap; PSD self-coupling converges, depth is the screened axis
+
+    s = s0.copy()
+    for _ in range(max_steps):
+        nxt = _threshold_step(s, W, gamma)
+        if np.array_equal(nxt, s):  # every row stationary => global fixed point
+            break
+        s = nxt
+    s_inf = s
+    if not np.array_equal(_threshold_step(s_inf, W, gamma), s_inf):
+        raise ValueError(
+            f"make_hopfield: did not reach a fixed point within {max_steps} steps (w={w}, "
+            f"weights={weights}, gamma={gamma}); raise gamma/gamma_margin or max_steps, or "
+            f"reduce n_patterns/weight_scale."
+        )
+
+    def _to01(arr):
+        return (arr + 1) // 2  # {-1,+1} -> {0,1}
+
+    X = _to01(s0)
+    if distractors > 0:
+        # static, uninformative distractor bits drawn from the function RNG (shared train/test)
+        fn_rng = np.random.default_rng(task_seed)
+        noise = fn_rng.integers(0, 2, size=(n, distractors))
+        X = np.concatenate([X, noise], axis=-1)
+
+    if return_trajectory:
+        traj_len = T if T is not None else max_steps
+        cur = s0.copy()
+        frames = []
+        for _ in range(traj_len):
+            cur = _threshold_step(cur, W, gamma)
+            frames.append(_to01(cur).copy())
+        traj = np.stack(frames, axis=1).astype(np.int64) if traj_len > 0 else _to01(s0)[:, :0, :]
+        return X.astype(np.float32), _to01(s_inf).astype(np.int64), traj
+    return X.astype(np.float32), _to01(s_inf).astype(np.int64)

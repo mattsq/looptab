@@ -1,0 +1,10 @@
+config,arm,n_params,ref_params,ratio,role,within_tol
+"w=24, n_patterns=8",ff_matched,16592,16624,0.9981,matched,True
+"w=24, n_patterns=8",trm_nods,16624,16624,1.0000,reference,True
+"w=24, n_patterns=8",untied_matched,17033,16624,1.0246,matched,False
+"w=24, n_patterns=12",ff_matched,16592,16624,0.9981,matched,True
+"w=24, n_patterns=12",trm_nods,16624,16624,1.0000,reference,True
+"w=24, n_patterns=12",untied_matched,17033,16624,1.0246,matched,False
+"w=24, n_patterns=16",ff_matched,16592,16624,0.9981,matched,True
+"w=24, n_patterns=16",trm_nods,16624,16624,1.0000,reference,True
+"w=24, n_patterns=16",untied_matched,17033,16624,1.0246,matched,False

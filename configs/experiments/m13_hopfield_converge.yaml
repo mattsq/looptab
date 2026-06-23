@@ -1,0 +1,118 @@
+# M13 — Does the joint-state coherence result LEAVE the ECA family?
+#
+# M8–M12 established one defensible positive: tied recurrence with a JOINT multi-output state
+# buys whole-row coherence on HARD multi-output fixed-point targets — robust over a fair untied
+# stack (P1), growing with model size (M11), mechanism = the joint state (M10), holding across the
+# ENTIRE hard-convergence ECA regime (M12: both symmetry orbits, all 8 rules). M12 also proved the
+# balanced+deep-converging ECAs are EXACTLY those two orbits, so every ECA test is dynamically a
+# mirror/complement of {13,78,92}. The one open scientific question: is the result a property of
+# the hard-convergence REGIME, or of cellular automata specifically?
+#
+# M13 answers it by LEAVING the ECA family. The `hopfield` task is a non-CA hard-convergence
+# fixed-point target: a dense, fully-coupled binary threshold / Hopfield attractor net (s0 →
+# converged attractor). Maximally unlike a local 3-neighbour CA, and basin-of-attraction is
+# INTRINSICALLY a whole-row property — the strongest possible probe of the joint-state hypothesis.
+#
+# Single knob vs M10 (m10_decoupled_converge): the substrate (converge/ECA → hopfield/threshold
+# net). Arms, sizes, seeds, curriculum, deltas, widths all inherited VERBATIM from M10 for clean
+# comparability. Locked regime from the multi-seed screen (m13_hopfield_screen): weights=hebbian,
+# n_patterns=12, gamma=16, distractors=8 — verified balanced (majority ~0.50), per-row convergence
+# depth median ~2-3 (>87% settle in ≤4 steps so n_steps=6 is ample; batch-max ~10 ≪ the 8·w cap),
+# 0/10 non-convergence raises over task_seeds 42..51 at both widths, and ff-HARD (shallow ff_matched
+# EM ~0.24 @ w=24, ~0.16 @ w=32 — the hard regime the result needs).
+#
+# PRE-REGISTERED honesty fork (§8), read off the four load-bearing deltas:
+#   - REPRODUCES (loop beats both on EM, decoupling collapses coherence Δ(nods−decoupled)>0,
+#     decoupled<ff) ⇒ the result is a property of the hard-convergence REGIME, not cellular
+#     automata — the strongest generalization; closes the open thread.
+#   - FAILS (ff not hard here / tying or joint-state neutral) ⇒ the result is CA/local-update
+#     specific — a genuine negative that BOUNDS the claim. Either is publishable-internally.
+
+task:
+  name: hopfield
+  params:
+    weights: hebbian
+    n_patterns: 12
+    gamma: 16
+    distractors: 8
+    T: 6
+  n_train: 4000
+  n_test: 1000
+  task_seed: 42
+  train_sample_seed: 1
+  test_sample_seed: 2
+
+grid:
+  params:
+    w: [24, 32]
+
+curriculum:
+  param: T
+  T_min: 1
+  T_max: 6
+
+couple_n_steps_to_param: T
+
+arms:
+  - name: trm
+    label: trm_nods                 # joint loop, final loss (budget reference)
+    hidden_dim: 64
+    latent_dim: 64
+    n_steps: 6
+    deep_supervision: false
+    ds_mode: final
+  - name: trm_decoupled
+    label: trm_decoupled_nods       # per-cell refinement, equal (final) supervision — THE ablation
+    hidden_dim: 64
+    latent_dim: 64
+    n_steps: 6
+    deep_supervision: false
+    ds_mode: final
+  - name: trm
+    label: trm_stepDS               # joint loop, step-aligned DS
+    hidden_dim: 64
+    latent_dim: 64
+    n_steps: 6
+    deep_supervision: true
+    ds_mode: step_aligned
+  - name: trm_decoupled
+    label: trm_decoupled_stepDS     # per-cell refinement, equal step-aligned supervision
+    hidden_dim: 64
+    latent_dim: 64
+    n_steps: 6
+    deep_supervision: true
+    ds_mode: step_aligned
+  - name: ff_matched
+    label: ff_matched               # §4a shallow MLP grounding
+    hidden_dim: 64
+    latent_dim: 64
+    n_steps: 6
+  - name: untied_matched
+    label: untied_matched           # §4b fair untied stack, final loss
+    hidden_dim: 64
+    latent_dim: 64
+    n_steps: 6
+    deep_supervision: false
+    ds_mode: final
+
+deltas:
+  - [trm_nods, trm_decoupled_nods]      # M10 headline: joint vs decoupled @ equal final loss
+  - [trm_stepDS, trm_decoupled_stepDS]  # joint vs decoupled @ equal step-aligned supervision
+  - [trm_nods, ff_matched]              # loop-beats-both leg vs §4a
+  - [trm_nods, untied_matched]          # tying-positive P1 vs §4b
+  - [trm_decoupled_nods, ff_matched]    # does the decoupled head still beat the shallow MLP?
+  - [trm_decoupled_nods, untied_matched]  # does the decoupled head still beat the fair untied?
+
+budget_reference: trm_nods
+budget_tol: 0.02
+
+train:
+  epochs: 100
+  lr: 1e-3
+  weight_decay: 1e-4
+  batch_size: 256
+  device: cpu
+
+seeds: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
+parallel_workers: 4
+results_dir: results

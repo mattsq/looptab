@@ -230,9 +230,13 @@ behaviour-changing conclusions, and the next pointer. Append detail to LOG.md, n
 - **Tasks:** Task 0 `linear` (smoke), Task A `parity`, Task B `iterated` (CA), `multi_parity`
   (M6a both-axes probe: `w` independent k-parities), and `converge` (M8 variable-compute
   FIXED-POINT task: map s0 → the converged fixed point s_inf of a *converging* CA, e.g. rule 92;
-  per-instance depth varies, target is a genuine fixed point). Generators in
-  `src/looptab/data/generators.py`, determinism-tested in `tests/test_generators.py`;
-  `make_trajectory_dataset` dispatches iterated/converge. Task C (hierarchy) is **gated, unbuilt** (§9).
+  per-instance depth varies, target is a genuine fixed point), and `hopfield` (M13 NON-ECA
+  hard-convergence probe: a dense binary threshold / Hopfield attractor net, s0 → converged
+  attractor; integer symmetric `W` + integer self-coupling `γ` for guaranteed synchronous
+  convergence — all-integer ⇒ bit-exact; built to test whether the joint-state result leaves the
+  ECA family). Generators in `src/looptab/data/generators.py`, determinism-tested in
+  `tests/test_generators.py`; `make_trajectory_dataset` dispatches iterated/converge/hopfield. Task
+  C (hierarchy) is **gated, unbuilt** (§9).
 - **Models/arms:** `trm` (weight-tied refinement loop, optional per-step readouts),
   `ff_matched` (§4a param-matched shallow MLP), `untied_stack` (§4b untied, ~`n_steps`×
   params — a confounded ceiling, NOT param-matched), `untied_matched` (§4b untied,
@@ -269,7 +273,8 @@ behaviour-changing conclusions, and the next pointer. Append detail to LOG.md, n
 - **Configs:** `configs/experiments/` (m0…m2-confirm, m3a/m3b, m4_parity_grid,
   m5_parity_wall_n16k/n64k, m6a_multi_parity_grid, m7_progressive_extrapolation, m7b_progressive_alpha1,
   m8_converge_adaptive, m8b_converge_grid, m8c_converge_fair, m9_converge_width,
-  m10_decoupled_converge, m11_size_{small,base,large}, m12_hardconv_orbit).
+  m10_decoupled_converge, m11_size_{small,base,large}, m12_hardconv_orbit,
+  m13_hopfield_{screen,converge,large}).
 - **`converge` rules — verified converging families:** {13, 78, 92} (M8), {140, 232} (M11), {69, 79, 93,
   141, 197} (M12). **The "balanced+deep converging" ECAs are EXACTLY 8 rules = two symmetry orbits** (M12
   256-rule screen): orbit 0 {13,69,79,93}, orbit 1 {78,92,141,197} — all are ff-hard and show the joint-state
@@ -283,7 +288,18 @@ behaviour-changing conclusions, and the next pointer. Append detail to LOG.md, n
   `src/looptab/eval/metrics.py`; paired Δ with variance + sign test is `delta_report`.
 - **Tests:** `tests/` — generator determinism, model shapes/param-ratios (incl. the M10
   decoupled no-cross-cell-leakage invariant), runner determinism/independence, coherence-metric
-  math. Run `uv run --extra dev pytest -q` (112 tests); lint `uv run ruff check`.
+  math, and (M13) `make_hopfield` determinism/fixed-point/balance. Run `uv run --extra dev pytest -q`
+  (121 tests); lint `uv run ruff check`.
+- **`hopfield` regime (M13) — locked setting:** `weights=hebbian, n_patterns=12, γ=16, distractors=8`,
+  w∈{24,32}. Screened multi-seed over the real task_seeds 42..51: **0/10 non-convergence raises**,
+  balanced (majority ~0.50), per-row convergence depth typical **median ~2–3** (batch-max ~10 ≪ the
+  8·w cap; >87% of rows settle in ≤4 steps, so `n_steps=6` is ample, NOT starving — comparable to
+  rule 78's median ~3), and **ff-HARD** (ff EM ~0.26 @ w=24 / ~0.14 @ w=32 — the same hard regime as
+  the hard-convergence ECAs). Committed runs
+  pin an explicit integer `γ` so the generator is bit-exact; `γ=None` auto-derives `ceil(-λ_min)+margin`
+  (float eigen-solve, for screening only). **`γ` too small → 2-cycles → the loud guard raises** (test
+  covers it). Despite clearing every precondition, the loop's coherence result does NOT reproduce here
+  (M13 §11(b)).
 
 ### (b) Behaviour-changing conclusions to date (read before re-running anything)
 
@@ -459,6 +475,31 @@ behaviour-changing conclusions, and the next pointer. Append detail to LOG.md, n
   mirror/complement images of {13,78,92} (genuinely different datasets to our non-equivariant models, but not
   *dynamically* independent) — the screen proves no balanced+deep converging operator exists OUTSIDE this
   closure among 3-neighbour ECAs; a truly independent test requires leaving the ECA family.
+- **The joint-state coherence result is CA/LOCAL-UPDATE specific — it does NOT leave the ECA family
+  (M13, clean NEGATIVE).** Built `make_hopfield`, a **non-CA** hard-convergence target (a dense,
+  fully-coupled binary threshold / Hopfield attractor net — basin-of-attraction is *intrinsically* a
+  whole-row property, the strongest probe of the joint-state hypothesis) and ran the M10 arm set at
+  base (hidden=64) AND large (128), w∈{24,32}, 10 seeds. The substrate clears **every** precondition:
+  genuine multi-output fixed point, balanced, **ff-HARD** (ff EM ~0.26/0.14 — the same hard regime as
+  {13,78,92}). Yet the result does **NOT** reproduce. **(1) Loop-beats-both FAILS** — the loop never
+  beats `ff_matched` on EM; it is *significantly worse* at base/w24 (−0.063, 0/10, p=.002) and large/w32
+  (−0.029, p=.021); per-arm EM is **ff 0.256 > loop 0.193 > decoupled 0.148 > untied 0.113** (base/w24)
+  — the shallow MLP is the **best** coherence arm, the exact inverse of the ECAs (M9: loop beat ff
+  +0.133). **(2) The JOINT-STATE MECHANISM essentially does not transfer** — the trainability-clean
+  Δ(stepDS−decoupled_stepDS) is **ns in all 4 size×width cells** (p=.11/.11/1.0/.75) vs the +0.32…+0.66,
+  10/0 it showed on ECAs (M10/M11); the final-loss Δ(nods−decoupled) is weakly positive (EM +0.03…+0.06,
+  p≈.02–.04) but small, fragile, and **does NOT grow with size** (base ≈ large). **(3) CAPACITY DOES NOT
+  REVIVE IT — the decisive M11 contrast:** on ECAs scaling 64→128 *strengthened* everything; here it does
+  nothing (loop-beats-both stays negative, clean mechanism stays null), so the failure is **intrinsic to
+  the substrate, not a tiny-model artifact**. **(4) The tying-positive P1 SURVIVES** (Δ(nods−untied) EM
+  10/0, p=.002 at base both widths + large/w24; vanishes only at large/w32) — the loop beats a fair
+  untied stack on coherence in 3/4 cells. So **the M8–M12 result is CA/local-update specific, NOT a
+  property of hard-convergence multi-output fixed points in general**; the loop's coherence edge appears
+  to need a *local, spatially-structured* per-cell map (where the shallow MLP makes spatially-correlated
+  errors the joint state repairs), absent on a dense net where the MLP already sees the whole row — and
+  it is NOT a depth effect (per-row depth is comparable, median ~2–3, to rule 78 where the loop WON). The
+  only regime-independent survivor is the tying-positive P1. (Hypothesis for the locality requirement is
+  untested — §8; would need an intermediate local-but-non-CA substrate.)
 - Each leg still rests on few configs: Task A now multi-`d`/multi-`k` (M4) and the d≥40 wall has
   been swept over `n_train` (M5 — it is sample-bound and lifts to all-solve, except d=80,k=5 which
   is capacity-bound); Task B depth swept (M3a) but unlearnable past T=4 one-shot; M3b on one rule
@@ -497,31 +538,39 @@ needs a per-cell-*hard* target) and **"loop-beats-both" is capacity-contingent**
 wins and widens at large). **M12** confirmed **"hard convergence" (ff-hardness) is the operative axis**: a
 256-rule screen shows balanced+deep converging ECAs are exactly two symmetry orbits {13,69,79,93}/
 {78,92,141,197}, and the mechanism reproduces on **all 5 untested orbit-mates** (loop-beats-both + joint-state
-collapse, 10/0) — so it is a property of the regime, not 3 lucky rules.
+collapse, 10/0) — so it is a property of the regime, not 3 lucky rules. **M13** left the ECA family entirely
+(a dense threshold/Hopfield attractor net) and found the joint-state coherence result is **CA/local-update
+specific** — at base AND large size it does NOT reproduce (loop-beats-both fails, ff is the *best* coherence
+arm; the trainability-clean joint-state mechanism is ns in all 4 cells; scaling does not revive it), with only
+the tying-positive P1 surviving. The M8–M12 result is now BOUNDED to local-update (CA) hard-convergence.
 
 **No milestone is currently in flight.** Open threads, in rough priority:
-- **A DECISION (now well-evidenced — M8+M9+M10+M11+M12): relax the literal §9 gate wording.** M6a showed
-  "beats both on A and B" is structurally unsatisfiable; the reframing the evidence supports: the loop's
-  value is **whole-row coherence via the JOINT refinement state, on HARD multi-output fixed-point targets** —
-  robust over a fair untied stack (P1), **growing with model size** (M11), mechanism = the joint state (M10,
-  all sizes), holding across the **entire hard-convergence ECA regime** (M12, both orbits). **Scope it
-  precisely:** NOT universal across operator families (ff-dominates the easy {140,232}), NOT a
-  capacity-independent "beats-both" (ff wins at small), NOT token-acc, NOT adaptive compute, NOT
-  depth-extrapolation. Rewrite §9's gate around this; do **NOT** build Task C. *(This rewrite is the single
-  highest-value remaining action — it is a writing task, the experiments are done.)*
-- **The only generality probe still open requires LEAVING the ECA family.** M12 proved no balanced+deep
-  converging operator exists outside the two symmetry orbits among 3-neighbour ECAs, so a *dynamically
-  independent* hard-convergence target needs a different substrate (larger neighbourhoods / multi-state /
-  non-CA fixed-point map). Higher-effort; only if more generality is wanted after the §9 rewrite. Lower-value:
-  a finer/larger size sweep; the strictly-budget-clean `untied` fix (over-budget only handicaps the control,
-  so P1 is already conservative).
+- **THE highest-value remaining action — relax the literal §9 gate wording (now even better-scoped after the
+  M13 bound).** M6a showed "beats both on A and B" is structurally unsatisfiable. The reframing the evidence
+  supports: the loop's value is **whole-row coherence via the JOINT refinement state, on LOCAL-UPDATE (CA)
+  HARD multi-output fixed-point targets** — robust over a fair untied stack (P1), growing with model size
+  (M11), mechanism = the joint state (M10, all sizes), across the entire hard-convergence ECA regime (M12),
+  **PLUS the broader-but-not-uniform tying-positive P1** (M13: P1 survives off-CA in 3/4 cells). **Scope it
+  precisely:** NOT universal across operator families (ff-dominates easy {140,232}), NOT a capacity-independent
+  "beats-both" (ff wins at small), **NOT a property of hard-convergence fixed points in general — it is
+  CA/local-update specific (M13)**, NOT token-acc, NOT adaptive compute, NOT depth-extrapolation. Rewrite §9's
+  gate around this; do **NOT** build Task C. *(This is a writing task — the experiments are done.)*
+- **A generality probe still open (lower priority, untested M13 hypothesis):** the loop's coherence edge may
+  require a *local, spatially-structured* per-cell map (CA), not just a globally-coupled fixed point (M13's
+  dense net left no gap for the loop because the shallow MLP already sees the whole row; and it is NOT a
+  depth effect — M13's per-row depth ~2–3 matched rule 78 where the loop won). An intermediate
+  **local-but-non-CA** fixed-point map (e.g. a larger-neighbourhood or multi-state local rule) would test
+  the locality hypothesis directly. Higher-effort; only if more generality is wanted after
+  the §9 rewrite. Lower-value: a finer/larger size sweep; the strictly-budget-clean `untied` fix (over-budget
+  only handicaps the control, so P1 is already conservative).
 - **Closed levers (do not redo):** depth-extrapolation via progressive loss / path-independence (M7/M8 —
   decay is intrinsic, not convergence-related); adaptive compute on a fixed-point target (M8 — decays);
   "lift the M4 sample wall" (M5); "re-judge via a both-axes task" (M6a); the decoupled-head mechanism
   question (M10 — coherence is the joint state); **the model-size axis (M11 — generalizes & strengthens);
   the rule/operator generality within ECAs (M11/M12 — family-specific to hard-convergence = two symmetry
-  orbits, all 8 members confirmed, no other balanced+deep ECA exists)**. A bigger-model probe of d=80,k=5
-  must scale the budget for *all* arms (M5).
+  orbits, all 8 members confirmed, no other balanced+deep ECA exists); LEAVING the ECA family (M13 — the
+  joint-state result is CA/local-update specific, does not transfer to a dense threshold net at any size).**
+  A bigger-model probe of d=80,k=5 must scale the budget for *all* arms (M5).
 
 ## 12. Key references (for grounding a cold agent)
 
