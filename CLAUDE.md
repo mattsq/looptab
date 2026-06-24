@@ -282,6 +282,58 @@ generic `compositional` probe:
   report that null and stop. Unlike the retired gate, this is a *within-loop ablation*, not a
   generalist-beats-specialists demand, so it can actually be met or cleanly falsified.
 
+**Proposed reference generator (NOT built — a sketch for the next agent, in the §3 style).** The
+two-timescale structure reuses the existing `ca_step` at both levels and the existing
+`make_mixed_converge` rejection-filter/depth-tracking boilerplate verbatim; only the relaxation
+operator is new. Screen the `(inner_rule, outer_rule)` pair for convergence + ff-hardness exactly
+as M8/M12/M15 screened single rules, and add the §5 determinism test before any run.
+
+```python
+# --- Task C (PROPOSED, gated — see §9.3): nested / two-timescale fixed point -------------
+# A hierarchy of local fixed points. A ROUND = one slow OUTER step then a full INNER relax:
+#   - inner (FAST, "L"): each block is its OWN ring of width block_w; iterate inner_rule to a
+#     per-block fixed point. ca_step touches only axis -1, so reshaping to (n, n_blocks, block_w)
+#     relaxes every block independently as a ring.
+#   - outer (SLOW, "H"): one outer_rule step on the FULL ring couples neighbouring blocks.
+# Target = the JOINT fixed point of (inner_relax ∘ outer_step). Two timescales by construction;
+# local + deep + (screen for) ff-hard; spatially uniform at each level so leg 2 (§9.2) can apply.
+# Difficulty dials: n_blocks, block_w, inner depth (rule), #outer rounds to converge.
+# WHY: one joint refinement timescale must discover it has to FULLY relax inner blocks between
+# every outer coupling — the within-loop insufficiency §9.3's build-gate tests for.
+
+def _inner_relax(s, n_blocks, block_w, inner_rule, max_inner):
+    blk = s.reshape(s.shape[0], n_blocks, block_w)        # each block = its own ring (axis -1)
+    for _ in range(max_inner):
+        nxt = ca_step(blk, inner_rule)
+        if np.array_equal(nxt, blk):
+            break
+        blk = nxt
+    return blk.reshape(s.shape[0], n_blocks * block_w)
+
+def make_nested_converge(n, n_blocks, block_w, task_seed, sample_seed,
+                         inner_rule=232, outer_rule=232, distractors=0,
+                         T=None, return_trajectory=False, max_rounds=None, max_inner=None):
+    w = n_blocks * block_w
+    max_rounds = max_rounds or 4 * n_blocks               # outer timescale ~ #blocks
+    max_inner  = max_inner  or 4 * block_w                # inner timescale ~ block width
+
+    def round_(s):                                        # one SLOW round: outer step, inner relax
+        return _inner_relax(ca_step(s, outer_rule), n_blocks, block_w, inner_rule, max_inner)
+
+    # Rejection-filter to the convergent basin EXACTLY as make_mixed_converge: draw blocks of 2n,
+    # iterate round_ to a joint fixed point, keep convergent rows, depth = #rounds, raise loudly if
+    # too few converge (a non-converging rule pair). s_inf = the joint fixed point; X = s0 (+ static
+    # task_seed distractors). return_trajectory => frames AFTER EACH ROUND (loops ≈ outer rounds) for
+    # step-aligned DS. row_rng = sample_seed (rows); fn_rng = task_seed (distractors / any rule pick).
+    ...
+    return X.astype(np.float32), s_inf.astype(np.int64)   # (n, w) float32 input, (n, w) int64 target
+```
+
+The new model piece is the **H/L two-module loop** (L = `_inner_relax`-shaped fast updates to a
+fixed point, H = one outer update per L-convergence) registered alongside `trm`; its decisive
+control is the single-timescale `trm` (§9.3 bullet 2). That model does not exist yet — building it
+is part of earning Task C, gated on the single-loop-insufficiency demonstration above.
+
 **Until that within-loop insufficiency is demonstrated, Task C stays DEFERRED.** Building the H/L
 split before showing the single loop fails on a nested target would repeat the exact HRM mistake
 the autopsy diagnosed.

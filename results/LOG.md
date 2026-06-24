@@ -1937,4 +1937,8 @@ exact HRM mistake the autopsy diagnosed.
 **Net.** The project's orienting criterion is now the right one (§9.2), Task C is re-scoped to a
 question the evidence actually leaves open with a gate that can be satisfied (§9.3), and the two
 remaining frontiers (gated Task C; real-tabular bridge) are named without either being "in flight."
-No code, configs, runs, or dependencies changed. Tracked: CLAUDE.md §3/§9/§11(c).
+§9.3 also carries a **proposed `make_nested_converge` reference-generator sketch** (in the §3 style,
+clearly marked NOT-built): a two-timescale fixed point (inner = per-block ring relax via `ca_step`;
+outer = one full-ring `ca_step` per round), reusing the `make_mixed_converge` rejection-filter
+boilerplate, so the next agent has a concrete starting point if/when the build-gate is met. No code,
+configs, runs, or dependencies changed. Tracked: CLAUDE.md §3/§9/§11(c).
