@@ -435,14 +435,27 @@ def test_mixed_converge_accept_max_depth_caps_depth(cap):
 
 
 def test_mixed_converge_accept_max_depth_none_is_unchanged():
-    """The cap is additive: accept_max_depth=None must reproduce the uncapped output bit-for-bit
-    (guards the committed M15 results when the M15b cap param was added)."""
+    """The cap is additive: accept_max_depth=None must reproduce the uncapped output bit-for-bit.
+
+    This checks additivity *within the current code*. The cross-version guard (that the M15b
+    depth-tracking rewrite still reproduces the pre-M15b committed output) is the golden-hash test
+    below."""
     a = make_mixed_converge(n=200, w=24, task_seed=42, sample_seed=1, distractors=8)
     b = make_mixed_converge(
         n=200, w=24, task_seed=42, sample_seed=1, distractors=8, accept_max_depth=None
     )
     np.testing.assert_array_equal(a[0], b[0])
     np.testing.assert_array_equal(a[1], b[1])
+
+
+def test_mixed_converge_golden_hash():
+    """Pin the committed M15 output bytes so the M15b depth-tracking rewrite (and any future change)
+    cannot silently alter the generated data the committed results rest on."""
+    import hashlib
+
+    X, y = make_mixed_converge(n=200, w=24, task_seed=42, sample_seed=1, distractors=8)
+    assert hashlib.sha256(X.tobytes()).hexdigest()[:16] == "7b862a85c0038032"
+    assert hashlib.sha256(y.tobytes()).hexdigest()[:16] == "40e789486f31084a"
 
 
 def test_ca_step_rule90():
