@@ -41,7 +41,7 @@ explicit difficulty knob, and a built-in out-of-distribution / extrapolation axi
 | 0 | `linear` | smoke test / tripwire | pipeline, metrics, training loop |
 | A | `parity` | **core diagnostic** | irregular target + uninformative features |
 | B | `iterated` | **mechanistic test** | loops ≈ algorithm steps; depth-extrapolation |
-| C | `nested_converge` | hierarchy probe, **re-imagined** | earn H/L *against the single loop* — **DEFERRED, gated** (see §9.3) |
+| C | `nested_converge` | hierarchy probe, **re-imagined** | earn H/L *against the single loop* — substrate BUILT, gate MET (M17); H/L model is M18 (see §9.3) |
 
 **Seed discipline (applies to all tasks).** Each task instance is a pure function of two
 seeds: a `task_seed` that defines *the function* (e.g. which bits are informative), and a
@@ -281,6 +281,15 @@ generic `compositional` probe:
   two-timescale. If the single loop already solves the nested target, the hierarchy is unearned —
   report that null and stop. Unlike the retired gate, this is a *within-loop ablation*, not a
   generalist-beats-specialists demand, so it can actually be met or cleanly falsified.
+  **This gate is now MET (M17).** `make_nested_converge` (inner_rule=13 / outer_rule=79 /
+  block_w=8, w∈{24,32}) is built + screened + tested; the single-timescale `trm` plateaus at
+  EM≈0.56 (w24) / 0.37 (w32) — far below the EM=1.0 target — and the plateau is **capacity-robust**
+  (hidden 64→128 lifts it only +0.03 EM, so it is NOT a learnability/capacity wall). So building
+  the H/L two-timescale loop (M18) is earned. **Sharpened control requirement from M17b:** a
+  depth-matched **untied stack beats the tied single-loop at scale** (EM 0.634 vs 0.593, 0/10,
+  p=.002 — P1 reverses), so the demonstrated insufficiency is of the single shared *operator*. M18's
+  H/L loop must therefore beat BOTH `trm` AND the **untied stack** (plus `trm_decoupled`) at matched
+  budget — only beating the untied stack proves a second *timescale*, not merely more operators.
 
 **Proposed reference generator (NOT built — a sketch for the next agent, in the §3 style).** The
 two-timescale structure reuses the existing `ca_step` at both levels and the existing
@@ -331,12 +340,14 @@ def make_nested_converge(n, n_blocks, block_w, task_seed, sample_seed,
 
 The new model piece is the **H/L two-module loop** (L = `_inner_relax`-shaped fast updates to a
 fixed point, H = one outer update per L-convergence) registered alongside `trm`; its decisive
-control is the single-timescale `trm` (§9.3 bullet 2). That model does not exist yet — building it
-is part of earning Task C, gated on the single-loop-insufficiency demonstration above.
+controls are the single-timescale `trm` **and** the depth-matched **untied stack** (§9.3 build-gate
+note + M17b). That model does not exist yet — building it **is M18**, now earned by the M17 gate.
 
-**Until that within-loop insufficiency is demonstrated, Task C stays DEFERRED.** Building the H/L
-split before showing the single loop fails on a nested target would repeat the exact HRM mistake
-the autopsy diagnosed.
+**The within-loop insufficiency is now demonstrated (M17): Task C is UN-deferred and the H/L build
+(M18) is earned.** The single-timescale loop plateaus capacity-robustly below the nested target, so
+building H/L no longer repeats the HRM mistake the autopsy diagnosed — single-loop insufficiency was
+shown *first*. M18 must still earn the *hierarchy* honestly: the H/L loop has to beat the untied
+stack (not just `trm`), or the gain is "more operators," not "a second timescale."
 
 ### 9.4 Still out of scope (rationale updated now that the synthetic story is clear)
 
@@ -377,10 +388,16 @@ behaviour-changing conclusions, and the next pointer. Append detail to LOG.md, n
   `mixed_converge` (M15 DEEP+NON-UNIFORM+LOCAL probe: a per-position MIXED CA — each cell runs its
   own radius-1 rule from a `rule_set`, default orbit1 {78,92,141,197} — iterated to a fixed point,
   **rejection-filtered to the convergent basin** since a spatial mix is not globally convergent;
-  local + temporally-uniform but spatially non-uniform; `mixed_ca_step` is the per-position step).
+  local + temporally-uniform but spatially non-uniform; `mixed_ca_step` is the per-position step),
+  and `nested_converge` (**M17 Task C substrate**: a TWO-TIMESCALE fixed point — a ROUND = one SLOW
+  outer full-ring `ca_step` then a full FAST inner relax (`_inner_relax` settles each block on its
+  OWN ring); target = the JOINT fixed point of `round_ = inner_relax ∘ outer_step`, basin-rejection-
+  filtered like `mixed_converge`; locked instance inner_rule=13 / outer_rule=79 / block_w=8,
+  n_blocks∈{3,4} ⇒ w∈{24,32}; built to test the §9.3 single-loop-insufficiency gate).
   Generators in `src/looptab/data/generators.py`, determinism-tested in
   `tests/test_generators.py`; `make_trajectory_dataset` dispatches iterated/converge/hopfield/
-  mixed_converge. Task C (hierarchy) is **gated, unbuilt** (§9).
+  mixed_converge/nested_converge. Task C **substrate is BUILT and its gate is MET (M17)**; the H/L
+  two-timescale MODEL is still unbuilt (= M18, earned — §9.3).
 - **Models/arms:** `trm` (weight-tied refinement loop, optional per-step readouts),
   `ff_matched` (§4a param-matched shallow MLP), `untied_stack` (§4b untied, ~`n_steps`×
   params — a confounded ceiling, NOT param-matched), `untied_matched` (§4b untied,
@@ -420,7 +437,7 @@ behaviour-changing conclusions, and the next pointer. Append detail to LOG.md, n
   m10_decoupled_converge, m11_size_{small,base,large}, m12_hardconv_orbit,
   m13_hopfield_{screen,converge,large}, m14_{local_screen,local_ladder,dense_anchor},
   m15_{mixed_screen,mixed_converge,uniform_anchor}, m15b_uniform_matched{,_screen},
-  m15b_depth_matched).
+  m15b_depth_matched, m17_nested_converge_{smoke,gate}, m17b_nested_capacity).
 - **`hopfield` `bandwidth` regime (M14) — locked setting:** the local ladder needs **w=48** (w≤32 has
   no clean local regime — convergence-vs-triviality tension); b∈{2,4,8} at `γ=10` all 10/10
   convergent, balanced, non-trivial (triv ≤5%), settle ≤6 steps; the dense end (b=24) needs `γ=16`
@@ -438,8 +455,9 @@ behaviour-changing conclusions, and the next pointer. Append detail to LOG.md, n
   `src/looptab/eval/metrics.py`; paired Δ with variance + sign test is `delta_report`.
 - **Tests:** `tests/` — generator determinism, model shapes/param-ratios (incl. the M10
   decoupled no-cross-cell-leakage invariant), runner determinism/independence, coherence-metric
-  math, and (M13) `make_hopfield` determinism/fixed-point/balance. Run `uv run --extra dev pytest -q`
-  (121 tests); lint `uv run ruff check`.
+  math, (M13) `make_hopfield` determinism/fixed-point/balance, and (M17) `make_nested_converge`
+  determinism/golden-hash/joint-fixed-point/two-timescale/trajectory-by-round. Run
+  `uv run --extra dev pytest -q` (160 tests); lint `uv run ruff check`.
 - **`hopfield` regime (M13) — locked setting:** `weights=hebbian, n_patterns=12, γ=16, distractors=8`,
   w∈{24,32}. Screened multi-seed over the real task_seeds 42..51: **0/10 non-convergence raises**,
   balanced (majority ~0.50), per-row convergence depth typical **median ~2–3** (batch-max ~10 ≪ the
@@ -730,6 +748,17 @@ behaviour-changing conclusions, and the next pointer. Append detail to LOG.md, n
   been swept over `n_train` (M5 — it is sample-bound and lifts to all-solve, except d=80,k=5 which
   is capacity-bound); Task B depth swept (M3a) but unlearnable past T=4 one-shot; M3b on one rule
   (30) / one width (9).
+- **The §9.3 Task C build-gate is MET, and P1 REVERSES on the two-timescale target at scale (M17).**
+  Built `make_nested_converge` and ran the single-loop gate: the single-timescale `trm` plateaus at
+  EM 0.56 (w24) / 0.37 (w32), **far below the EM=1.0 target**, and the plateau is **capacity-robust**
+  (hidden 64→128 lifts it only +0.03 EM — NOT the M11 "scale amplifies" pattern, NOT a capacity wall).
+  So one joint-state timescale is shown insufficient on a genuinely two-timescale structure → building
+  the H/L loop (M18) is earned (the HRM mistake is avoided: insufficiency shown *first*). Leg-1 (joint-
+  state) and leg-2 (loop>ff) both reproduce and **strengthen** with size on the nested task (we are in
+  the right regime). **But the depth-matched untied stack BEATS the tied loop at scale** — Δ(trm−untied)
+  EM +0.025 ns (base, untied over-budget) → **−0.042, 0/10, p=.002 (large, budget-clean)** — the FIRST
+  place P1 fails. So the demonstrated insufficiency is of the single shared *operator*; M18 must beat the
+  **untied stack** too, or the H/L gain is "more operators," not "a second timescale."
 
 ### (c) Next milestone
 
@@ -789,15 +818,29 @@ depth histogram, mean 3.40): at fixed depth, uniform rule 13 → loop beats ff +
 partly depth (drops to +0.032 ns, becomes ff-easy). Leg 1 + P1 hold at matched depth. **Leg 2 stands
 depth-controlled (rule 13); only the definitional uniformity↔rule-cardinality entanglement remains.**
 
-**No milestone is currently in flight.** Open threads, in rough priority:
+**No milestone is currently in flight. The next milestone is M18: BUILD the H/L two-timescale loop**
+(the M17 gate is met — see below). Open threads, in rough priority:
+- **NEXT — M18: build the H/L two-timescale loop on `nested_converge`.** The §9.3 gate is now MET (M17):
+  the single-timescale `trm` plateaus capacity-robustly below the nested target, so the H/L build is earned.
+  Register an H/L two-module loop alongside `trm` (L = fast per-block relax toward a fixed point, H = one
+  outer coupling per L-convergence). **Decisive control set (mandated by M17b): the H/L loop must beat BOTH
+  the single-timescale `trm` AND the depth-matched `untied_matched` stack** (the untied stack already beats
+  the tied single-loop at scale — Δ(trm−untied) EM −0.042, 0/10 — so beating `trm` alone proves nothing;
+  only beating the untied stack isolates a second *timescale* vs merely "more operators"), plus
+  `trm_decoupled` (still the joint state?). Reuse the `m17_nested_converge_gate.yaml` task/curriculum; vary
+  only the model. This is the autopsy's "earn the hierarchy against the loop we already trust," now also
+  against the untied stack. If the H/L loop does NOT beat the untied stack, report that null — it means the
+  nested target needs more operators, not a second timescale.
+- **DONE — M17 built the Task C substrate and ran the gate (this branch).** `make_nested_converge`
+  (two-timescale fixed point) built, screened, tested (golden hash + two-timescale assertion); the single-
+  loop gate is MET (single-timescale loop plateaus capacity-robustly below the target on a genuinely two-
+  timescale instance). Leg-1/leg-2 reproduce & strengthen on the nested task; P1 reverses at scale (the
+  mandate for M18's untied-stack control). Full narrative in LOG.md M17.
 - **DONE — the §9 gate has been rewritten (M16, this branch).** The unsatisfiable "beats both on A and B"
   gate is retired/falsified (M6a) and §9 is reframed around the actual finding (joint-state coherence on
   local-update hard fixed-point targets; legs 1/2 + P1, precisely scoped) with Task C re-imagined as
-  `nested_converge` and gated on a *satisfiable* within-loop criterion (§9.3). This was the project's
-  highest-value remaining action and it was a writing task; the experiments were already complete. The two
-  legitimate frontiers are now **(a)** the §9.3 `nested_converge` Task C (only if the single loop is first
-  shown insufficient on a nested target — do NOT build the H/L split before that) and **(b)** the
-  separately-scoped real-tabular bridge (§9.4).
+  `nested_converge` and gated on a *satisfiable* within-loop criterion (§9.3). The other legitimate frontier
+  remains **(b)** the separately-scoped real-tabular bridge (§9.4).
 - **The experimental program is COMPLETE — all leg-2 confounds now controlled.** M14 closed locality;
   M15 established leg 1 (joint-state mechanism = deep+local, transfers off-CA, clean); M15b max-depth-matched
   leg 2; **M15c closed the central-depth residual** (depth-distribution-matched: leg 2 confirmed
@@ -806,8 +849,8 @@ depth-controlled (rule 13); only the definitional uniformity↔rule-cardinality 
   DEFINITIONAL uniformity↔rule-cardinality entanglement (a non-uniform local rule must use ≥2 truth tables).
   Lowest-value leftovers only: more uniform rules at matched depth (rule 78 went ff-easy — try a harder
   matched rule); finer/larger size sweep; radius-2 mix; the operator-sharing *why*. **The §9-gate rewrite is
-  now DONE (M16);** the next genuine frontiers are the §9.3 `nested_converge` Task C (gated on single-loop
-  insufficiency) and the §9.4 real-tabular bridge — neither is "in flight."
+  DONE (M16) and the gate is now MET (M17);** the next genuine frontier is **M18 (build the H/L loop, above)**,
+  with the §9.4 real-tabular bridge the other (separately-scoped) frontier.
 - **Closed levers (do not redo):** depth-extrapolation via progressive loss / path-independence (M7/M8 —
   decay is intrinsic, not convergence-related); adaptive compute on a fixed-point target (M8 — decays);
   "lift the M4 sample wall" (M5); "re-judge via a both-axes task" (M6a); the decoupled-head mechanism
