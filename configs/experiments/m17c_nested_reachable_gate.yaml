@@ -1,0 +1,115 @@
+# M17c — DEPTH-REACHABLE gate: close the unroll-budget confound (adversarial review B1/B2).
+#
+# The M17 base gate trained the loop with only 6 unrolls (n_steps=6, T_max=6), but the target is the
+# FULL-depth joint fixed point and the convergence-depth distribution has a heavy tail: 23.5% (w24) /
+# 32.1% (w32) of kept rows need >6 outer rounds, so a model that perfectly emulates the round operator
+# in 6 unrolls is capped at EM ~0.76/0.68 for a pure COMPUTE reason. That confounds "single-timescale
+# insufficiency" with "under-unrolled". This rerun caps accepted rows to depth<=6 (accept_max_depth=6,
+# the same lever M15b/M15c used), so EVERY target IS reachable within the 6-round/6-step budget
+# (trajectory coverage = 1.000, verified). Now the loop has enough unrolls; if its whole-row EM STILL
+# plateaus well below 1.0 (and stays there under the hidden=128 capacity probe), the insufficiency is
+# genuine and the §9.3 gate is cleanly MET. If the loop now SOLVES the reachable task, the M17 low-EM
+# was an unroll-budget artifact and the gate verdict must be retracted/softened.
+#
+# Substrate: inner_rule=13 (FAST per-block ring relax), outer_rule=79 (SLOW full-ring coupling),
+# block_w=8, n_blocks∈{3,4} => w∈{24,32}. Each TRM step must still emulate a full ROUND (outer step +
+# full inner relax), so the two-timescale structure is preserved; only the OUTER-round budget confound
+# is removed. Arm set + training IDENTICAL to m17_nested_converge_gate.yaml (the M10/M11/M12 protocol):
+# trm vs ff_matched (§4a), untied_matched (§4b), trm_decoupled (joint-state ablation); T~1..6 curriculum
+# + step-aligned DS. Decisive reads:
+#   - trm's ABSOLUTE exact-match: does it plateau well below 1.0 (gate MET) or solve it (null)?
+#   - leg-1 mechanism Δ(trm_nods − trm_decoupled_nods) > 0: confirms we are in the joint-state regime;
+#   - leg-2 Δ(trm_nods − ff_matched): does the loop beat the shallow MLP on this nested target?
+#   - P1 Δ(trm_nods − untied_matched): the regime-independent tying-positive.
+# Verdict: gate MET (build Task C / H-L module next) if single-loop EM plateaus below the target;
+# clean NULL (Task C stays deferred) if the single loop already solves it.
+
+task:
+  name: nested_converge
+  params:
+    block_w: 8
+    inner_rule: 13   # FAST inner per-block relax (orbit-0 ff-hard converging ECA)
+    outer_rule: 79   # SLOW outer full-ring coupling (orbit-0 mate)
+    T: 6
+    distractors: 8
+    accept_max_depth: 6   # B1 fix: cap accepted rows to depth<=6 so EVERY target is reachable in the 6-round/6-unroll budget; isolates single-timescale insufficiency from the unroll-budget ceiling
+  n_train: 4000
+  n_test: 1000
+  task_seed: 42
+  train_sample_seed: 1
+  test_sample_seed: 2
+
+grid:
+  params:
+    n_blocks: [3, 4]   # w = 24, 32
+
+curriculum:
+  param: T
+  T_min: 1
+  T_max: 6
+
+couple_n_steps_to_param: T
+
+arms:
+  - name: trm
+    label: trm_nods
+    hidden_dim: 64
+    latent_dim: 64
+    n_steps: 6
+    deep_supervision: false
+    ds_mode: final
+  - name: trm_decoupled
+    label: trm_decoupled_nods
+    hidden_dim: 64
+    latent_dim: 64
+    n_steps: 6
+    deep_supervision: false
+    ds_mode: final
+  - name: trm
+    label: trm_stepDS
+    hidden_dim: 64
+    latent_dim: 64
+    n_steps: 6
+    deep_supervision: true
+    ds_mode: step_aligned
+  - name: trm_decoupled
+    label: trm_decoupled_stepDS
+    hidden_dim: 64
+    latent_dim: 64
+    n_steps: 6
+    deep_supervision: true
+    ds_mode: step_aligned
+  - name: ff_matched
+    label: ff_matched
+    hidden_dim: 64
+    latent_dim: 64
+    n_steps: 6
+  - name: untied_matched
+    label: untied_matched
+    hidden_dim: 64
+    latent_dim: 64
+    n_steps: 6
+    deep_supervision: false
+    ds_mode: final
+
+deltas:
+  - [trm_nods, trm_decoupled_nods]
+  - [trm_stepDS, trm_decoupled_stepDS]
+  - [trm_nods, ff_matched]
+  - [trm_nods, untied_matched]
+  - [trm_decoupled_nods, ff_matched]
+  - [trm_decoupled_nods, untied_matched]
+
+budget_reference: trm_nods
+budget_tol: 0.02
+
+train:
+  epochs: 100
+  lr: 1e-3
+  weight_decay: 1e-4
+  batch_size: 256
+  device: cpu
+
+seeds: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
+parallel_workers: 4
+results_dir: results
