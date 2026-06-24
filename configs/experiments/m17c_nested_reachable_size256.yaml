@@ -1,0 +1,82 @@
+# M17c-size — 3rd capacity point (hidden=256) on the reachable task: does trm EM SATURATE below 1.0 (gate MET) or keep CLIMBING toward solving (gate NULL)? Resolves the single-capacity-point objection (review B2).
+# is SHARED across ff/untied/decoupled, so it could be a generic capacity/learnability wall rather
+# than a single-TIMESCALE insufficiency. M11 showed scaling capacity up (64→128) AMPLIFIED the
+# loop's edge and climbed toward solving on ECA-converge. So: run the decisive arms at hidden=128
+# on the w=24 nested instance and read whether the loop (and ff) climb toward EM 1.0.
+#   - loop climbs toward solving  => CAPACITY wall, single-timescale NOT shown insufficient => gate NULL.
+#   - loop stays plateaued << 1.0 (ff too) => structural ceiling worth an H/L probe => gate closer to MET.
+# Same substrate as m17_nested_converge_gate.yaml (inner 13 / outer 79 / block_w 8, n_blocks=3),
+# only the model size differs (one knob, §5).
+
+task:
+  name: nested_converge
+  params:
+    block_w: 8
+    inner_rule: 13
+    outer_rule: 79
+    T: 6
+    distractors: 8
+    accept_max_depth: 6
+  n_train: 4000
+  n_test: 1000
+  task_seed: 42
+  train_sample_seed: 1
+  test_sample_seed: 2
+
+grid:
+  params:
+    n_blocks: [3]   # w = 24, the leg-2 regime
+
+curriculum:
+  param: T
+  T_min: 1
+  T_max: 6
+
+couple_n_steps_to_param: T
+
+arms:
+  - name: trm
+    label: trm_nods
+    hidden_dim: 256
+    latent_dim: 256
+    n_steps: 6
+    deep_supervision: false
+    ds_mode: final
+  - name: trm_decoupled
+    label: trm_decoupled_nods
+    hidden_dim: 256
+    latent_dim: 256
+    n_steps: 6
+    deep_supervision: false
+    ds_mode: final
+  - name: ff_matched
+    label: ff_matched
+    hidden_dim: 256
+    latent_dim: 256
+    n_steps: 6
+  - name: untied_matched
+    label: untied_matched
+    hidden_dim: 256
+    latent_dim: 256
+    n_steps: 6
+    deep_supervision: false
+    ds_mode: final
+
+deltas:
+  - [trm_nods, trm_decoupled_nods]
+  - [trm_nods, ff_matched]
+  - [trm_nods, untied_matched]
+
+budget_reference: trm_nods
+budget_tol: 0.02
+
+train:
+  epochs: 100
+  lr: 1e-3
+  weight_decay: 1e-4
+  batch_size: 256
+  device: cpu
+
+seeds: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
+parallel_workers: 4
+results_dir: results

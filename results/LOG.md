@@ -1942,3 +1942,174 @@ clearly marked NOT-built): a two-timescale fixed point (inner = per-block ring r
 outer = one full-ring `ca_step` per round), reusing the `make_mixed_converge` rejection-filter
 boilerplate, so the next agent has a concrete starting point if/when the build-gate is met. No code,
 configs, runs, or dependencies changed. Tracked: CLAUDE.md §3/§9/§11(c).
+
+## M17 — DONE (verdict SUPERSEDED by M17c — read that first). Build the §9.3 Task C substrate (`make_nested_converge`) and run the single-loop BUILD-GATE. Original verdict: gate MET / M18 earned. **An adversarial review then found the "capacity-robust plateau" rested on an unroll-budget confound; the M17c control REVERSES the verdict to gate NOT met / M18 NOT earned. The substrate-built / leg-1-reproduces / two-timescale-validated parts below still stand; the gate conclusion does not.**
+
+> ⚠ **Superseded conclusion.** Everything in this M17 entry about the *substrate* (built, screened, determinism-tested, genuinely two-timescale) and *leg-1* (joint-state mechanism reproduces) is correct. But the headline gate verdict — "single-timescale loop plateaus capacity-robustly below the target ⇒ insufficiency proven ⇒ build M18" — was overturned by M17c after an adversarial review. Read M17c for the corrected story. The numbers below are the *uncapped* run, which an unroll budget of 6 unrolls capped at EM ~0.76/0.68 for a pure-compute reason.
+
+
+§9.3 (M16) re-imagined Task C as a two-timescale fixed point and gated building the H/L hierarchy on a
+*satisfiable, within-loop* criterion: build it only once a concrete `nested_converge` instance shows the
+validated **single-timescale** loop's whole-row coherence **plateaus below the target** (one joint-state
+timescale insufficient) on a genuinely two-timescale structure. M17 builds the substrate and runs that
+gate. It does **NOT** build the H/L module — doing so before demonstrating single-loop insufficiency is the
+exact HRM mistake the ARC autopsy diagnosed.
+
+**The substrate (`make_nested_converge`, `src/looptab/data/generators.py`).** A hierarchy of local fixed
+points, exactly the §9.3 sketch. A ROUND = one SLOW outer full-ring `ca_step` (the only op that couples
+across block boundaries) then a full FAST inner relax (each block iterated on its OWN ring of width
+`block_w` to a per-block fixed point via `_inner_relax`). Target `s_inf` = the JOINT fixed point of
+`round_ = inner_relax ∘ outer_step`; rows are rejection-filtered to the convergent basin EXACTLY as
+`make_mixed_converge` (depth = #outer rounds; raises loudly on a non-converging rule pair). All-integer ⇒
+bit-exact. Wired into the dataset/trajectory/curriculum machinery + config schema unchanged. 11 new tests
+(determinism, golden hash, joint-fixed-point, two-timescale, balance, trajectory-by-round, cycling-raise);
+full suite green (96 tests), ruff clean.
+
+**Screened instance** (`scratchpad/screen_nested.py`, a structural screen mirroring M8/M12/M15): a
+256-pair-ish sweep over (inner_rule, outer_rule, n_blocks, block_w) for convergence + balance + non-
+triviality + genuine two-timescale depth. Locked **inner_rule=13, outer_rule=79, block_w=8** (both orbit-0
+ff-hard converging ECAs, uniform per level), `n_blocks∈{3,4}` ⇒ **w∈{24,32}** (the M9–M12 regime): >0.97
+convergent, perfectly balanced (0.50), **zero** trivial targets, and genuinely two-timescale (mean ~4–5
+outer rounds, each ~4–5 inner steps; one inner relax alone ≠ target for >99% of rows, one round ≠ target
+for >50%). The two-timescale-ness is asserted as a determinism-grade test, not just screened.
+
+**Gate run (`m17_nested_converge_gate.yaml`, the M10/M11/M12 arm set + T~1..6 curriculum + step-aligned DS,
+10 seeds, base hidden=latent=64).** Absolute whole-row exact-match (target = the true joint fixed point,
+i.e. EM=1.0):
+
+| arm | EM @ w=24 | EM @ w=32 | token-acc @ w=24 |
+|-----|-----------|-----------|------------------|
+| trm_nods (single-timescale loop) | **0.559** | **0.371** | 0.873 |
+| ff_matched (§4a) | 0.489 | 0.341 | 0.871 |
+| untied_matched (§4b) | 0.533 | 0.365 | 0.837 |
+| trm_decoupled_nods | 0.467 | 0.281 | 0.831 |
+
+So the single loop **plateaus far below the target** (EM 0.56/0.37 ≪ 1.0), but every param-matched control
+plateaus in the SAME band (ff within token-acc *noise* of the loop). On its own this is ambiguous — it
+could be a generic capacity/learnability ceiling (the M3a/M4 shared-wall signature) rather than a single-
+*timescale* deficit. **In-regime checks confirm the substrate is the right kind of task:** leg-1 joint-
+state mechanism reproduces (Δ(trm_nods−decoupled) EM +0.092 @ w24 / +0.090 @ w32; trainability-clean
+Δ(stepDS−decoupled_stepDS) EM +0.127 @ w24; decoupled is the worst arm) and leg-2 holds at w≤24
+(Δ(trm_nods−ff) EM +0.070, token +0.003 ns — the M9 EM-at-matched-token-acc signature). P1 base
+Δ(trm_nods−untied) EM +0.025 ns (and `untied_matched` is +2.5%/+3.1% OVER budget here, so conservative).
+
+**The decisive probe (`m17b_nested_capacity.yaml`, hidden=latent=128, w=24, 10 seeds) — capacity wall vs
+structural ceiling.** M11 established the lever: on ECA-`converge` scaling 64→128 *amplified* the loop and
+climbed toward solving. Here it does **not**:
+
+| arm | EM @ hidden=64 | EM @ hidden=128 | Δ |
+|-----|----------------|-----------------|---|
+| trm_nods | 0.559 | **0.593** | +0.034 (~3× params, barely moves) |
+| ff_matched | 0.489 | 0.486 | flat |
+| untied_matched | 0.533 | **0.634** | **+0.101 (now the BEST EM arm)** |
+| trm_decoupled_nods | 0.467 | 0.415 | − |
+
+Two clean conclusions: **(1) the single-loop plateau is CAPACITY-ROBUST** — 3× params lifts the tied loop
+only +0.03 EM (to 0.59, still ≪ 1.0), so it is NOT a capacity wall and NOT the M11 "scale amplifies"
+pattern; the single-timescale tied loop has a genuine ceiling on this two-timescale target. **(2) P1
+REVERSES at scale** — the depth-matched untied stack climbs +0.10 to 0.634 and **beats** the tied loop:
+Δ(trm_nods−untied) EM **−0.042, 0/10, p=.002**, budget-clean (untied 0.988× budget). This is the FIRST
+place the project's broadest "tying-positive" leg fails. Leg-1 strengthens with size (Δ(trm−decoupled) EM
+**+0.178**, 10/0, p=.002) and leg-2 strengthens (Δ(trm−ff) EM **+0.106**, 10/0, p=.002) — both consistent
+with M11, so the joint-state regime is intact; it is specifically *tying-vs-untied-depth* that flips.
+
+**Verdict — gate MET, with a sharpened control requirement for M18.** By the §9.3 build-gate as worded:
+(a) the single-timescale loop's coherence plateaus below the target — YES, and now shown **capacity-robust**
+(the precondition is not a learnability/capacity artifact); (b) the structure is genuinely two-timescale —
+YES (built + tested); (c) the "single loop already solves it ⇒ null" escape clause does **not** apply
+(EM 0.59 ≪ 1.0). So **building the H/L two-timescale loop (M18) is now earned** — the HRM mistake is
+avoided because single-loop insufficiency was demonstrated *first*. **Critical refinement from M17b:** the
+demonstrated insufficiency is of the single shared *operator* (weight-tying) — an untied multi-operator
+stack already extracts headroom the tied single-timescale loop cannot (0.634 vs 0.593). An H/L loop adds a
+second *operator at a second timescale* (tied within each), which is the parameter-efficient version of
+"more operators." Therefore **M18's decisive control set must include the untied stack**: the H/L loop has
+to beat BOTH the single-timescale `trm` (does a 2nd timescale add coherence?) AND the depth-matched untied
+stack (is it the second *timescale*, or merely more independent operators?), alongside `trm_decoupled`
+(still the joint state?). Only an H/L loop that beats the untied stack at matched budget proves a second
+*timescale* — not just more operators — is the active ingredient. This is the autopsy's "earn the
+hierarchy" done honestly, now against the untied stack too.
+
+**What M17 did NOT do (scope).** It did not build the H/L module (that is M18, gated-and-now-earned). It
+did not sweep more rule pairs / block sizes / a full size ladder (one screened instance + one capacity
+point; the verdict rests on capacity-robustness at w=24, the leg-2 regime). It did not do a per-row depth-
+stratified error analysis (a stronger but heavier confirmation that the loop's errors concentrate on high-
+outer-round rows — a candidate sharpening for M18). Tracked: `make_nested_converge` + tests, the gate/probe
+configs, their summary CSVs; CLAUDE.md §3/§9.3/§11.
+
+## M17c — DONE. Adversarial review of M17 caught an unroll-budget confound; the depth-reachable control REVERSES the gate verdict. The single-timescale loop is CAPACITY-LIMITED (climbs with size), NOT structurally insufficient — so the §9.3 gate is NOT met, M18 (H/L) is NOT earned, Task C stays DEFERRED. Clean negative.
+
+An adversarial subagent review of M17 (in the M8b/M9/M15 tradition) found a **BLOCKER** that the
+original gate verdict rested on, and running the control confirmed it and flipped the conclusion.
+
+**The confound (review B1/B2).** The gate trains the loop with **6 unrolls** (`n_steps=6`, `T_max=6`
+curriculum), but the target is the *full-depth* joint fixed point and the convergence-depth
+distribution has a heavy tail: **23.5% (w24) / 32.1% (w32) of kept rows need >6 outer rounds**. So a
+model that perfectly emulates the round operator in 6 unrolls is capped at EM ≈ 0.76 / 0.68 for a
+pure **compute** reason (verified: at T=6 only 76.4% of rows have their target within the 6-frame
+trajectory). M17 presented the entire gap-to-1.0 as single-*timescale* insufficiency; a large chunk
+was the unroll budget. The capacity probe (M17b) varied only *width*, never unroll depth, so it could
+not separate "single-timescale ceiling" from "under-unrolled for a third of rows" — and the latter
+predicts the exact "+0.03 EM, capacity-robust" M17b observed. This is the M3a/M4 shared-wall trap the
+gate was meant to avoid.
+
+**The control (M17c, `accept_max_depth=6`).** Re-ran the gate + a 3-point capacity curve with accepted
+rows capped to convergence-depth ≤6 (the same lever M15b/M15c used), so **every** target is reachable
+within the 6-round/6-step budget (trajectory coverage = 1.000, verified). Capacity curve on the
+reachable w24 task (10 seeds, EM):
+
+| hidden | params | trm EM | ff EM | untied EM | Δ(trm−untied) EM |
+|--------|--------|--------|-------|-----------|------------------|
+| 64  | 16.6k | 0.641 | 0.622 | 0.637 | +0.004 (6/4, p=.75 ns) |
+| 128 | 49.6k | 0.720 | 0.621 | 0.752 | −0.032 (3/7, p=.34 ns) |
+| 256 | 165k  | 0.763 | 0.625 | **0.861** | **−0.098 (0/10, p=.002)** |
+
+**Three conclusions, all reversing or qualifying M17:**
+
+1. **The "capacity-robust plateau" is RETRACTED — the loop is capacity-LIMITED, not structurally
+   insufficient.** Removing the depth tail lifts trm EM **0.56→0.64** at base (so ~⅓ of the M17 gap
+   *was* the unroll budget), and on the reachable task the loop **climbs monotonically** with capacity
+   (0.641→0.720→0.763, decelerating but no ceiling) — the M11 "scale helps" pattern. The M17b
+   "+0.03 capacity-robust" was itself the confound: the unreachable ~30% of rows flattened the uncapped
+   capacity curve and masked the loop's learnability. There is **no structural single-timescale wall**;
+   "one joint-state timescale is *provably* insufficient" is false on this instance.
+
+2. **The untied stack DOMINATES and pulls away with scale.** ff is capacity-saturated (0.622→0.625 —
+   a shallow one-shot map can't improve), but the depth-matched untied stack climbs fastest
+   (0.637→0.752→0.861) and the P1 reversal **grows monotonically and becomes significant** at 256
+   (Δ(trm−untied) +0.004→−0.032→−0.098, 0/10, budget-clean). So the nested target rewards **more
+   independent operators**, and weight-tying into one shared operator increasingly *forfeits* capacity.
+   This is a clean negative for the project's broadest pro-loop leg (**P1 reverses**) — now on a
+   depth-controlled task, not just the confounded uncapped run.
+
+3. **leg-2 is capacity-contingent; leg-1 (joint-state) survives.** Under the depth control, leg-2
+   (Δ(trm−ff) EM) is **ns at base** (+0.019, 7/3, p=.34 — the M17 base "+0.070" was substantially the
+   depth tail) and returns only at scale as ff saturates (+0.099 @128, +0.138 @256, 10/0). leg-1
+   (Δ(trm−trm_decoupled) EM) reproduces clean at base (+0.096 @w24 / +0.116 @w32, 10/0; trainability-
+   clean stepDS +0.156 @w24) — confirming `nested_converge` is a genuine deep+local joint-state target.
+   (Caveat: `trm_decoupled_nods` is the documented-fragile arm — at hidden=256 it collapsed to EM
+   0.186 ± 0.222, inflating the 256 leg-1 Δ to +0.577; lean on the base/stepDS numbers, not 256.)
+   Also disclosed (review S3): the loop cannot fit even the *training* set (train token-acc ~0.92,
+   tiny train–test gap) — an optimization/capacity limit, consistent with "climbs with size," not a
+   structural-insufficiency signature.
+
+**Verdict — the §9.3 build-gate is NOT met; M18 (H/L) is NOT earned; Task C stays DEFERRED (clean
+negative).** Once the unroll-budget confound is removed, the single-timescale loop is shown to be
+capacity-limited (monotone climb, no plateau), so there is no demonstrated single-timescale
+insufficiency for a second timescale to fix. Worse for the H/L motivation: the evidence favours *less*
+tying (the untied stack wins and the gap widens with scale), and §9.3/M17b already require any H/L loop
+to **beat the untied stack** — which is here strong and scaling, with no evidence H/L would clear it.
+Building H/L now would be the exact HRM mistake the autopsy diagnosed (a hierarchy built on faith), so
+we do not. This is a §8 "report the null plainly" outcome: the substrate is sound and leg-1 holds, but
+the hierarchy is unearned on this instance.
+
+**What would re-open it (for a future agent, NOT now):** a `nested_converge` instance (deeper nesting,
+larger block_w, more levels, harder inner/outer pair) where, on the *reachable* task with a *capacity
+sweep*, the single loop's EM genuinely **saturates below 1.0** while remaining below an equally-scaled
+untied stack — i.e. a real ceiling, not a confound. Until such an instance exists, Task C is deferred
+and the other legitimate frontier is the §9.4 real-tabular bridge.
+
+**Process note.** This is the adversarial review working as intended: it caught a verdict-flipping
+confound (B1) before it propagated into building a model (M18). M17's substrate/tests/leg-1 stand;
+its gate conclusion was wrong and is corrected here. Tracked: `accept_max_depth=6` configs
+(`m17c_nested_reachable_{gate,capacity,size256}.yaml`), their summary CSVs, the committed structural
+screen (`experiments/screen_nested_converge.py`, review N1); CLAUDE.md §3/§9.3/§11.
