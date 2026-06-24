@@ -1883,3 +1883,62 @@ result); it is rule-dependent and was partly depth-inflated for rule 78.** The o
 un-removable is the definitional uniformity↔rule-cardinality entanglement (1 vs 4 truth tables). Leg 1
 (joint-state = deep+local, transfers off-CA) and P1 remain clean and depth-controlled. Tracked:
 `results/m15b_depth_matched_*.{json,csv}`.
+
+---
+
+## M16 — DONE. Reframe the project: retire the unsatisfiable §9 gate; re-imagine Task C around the mechanism we found. (Writing milestone — no new runs; the experimental program M0–M15c is complete.)
+
+This is a documentation/decision milestone, not an experiment. After M15c the experimental
+program is complete and the highest-value remaining action (flagged since M13) was to rewrite
+§9 so the project's success criterion matches what the evidence actually established. Done here.
+
+**What changed in CLAUDE.md.**
+- **§9 rewritten** from a flat "do-not-do" list into four parts: §9.1 retires the old gate,
+  §9.2 states the settled finding, §9.3 re-imagines Task C, §9.4 keeps the genuine don'ts.
+- **§3 Task C row** repurposed `compositional` → `nested_converge` ("earn H/L against the single
+  loop", deferred/gated, see §9.3).
+- **§11(c)** re-pointed: the §9-gate rewrite is marked DONE; the two legitimate frontiers are now
+  named (the §9.3 Task C, gated; the §9.4 real-tabular bridge).
+
+**Why retire the gate (not just mark it met).** The old gate — "no H/L hierarchy until the single
+loop beats its control on Task A *and* Task B" — is **structurally unsatisfiable**, not merely
+unmet. M6a built the one task (`multi_parity`) where a generalist *should* beat both single-axis
+controls and got **zero** loop-beats-both cells, plus falsified the weaker "never-worst" claim. A
+weight-tied generalist judged against single-axis *specialist* controls at a fixed budget cannot
+dominate on both axes. So "beats both on A and B" was the wrong success criterion; the honest move
+is to withdraw it, not to keep chasing it (M5/M6a already closed that).
+
+**The finding §9.2 now anchors the project on:** *tied recurrence with a JOINT multi-output state
+buys whole-row COHERENCE on LOCAL-UPDATE (CA) HARD multi-output FIXED-POINT targets.* Decomposed:
+leg 1 = joint-state coherence mechanism (deep+local, transfers off-CA, clean within-task, M10–M15);
+leg 2 = loop-beats-the-MLP EM edge needing a uniform local rule (depth-controlled on rule 13, M15c);
+P1 = tying-positive over a fair untied stack (broadest, survives off-CA, M9/M13/M14). Scoped by what
+it is NOT: not depth-extrapolation, not adaptive compute, not token-acc at large w, not universal
+across operator families, not hard-convergence fixed points in general (CA/local-update specific),
+not a capacity-independent beats-both.
+
+**How Task C was re-imagined (the substantive design call).** The original Task C was a generic
+`compositional` hierarchy probe gated on the loop beating the *FF baselines*. Both halves are now
+wrong: (i) the ARC autopsy + our M0–M2 work already showed the *loop*, not the H/L hierarchy, is the
+active ingredient; (ii) §9.2 shows the loop's value is coherence on local fixed-point maps, not
+depth/composition. So a re-imagined Task C must ask the only open hierarchy question — **does a
+two-timescale (H-slow/L-fast) loop buy coherence the validated single-timescale loop CANNOT, on a
+target that is itself a hierarchy of local fixed points?** Concretely `nested_converge`: an outer
+local map whose every step is the converged fixed point of an inner local CA (local+deep+ff-hard,
+basin-rejection-filtered like `converge`/`mixed_converge`; difficulty = nesting levels / inner-vs-
+outer depth / block size). **The control becomes the single loop** (`trm`), not the FF baseline —
+plus `trm_decoupled` (still the joint state?) and a depth-matched untied stack (two-timescale tying
+vs more depth). **The build-gate is now satisfiable:** build it only once a concrete instance shows
+the single-timescale loop's coherence plateaus below the target (a within-loop ablation, can be met
+or cleanly falsified) — unlike the retired generalist-beats-specialists gate. Until then Task C
+stays deferred: building the H/L split before showing single-loop insufficiency would repeat the
+exact HRM mistake the autopsy diagnosed.
+
+**Net.** The project's orienting criterion is now the right one (§9.2), Task C is re-scoped to a
+question the evidence actually leaves open with a gate that can be satisfied (§9.3), and the two
+remaining frontiers (gated Task C; real-tabular bridge) are named without either being "in flight."
+§9.3 also carries a **proposed `make_nested_converge` reference-generator sketch** (in the §3 style,
+clearly marked NOT-built): a two-timescale fixed point (inner = per-block ring relax via `ca_step`;
+outer = one full-ring `ca_step` per round), reusing the `make_mixed_converge` rejection-filter
+boilerplate, so the next agent has a concrete starting point if/when the build-gate is met. No code,
+configs, runs, or dependencies changed. Tracked: CLAUDE.md §3/§9/§11(c).
