@@ -11,6 +11,7 @@ from .generators import (
     make_hopfield,
     make_iterated,
     make_linear,
+    make_mixed_converge,
     make_multi_parity,
     make_parity,
 )
@@ -94,6 +95,11 @@ def make_splits(
         elif task == "hopfield":
             X, y = make_hopfield(n=n, task_seed=task_seed, sample_seed=sample_seed, **task_cfg)
             return TabularDataset(X, y)
+        elif task == "mixed_converge":
+            X, y = make_mixed_converge(
+                n=n, task_seed=task_seed, sample_seed=sample_seed, **task_cfg
+            )
+            return TabularDataset(X, y)
         else:
             raise ValueError(f"Unknown task: {task}")
 
@@ -113,11 +119,16 @@ def make_trajectory_dataset(
     The CA-family tasks carry a trajectory: ``iterated`` (target s_T, traj last frame == s_T)
     and ``converge`` (target s_inf the fixed point — traj last frame is s_{T_max}, which for
     slow-converging rows is *not* yet s_inf; that gap is intentional, M8). ``hopfield`` (M13)
-    carries the threshold-net iterate chain with the same fixed-point contract. ``task_cfg`` may
-    carry the fixed-T reference (``T``) which is ignored here in favour of ``T_max``.
+    carries the threshold-net iterate chain, and ``mixed_converge`` (M15) the per-position mixed-CA
+    chain — both with the same fixed-point contract. ``task_cfg`` may carry the fixed-T reference
+    (``T``) which is ignored here in favour of ``T_max``.
     """
     cfg = {k: v for k, v in task_cfg.items() if k != "T"}
-    gen = {"converge": make_converge, "hopfield": make_hopfield}.get(task, make_iterated)
+    gen = {
+        "converge": make_converge,
+        "hopfield": make_hopfield,
+        "mixed_converge": make_mixed_converge,
+    }.get(task, make_iterated)
     X, _, traj = gen(
         n=n, T=T_max, task_seed=task_seed, sample_seed=sample_seed, return_trajectory=True, **cfg
     )

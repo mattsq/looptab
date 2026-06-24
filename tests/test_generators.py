@@ -12,8 +12,10 @@ from looptab.data.generators import (
     make_hopfield,
     make_iterated,
     make_linear,
+    make_mixed_converge,
     make_multi_parity,
     make_parity,
+    mixed_ca_step,
 )
 
 
@@ -327,6 +329,79 @@ def test_hopfield_banded_target_is_a_fixed_point(bandwidth):
         n=300, w=w, task_seed=3, sample_seed=4, n_patterns=12, bandwidth=bandwidth, gamma=None
     )
     np.testing.assert_array_equal(_hopfield_update01(s_inf, W, gamma), s_inf)
+
+
+# --- M15: per-position mixed-CA fixed-point task (deep + non-uniform + local) -------
+
+
+def test_mixed_ca_step_matches_ca_step_when_uniform():
+    """A constant per-position rule vector reduces mixed_ca_step to plain ca_step."""
+    s = np.random.default_rng(0).integers(0, 2, size=(50, 16))
+    rules = np.full(16, 78, dtype=np.int64)
+    np.testing.assert_array_equal(mixed_ca_step(s, rules), ca_step(s, 78))
+
+
+def test_mixed_converge_determinism():
+    """Same seeds (incl. the rejection filter) => identical bytes."""
+    a = make_mixed_converge(n=200, w=24, task_seed=42, sample_seed=1, distractors=8)
+    b = make_mixed_converge(n=200, w=24, task_seed=42, sample_seed=1, distractors=8)
+    np.testing.assert_array_equal(a[0], b[0])
+    np.testing.assert_array_equal(a[1], b[1])
+
+
+def test_mixed_converge_is_non_uniform():
+    """The per-position rule assignment uses >1 distinct rule (it is NOT a single CA)."""
+    rules = np.asarray((78, 92, 141, 197))
+    fn_rng = np.random.default_rng(42)
+    pos_rules = rules[fn_rng.integers(0, len(rules), size=48)]
+    assert len(np.unique(pos_rules)) > 1
+
+
+@pytest.mark.parametrize("w", [24, 32])
+def test_mixed_converge_target_is_a_fixed_point(w):
+    """Every kept row's target is a genuine fixed point of its own per-position rule."""
+    rules = np.asarray((78, 92, 141, 197))
+    pos_rules = rules[np.random.default_rng(7).integers(0, len(rules), size=w)]
+    X, s_inf = make_mixed_converge(n=400, w=w, task_seed=7, sample_seed=2)
+    np.testing.assert_array_equal(mixed_ca_step(s_inf, pos_rules), s_inf)
+
+
+def test_mixed_converge_balance_and_nontrivial():
+    """Balanced (majority ~0.5) and non-trivial (most rows actually move off s0)."""
+    X, y = make_mixed_converge(n=3000, w=32, task_seed=42, sample_seed=1)
+    cell_means = y.mean(axis=0)
+    assert np.all((cell_means > 0.25) & (cell_means < 0.75))
+    moved = ~(y == X[:, :32]).all(axis=1)
+    assert moved.mean() > 0.9  # screened triv ~0% => >90% of rows are non-identity
+
+
+def test_mixed_converge_shapes_distractors_and_coding():
+    X, y = make_mixed_converge(n=50, w=24, task_seed=0, sample_seed=0, distractors=8)
+    assert X.shape == (50, 32)  # w + distractors
+    assert y.shape == (50, 24)
+    assert set(np.unique(y)).issubset({0, 1})
+
+
+def test_mixed_converge_trajectory_chains_to_fixed_point_tail():
+    rules = np.asarray((78, 92, 141, 197))
+    pos_rules = rules[np.random.default_rng(3).integers(0, len(rules), size=24)]
+    X, s_inf, traj = make_mixed_converge(
+        n=80, w=24, task_seed=3, sample_seed=4, T=96, return_trajectory=True
+    )
+    assert traj.shape == (80, 96, 24)
+    for i in range(1, traj.shape[1]):
+        np.testing.assert_array_equal(traj[:, i, :], mixed_ca_step(traj[:, i - 1, :], pos_rules))
+    # T=96 = 4*w exceeds the (filtered) convergence depth, so the tail has reached s_inf.
+    np.testing.assert_array_equal(traj[:, -1, :], s_inf)
+
+
+def test_mixed_converge_raises_when_cycling():
+    """A non-converging rule_set must fail loudly rather than return non-fixed states."""
+    with pytest.raises(ValueError):
+        # rule 90 (XOR) never settles to a fixed point from random inputs => 0 convergent rows.
+        make_mixed_converge(
+            n=200, w=24, task_seed=0, sample_seed=0, rule_set=(90,), max_draw_factor=4
+        )
 
 
 def test_ca_step_rule90():

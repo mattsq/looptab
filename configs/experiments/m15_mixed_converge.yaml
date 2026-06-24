@@ -1,0 +1,106 @@
+# M15 — Is the loop's edge DEEP CONVERGENCE or the UNIFORM (translation-invariant) RULE?
+#
+# M14 falsified "the loop needs coupling locality" but confounded bandwidth with convergence depth,
+# so it could NOT separate the two candidate ECA-specific ingredients. M15 breaks the confound with
+# the decisive cell: `mixed_converge` — a per-position MIXED CA (each cell runs its own radius-1
+# rule from orbit1 {78,92,141,197}, iterated to a fixed point, rejection-filtered to the convergent
+# basin). This is LOCAL + DEEP-converging + ff-HARD (screened: ff EM ~0.28 at w=24, depth median 3 —
+# the rule-78 regime where the loop WON, M9) but spatially NON-uniform (not a CA). Temporally uniform
+# (same step repeated), which is what the loop's weight-tying matches.
+#
+# Run the SAME M10 arm set as the uniform `converge` rule-78 anchor (m15_uniform_anchor), same w /
+# curriculum / seeds. PRE-REGISTERED reading (§8), on the two load-bearing deltas vs the uniform
+# anchor:
+#   - loop BEATS ff here (Δ(nods−ff) EM > 0) AND the joint-state mechanism survives
+#     (Δ(stepDS−decoupled_stepDS) EM > 0, like the ECA's +0.28..+0.35) ⇒ the active ingredient is
+#     DEEP CONVERGENCE / wide light-cone, NOT the uniform rule (translation-invariance not required).
+#   - loop only TIES/LOSES ff AND the mechanism is null (as on M13/M14) ⇒ the ingredient is the
+#     UNIFORM (translation-invariant) local rule. (The 3-seed screen points here: Δ(nods−ff) ≈ 0.)
+# Either way the tying-positive P1 (Δ(nods−untied)) is expected to survive.
+
+task:
+  name: mixed_converge
+  params:
+    rule_set: [78, 92, 141, 197]
+    distractors: 8
+    T: 6
+  n_train: 4000
+  n_test: 1000
+  task_seed: 42
+  train_sample_seed: 1
+  test_sample_seed: 2
+
+grid:
+  params:
+    w: [24, 32]
+
+curriculum:
+  param: T
+  T_min: 1
+  T_max: 6
+
+couple_n_steps_to_param: T
+
+arms:
+  - name: trm
+    label: trm_nods                 # joint loop, final loss (budget reference)
+    hidden_dim: 64
+    latent_dim: 64
+    n_steps: 6
+    deep_supervision: false
+    ds_mode: final
+  - name: trm_decoupled
+    label: trm_decoupled_nods       # per-cell refinement, equal (final) supervision — THE ablation
+    hidden_dim: 64
+    latent_dim: 64
+    n_steps: 6
+    deep_supervision: false
+    ds_mode: final
+  - name: trm
+    label: trm_stepDS               # joint loop, step-aligned DS
+    hidden_dim: 64
+    latent_dim: 64
+    n_steps: 6
+    deep_supervision: true
+    ds_mode: step_aligned
+  - name: trm_decoupled
+    label: trm_decoupled_stepDS     # per-cell refinement, equal step-aligned supervision
+    hidden_dim: 64
+    latent_dim: 64
+    n_steps: 6
+    deep_supervision: true
+    ds_mode: step_aligned
+  - name: ff_matched
+    label: ff_matched               # §4a shallow MLP grounding
+    hidden_dim: 64
+    latent_dim: 64
+    n_steps: 6
+  - name: untied_matched
+    label: untied_matched           # §4b fair untied stack, final loss
+    hidden_dim: 64
+    latent_dim: 64
+    n_steps: 6
+    deep_supervision: false
+    ds_mode: final
+
+deltas:
+  - [trm_nods, trm_decoupled_nods]      # M10 headline: joint vs decoupled @ equal final loss
+  - [trm_stepDS, trm_decoupled_stepDS]  # joint vs decoupled @ equal step-aligned supervision
+  - [trm_nods, ff_matched]              # loop-beats-both leg vs §4a (the depth-vs-uniform test)
+  - [trm_nods, untied_matched]          # tying-positive P1 vs §4b
+  - [trm_decoupled_nods, ff_matched]    # does the decoupled head still beat the shallow MLP?
+  - [trm_decoupled_nods, untied_matched]  # does the decoupled head still beat the fair untied?
+
+budget_reference: trm_nods
+budget_tol: 0.02
+
+train:
+  epochs: 100
+  lr: 1e-3
+  weight_decay: 1e-4
+  batch_size: 256
+  device: cpu
+
+seeds: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
+parallel_workers: 4
+results_dir: results

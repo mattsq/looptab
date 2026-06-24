@@ -1,0 +1,13 @@
+config,delta,metric,delta_mean,delta_std,n_seeds,sign_pos,sign_neg,sign_p
+w=24,trm_nods-ff_matched,accuracy,-0.005791666666666639,0.016608701283764855,3,1,2,1.0
+w=24,trm_nods-ff_matched,exact_match,-0.009333333333333341,0.11566042250196623,3,2,1,1.0
+w=24,trm_nods-ff_matched,coherence_excess,0.028883153200260026,0.018962375161957673,3,3,0,0.25
+w=24,trm_nods-untied_matched,accuracy,0.10002777777777783,0.014296059415615748,3,3,0,0.25
+w=24,trm_nods-untied_matched,exact_match,0.238,0.02690724809414741,3,3,0,0.25
+w=24,trm_nods-untied_matched,coherence_excess,0.05196911788067047,0.006990014547550027,3,3,0,0.25
+w=32,trm_nods-ff_matched,accuracy,0.006687499999999995,0.022500021701378468,3,2,1,1.0
+w=32,trm_nods-ff_matched,exact_match,0.019,0.017776388834631177,3,3,0,0.25
+w=32,trm_nods-ff_matched,coherence_excess,0.010918670376127149,0.018850788263687704,3,2,1,1.0
+w=32,trm_nods-untied_matched,accuracy,0.1042604166666667,0.012247143055457228,3,3,0,0.25
+w=32,trm_nods-untied_matched,exact_match,0.054,0.018330302779823355,3,3,0,0.25
+w=32,trm_nods-untied_matched,coherence_excess,0.02223916748029688,0.02475770245501229,3,2,1,1.0

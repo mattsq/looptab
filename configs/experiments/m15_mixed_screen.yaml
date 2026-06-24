@@ -1,0 +1,78 @@
+# M15 screen — is the per-position mixed-CA fixed-point task ff-HARD (like the ECA)?
+#
+# M14 falsified "the loop needs coupling locality" but confounded bandwidth with convergence depth
+# (the banded net dropped the uniform rule AND collapsed depth at once), so it could NOT separate
+# "iterated translation-invariant rule" from "deep convergence" as the loop-edge ingredient. M15
+# fills the decisive missing cell: `mixed_converge` — a per-position MIXED CA (each cell runs its
+# own radius-1 rule from orbit1 {78,92,141,197}), iterated to a fixed point (rejection-filtered to
+# the convergent basin). It is LOCAL + DEEP-converging (ff-hard candidate) but spatially NON-uniform
+# (not a CA), and temporally uniform (same step repeated — what the loop's tying matches).
+#
+# numpy pre-screen (committed in the M15 LOG entry): fills n=4000 with no raises over task_seeds
+# 42..51 at w in {24,32}, balanced (maj ~0.50), non-trivial (>90% rows move off s0), deep (depth
+# median 3, max 6-10), and >=97% settle in <=6 steps so n_steps=6 is ample. The ONE remaining
+# precondition is ff-HARDNESS: the loop's edge only appears where a shallow per-cell map FAILS on
+# coherence (M11). We want ff EM ~0.3 (the hard regime of the converging ECAs) with trm_nods showing
+# a gap above it. Light: 3 seeds.
+
+task:
+  name: mixed_converge
+  params:
+    rule_set: [78, 92, 141, 197]
+    distractors: 8
+    T: 6
+  n_train: 4000
+  n_test: 1000
+  task_seed: 42
+  train_sample_seed: 1
+  test_sample_seed: 2
+
+grid:
+  params:
+    w: [24, 32]
+
+curriculum:
+  param: T
+  T_min: 1
+  T_max: 6
+
+couple_n_steps_to_param: T
+
+arms:
+  - name: ff_matched
+    label: ff_matched               # the hardness probe — want EM ~0.3 (hard regime)
+    hidden_dim: 64
+    latent_dim: 64
+    n_steps: 6
+  - name: trm
+    label: trm_nods                 # does the joint loop show a coherence gap above ff?
+    hidden_dim: 64
+    latent_dim: 64
+    n_steps: 6
+    deep_supervision: false
+    ds_mode: final
+  - name: untied_matched
+    label: untied_matched           # §4b fair untied grounding
+    hidden_dim: 64
+    latent_dim: 64
+    n_steps: 6
+    deep_supervision: false
+    ds_mode: final
+
+deltas:
+  - [trm_nods, ff_matched]          # the coherence gap the main grid will test
+  - [trm_nods, untied_matched]
+
+budget_reference: trm_nods
+budget_tol: 0.02
+
+train:
+  epochs: 100
+  lr: 1e-3
+  weight_decay: 1e-4
+  batch_size: 256
+  device: cpu
+
+seeds: [0, 1, 2]
+parallel_workers: 3
+results_dir: results

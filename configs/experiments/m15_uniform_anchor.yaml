@@ -1,0 +1,99 @@
+# M15 uniform anchor — the deep + UNIFORM (translation-invariant) reference for the mixed-CA test.
+#
+# Same M10 arm set / w / curriculum / seeds / distractors as m15_mixed_converge, but the task is the
+# UNIFORM `converge` rule 78 (one rule at every position — a true CA). Rule 78 is the M9 rule where
+# the loop WON (loop beats ff on EM at matched token-acc, w<=24), and it is in the mixed task's
+# orbit1 {78,92,141,197}. So this is the apples-to-apples uniform anchor: identical rule family and
+# protocol, the ONLY difference vs m15_mixed_converge being translation-invariance (uniform here,
+# per-position-mixed there).
+#
+# The contrast IS the experiment: if the loop beats ff HERE (uniform) but only ties/loses on the
+# mixed task — both deep and ff-hard — then the active ingredient is the UNIFORM rule, not depth.
+# (distractors=8 to match the mixed task; converge default is 0.)
+
+task:
+  name: converge
+  params:
+    rule: 78
+    distractors: 8
+    T: 6
+  n_train: 4000
+  n_test: 1000
+  task_seed: 42
+  train_sample_seed: 1
+  test_sample_seed: 2
+
+grid:
+  params:
+    w: [24, 32]
+
+curriculum:
+  param: T
+  T_min: 1
+  T_max: 6
+
+couple_n_steps_to_param: T
+
+arms:
+  - name: trm
+    label: trm_nods
+    hidden_dim: 64
+    latent_dim: 64
+    n_steps: 6
+    deep_supervision: false
+    ds_mode: final
+  - name: trm_decoupled
+    label: trm_decoupled_nods
+    hidden_dim: 64
+    latent_dim: 64
+    n_steps: 6
+    deep_supervision: false
+    ds_mode: final
+  - name: trm
+    label: trm_stepDS
+    hidden_dim: 64
+    latent_dim: 64
+    n_steps: 6
+    deep_supervision: true
+    ds_mode: step_aligned
+  - name: trm_decoupled
+    label: trm_decoupled_stepDS
+    hidden_dim: 64
+    latent_dim: 64
+    n_steps: 6
+    deep_supervision: true
+    ds_mode: step_aligned
+  - name: ff_matched
+    label: ff_matched
+    hidden_dim: 64
+    latent_dim: 64
+    n_steps: 6
+  - name: untied_matched
+    label: untied_matched
+    hidden_dim: 64
+    latent_dim: 64
+    n_steps: 6
+    deep_supervision: false
+    ds_mode: final
+
+deltas:
+  - [trm_nods, trm_decoupled_nods]
+  - [trm_stepDS, trm_decoupled_stepDS]
+  - [trm_nods, ff_matched]
+  - [trm_nods, untied_matched]
+  - [trm_decoupled_nods, ff_matched]
+  - [trm_decoupled_nods, untied_matched]
+
+budget_reference: trm_nods
+budget_tol: 0.02
+
+train:
+  epochs: 100
+  lr: 1e-3
+  weight_decay: 1e-4
+  batch_size: 256
+  device: cpu
+
+seeds: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
+parallel_workers: 4
+results_dir: results

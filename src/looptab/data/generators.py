@@ -182,6 +182,116 @@ def make_converge(
     return X.astype(np.float32), s_inf.astype(np.int64)
 
 
+# Default per-position rule pool for `make_mixed_converge`: ECA symmetry orbit 1 (M12), the
+# converging-orbit-mates of rule 78. Mixing these per position breaks translation-invariance while
+# every position still runs a *converging* radius-1 rule (best global-convergence rate of the
+# orbits screened — see M15). Rule 78 itself is in this set, so the uniform `converge` rule-78
+# baseline (M9, loop WINS) is the apples-to-apples uniform anchor.
+MIXED_CONVERGE_ORBIT1 = (78, 92, 141, 197)
+
+
+def mixed_ca_step(s: np.ndarray, rules: np.ndarray) -> np.ndarray:
+    """One CA step with a PER-POSITION rule vector (periodic boundary).
+
+    ``rules`` has shape ``(w,)``: cell ``i`` is updated by its own radius-1 truth table
+    ``rules[i]`` (0..255). Identical to ``ca_step`` when ``rules`` is constant — the only change
+    is that the lookup is broadcast per column, so the update is local but NOT translation-invariant
+    (a non-CA local rule).
+    """
+    left, center, right = np.roll(s, 1, -1), s, np.roll(s, -1, -1)
+    idx = (left << 2) | (center << 1) | right  # (n, w) in 0..7
+    return (rules[None, :] >> idx) & 1
+
+
+def make_mixed_converge(
+    n: int,
+    w: int,
+    task_seed: int,
+    sample_seed: int,
+    rule_set: tuple[int, ...] = MIXED_CONVERGE_ORBIT1,
+    distractors: int = 0,
+    T: int | None = None,
+    return_trajectory: bool = False,
+    max_steps: int | None = None,
+    max_draw_factor: int = 20,
+):
+    """DEEP + NON-UNIFORM + LOCAL fixed-point task (M15): break the M14 bandwidth↔depth confound.
+
+    M14 showed a *local-but-non-CA* threshold net does not revive the loop's coherence edge, but it
+    confounded two changes from the ECA at once — it dropped the translation-invariant rule AND
+    collapsed convergence depth (shallow ⇒ ff-easy). This task fills the decisive missing cell: a
+    **per-position mixed CA** — each cell runs its own radius-1 rule drawn (by ``task_seed``) from
+    ``rule_set`` — so the map is **local** and **deep-converging** (ff-hard, like the ECA) but
+    **spatially non-uniform** (not a CA). It is still *temporally* uniform (the same per-position
+    update is applied every step, which is what the loop's weight-tying matches). Contrast with the
+    uniform `converge` rule-78 baseline (M9, loop WINS):
+      - loop WINS here  ⇒ the active ingredient is DEEP CONVERGENCE / wide light-cone, NOT the
+        uniform rule (translation-invariance is not required).
+      - loop LOSES here ⇒ the ingredient is the UNIFORM (translation-invariant) local rule.
+
+    A spatial mix of converging rules is NOT globally convergent (~15-85% of random inputs cycle;
+    screened M15), so rows are **rejection-filtered to the convergent basin**: inputs are drawn,
+    iterated, and only those reaching a genuine fixed point within ``max_steps`` are kept (the
+    target is then a true fixed point, ``mixed_ca_step(s_inf)==s_inf``). The input distribution is
+    therefore basin-conditioned — disclosed; all arms see the identical distribution, so the
+    loop-vs-control comparison is unaffected. Filtering is deterministic (fixed sample_seed ⇒ fixed
+    block draws ⇒ fixed accepted rows). All-integer ⇒ bit-exact (no float-matmul determinism risk).
+
+    Returns ``(X, s_inf[, traj])`` mirroring ``make_converge``/``make_hopfield`` exactly, so it
+    slots into the existing dataset/trajectory/curriculum machinery unchanged.
+    """
+    rules = np.asarray(rule_set, dtype=np.int64)
+    fn_rng = np.random.default_rng(task_seed)
+    pos_rules = rules[fn_rng.integers(0, len(rules), size=w)]  # (w,) per-position assignment
+    if max_steps is None:
+        max_steps = 4 * w  # generous; screened convergence depth max ≪ this cap
+
+    row_rng = np.random.default_rng(sample_seed)
+    block = 2 * n
+    max_draw = max_draw_factor * n
+    drawn = 0
+    s0_keep: list[np.ndarray] = []
+    sinf_keep: list[np.ndarray] = []
+    got = 0
+    while got < n:
+        if drawn >= max_draw:
+            raise ValueError(
+                f"make_mixed_converge: only {got}/{n} convergent rows after {drawn} draws "
+                f"(w={w}, rule_set={tuple(rule_set)}); the mix may cycle too often — raise "
+                f"max_draw_factor/max_steps or use a more convergent rule_set."
+            )
+        b = row_rng.integers(0, 2, size=(block, w))
+        drawn += block
+        s = b.copy()
+        for _ in range(max_steps):
+            nxt = mixed_ca_step(s, pos_rules)
+            if np.array_equal(nxt, s):  # whole block stationary (rare when some rows cycle)
+                break
+            s = nxt
+        fixed = (mixed_ca_step(s, pos_rules) == s).all(axis=1)  # per-row: reached a fixed point?
+        s0_keep.append(b[fixed])
+        sinf_keep.append(s[fixed])
+        got += int(fixed.sum())
+    s0 = np.concatenate(s0_keep)[:n]
+    s_inf = np.concatenate(sinf_keep)[:n]
+
+    X = s0
+    if distractors > 0:
+        noise = fn_rng.integers(0, 2, size=(n, distractors))  # static, uninformative (task_seed)
+        X = np.concatenate([s0, noise], axis=-1)
+
+    if return_trajectory:
+        traj_len = T if T is not None else max_steps
+        cur = s0.copy()
+        frames = []
+        for _ in range(traj_len):
+            cur = mixed_ca_step(cur, pos_rules)
+            frames.append(cur.copy())
+        traj = np.stack(frames, axis=1).astype(np.int64) if traj_len > 0 else s0[:, :0, :]
+        return X.astype(np.float32), s_inf.astype(np.int64), traj
+    return X.astype(np.float32), s_inf.astype(np.int64)
+
+
 def _ring_band_mask(w: int, bandwidth: int) -> np.ndarray:
     """Boolean (w, w) mask: True where the ring distance min(|i-j|, w-|i-j|) ≤ bandwidth.
 
