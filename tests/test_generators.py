@@ -416,6 +416,35 @@ def test_mixed_converge_trajectory_path_matches_splits_path():
     np.testing.assert_array_equal(y1, y2)  # identical fixed-point targets
 
 
+@pytest.mark.parametrize("cap", [2, 4, 6])
+def test_mixed_converge_accept_max_depth_caps_depth(cap):
+    """accept_max_depth keeps only rows converging within `cap` steps (M15b depth-matched control).
+
+    Uniform rule_set=(78,) => a true CA through the same pipeline; every accepted row must reach its
+    fixed point in <= cap steps."""
+    rules = np.full(24, 78, dtype=np.int64)
+    X, s_inf = make_mixed_converge(
+        n=300, w=24, task_seed=42, sample_seed=1, rule_set=(78,), accept_max_depth=cap
+    )
+    s = X[:, :24].astype(np.int64)
+    reached = np.zeros(len(s), dtype=bool)
+    for _ in range(cap):
+        s = mixed_ca_step(s, rules)
+        reached |= (s == s_inf).all(axis=1)
+    assert reached.all()  # every accepted row hits its fixed point within `cap` steps
+
+
+def test_mixed_converge_accept_max_depth_none_is_unchanged():
+    """The cap is additive: accept_max_depth=None must reproduce the uncapped output bit-for-bit
+    (guards the committed M15 results when the M15b cap param was added)."""
+    a = make_mixed_converge(n=200, w=24, task_seed=42, sample_seed=1, distractors=8)
+    b = make_mixed_converge(
+        n=200, w=24, task_seed=42, sample_seed=1, distractors=8, accept_max_depth=None
+    )
+    np.testing.assert_array_equal(a[0], b[0])
+    np.testing.assert_array_equal(a[1], b[1])
+
+
 def test_ca_step_rule90():
     """Rule 90 is XOR of neighbors."""
     s = np.array([[1, 0, 0, 1, 0]])

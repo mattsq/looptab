@@ -1739,3 +1739,64 @@ per-position mixing (a fully random-rule mix does not converge), rejection-filte
 inputs, mixed task harder + shallower-tailed than the uniform anchor, leg (2) is w≤24. Tracked:
 `results/m15_mixed_screen_*.{json,csv}`, `results/m15_mixed_converge_*.{json,csv}`,
 `results/m15_uniform_anchor_*.{json,csv}`.
+
+---
+
+## M15b — DONE. Leg 2 NAILED: a depth/hardness-controlled uniform control confirms loop-beats-the-MLP needs the uniform (translation-invariant) rule.
+
+The M15 review left leg 2 ("loop-beats-the-MLP requires the uniform rule") *suggestive but confounded*:
+the mixed vs uniform-78 contrast differed in hardness and convergence-depth-tail, not just translation-
+invariance. M15b removes the confound with the control the review prescribed.
+
+**The depth-matched uniform control.** Added an `accept_max_depth` cap to `make_mixed_converge`: it keeps
+only rows reaching their fixed point within the cap (additive; `None` reproduces the committed M15 output
+bit-for-bit — tested). A UNIFORM single-rule CA run through the *identical* rejection-filter pipeline
+(`rule_set=[r]`) with `accept_max_depth=6` then matches the mixed task's depth tail (**max depth 6, 0%
+rows depth>6, target fully fixed at T=6**) — directly removing 2 of the review's 3 confounds (depth-tail
+*and* target-fixedness). The 3rd (hardness) is handled by **direction**: capping makes the uniform task
+*easier* (ff EM 0.362 / 0.345 for rules 78 / 13 @ w=24 vs the mixed task's 0.255), and per M11 an *easier*
+task *handicaps* the loop-beats-ff edge (ff has more room) — so a loop win on the easier uniform control,
+against a loop tie on the harder mixed task, is a **conservative** demonstration that the difference is
+not hardness.
+
+**Result — depth-matched uniform vs the (already-depth-≤6) mixed task, EM, 10 seeds, sign-test p:**
+
+| task @ w=24 (depth ≤6) | ff EM | Δ(loop−ff) EM | Δ(stepDS−dec_stepDS) EM | Δ(loop−untied) EM |
+|---|---|---|---|---|
+| **uniform rule 78** (cap6) | 0.362 | **+0.090 (9/1, p=.021)** | +0.313 (10/0, p=.002) | +0.318 (10/0) |
+| **uniform rule 13** (cap6) | 0.345 | **+0.175 (9/1, p=.021)** | +0.309 (10/0, p=.002) | +0.411 (10/0) |
+| **mixed orbit1** (M15, non-uniform) | 0.255 | **−0.028 (3/6, p=.51 ns)** | +0.206 (10/0, p=.002) | +0.199 (10/0) |
+
+At w=32 the loop-beats-ff edge vanishes for *both* uniform rules (78: −0.015, 2/8, p=.11; 13: −0.005,
+2/6, p=.29) — the M9 "edge is w≤24" boundary, the same regime where the mixed task also ties. The 3-seed
+screen (`m15b_uniform_matched_screen`) additionally shows **all four** rules {78,197,141,13} give a
+positive loop−ff EM edge at w=24 (+0.065…+0.222), so the uniform win is not a single-rule fluke. Budget:
+`ff_matched` within tol (0.998) ⇒ the loop-vs-ff contrast is budget-clean; `untied_matched` over budget
+(1.025) ⇒ P1 conservative.
+
+**Reading (per §8) — leg 2 is confirmed; the M15 decomposition is now clean.**
+- **At matched convergence-depth (≤6) and with hardness controlled by direction, the loop beats ff on the
+  UNIFORM task (+0.090 / +0.175 EM, both 9/1, p=.021) but TIES on the NON-uniform mixed task (−0.028,
+  ns).** The only remaining difference between the depth-matched uniform control and the mixed task is
+  translation-invariance, and the residual hardness gap runs *against* the result (uniform is easier, ff
+  EM 0.35–0.36 > 0.255, which by M11 should shrink the loop's edge, yet the edge is present). So
+  **loop-beats-the-MLP requires the uniform, translation-invariant rule** — now isolated, not merely
+  suggested. The M15 "task-matching audit" caveat is resolved.
+- **Leg 1 reconfirmed and orthogonal:** the joint-state mechanism Δ(stepDS−dec_stepDS) is large and
+  10/0 on the uniform controls (+0.31) *and* on the mixed task (+0.206) — present regardless of
+  uniformity, consistent with its deep+local requirement. So the two legs are genuinely separable: the
+  joint-state coherence mechanism needs deep+local structure (uniform or not); the loop-beats-MLP edge
+  needs the uniform rule on top.
+- **Mechanistic reading (still a hypothesis, not isolated):** a uniform rule makes the one-step operator
+  maximally shared across positions, which the weight-tied loop matches to beat a one-shot MLP; a
+  per-position rule makes it spatially-varying, erasing that edge. M15b establishes the *dependence* on
+  uniformity; it does not separately prove the *operator-sharing* account of why.
+
+**Net.** The M8–M12 "tied loop + joint state buys whole-row coherence on hard CA targets" decomposes —
+now with both legs controlled — into: **(1)** a **joint-state coherence mechanism** requiring *deep +
+local* structure (transfers off-CA to the non-uniform mixed-CA; within-task, M15), and **(2)** a
+**loop-beats-the-MLP** edge requiring the *uniform translation-invariant rule* (M15b: holds on
+depth/hardness-controlled uniform CAs, absent on the non-uniform mixed task; w≤24). Caveats: w≤24 (the
+loop-beats-ff regime, both legs tie at w=32); orbit rules only; rejection-filtered (basin-conditioned)
+inputs; hardness matched by direction (conservative) rather than exactly. Tracked:
+`results/m15b_uniform_matched_screen_*.{json,csv}`, `results/m15b_uniform_matched_*.{json,csv}`.

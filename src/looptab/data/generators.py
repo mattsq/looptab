@@ -214,6 +214,7 @@ def make_mixed_converge(
     return_trajectory: bool = False,
     max_steps: int | None = None,
     max_draw_factor: int = 20,
+    accept_max_depth: int | None = None,
 ):
     """DEEP + NON-UNIFORM + LOCAL fixed-point task (M15): break the M14 bandwidth↔depth confound.
 
@@ -236,6 +237,13 @@ def make_mixed_converge(
     therefore basin-conditioned — disclosed; all arms see the identical distribution, so the
     loop-vs-control comparison is unaffected. Filtering is deterministic (fixed sample_seed ⇒ fixed
     block draws ⇒ fixed accepted rows). All-integer ⇒ bit-exact (no float-matmul determinism risk).
+
+    ``accept_max_depth`` (M15b): if set, additionally reject rows whose convergence depth EXCEEDS it
+    (keep only rows reaching their fixed point within ``accept_max_depth`` steps). This caps the
+    depth-tail of the accepted basin — used to build a DEPTH-MATCHED uniform control
+    (``rule_set=(78,)`` runs the identical pipeline with one rule, i.e. a true CA, restricted to its
+    depth-<=cap basin) so the mixed-vs-uniform contrast holds convergence depth fixed and isolates
+    translation-invariance.
 
     Returns ``(X, s_inf[, traj])`` mirroring ``make_converge``/``make_hopfield`` exactly, so it
     slots into the existing dataset/trajectory/curriculum machinery unchanged.
@@ -263,14 +271,19 @@ def make_mixed_converge(
         b = row_rng.integers(0, 2, size=(block, w))
         drawn += block
         s = b.copy()
-        for _ in range(max_steps):
+        depth = np.full(block, -1, dtype=np.int64)  # first step at which each row is stationary
+        for step in range(max_steps):
             nxt = mixed_ca_step(s, pos_rules)
-            if np.array_equal(nxt, s):  # whole block stationary (rare when some rows cycle)
+            newly = (nxt == s).all(axis=1) & (depth < 0)  # s already a fixed point at this step
+            depth[newly] = step
+            if (depth >= 0).all():  # whole block settled
                 break
             s = nxt
-        fixed = (mixed_ca_step(s, pos_rules) == s).all(axis=1)  # per-row: reached a fixed point?
+        fixed = depth >= 0  # reached a genuine fixed point within max_steps
+        if accept_max_depth is not None:
+            fixed &= depth <= accept_max_depth  # cap the depth-tail (M15b matched control)
         s0_keep.append(b[fixed])
-        sinf_keep.append(s[fixed])
+        sinf_keep.append(s[fixed])  # converged rows are stationary, so s holds the fixed point
         got += int(fixed.sum())
     s0 = np.concatenate(s0_keep)[:n]
     s_inf = np.concatenate(sinf_keep)[:n]
