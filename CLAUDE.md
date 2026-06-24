@@ -41,7 +41,7 @@ explicit difficulty knob, and a built-in out-of-distribution / extrapolation axi
 | 0 | `linear` | smoke test / tripwire | pipeline, metrics, training loop |
 | A | `parity` | **core diagnostic** | irregular target + uninformative features |
 | B | `iterated` | **mechanistic test** | loops ≈ algorithm steps; depth-extrapolation |
-| C | `compositional` | hierarchy probe | **DEFERRED — phase 2 only** (see §9) |
+| C | `nested_converge` | hierarchy probe, **re-imagined** | earn H/L *against the single loop* — **DEFERRED, gated** (see §9.3) |
 
 **Seed discipline (applies to all tasks).** Each task instance is a pure function of two
 seeds: a `task_seed` that defines *the function* (e.g. which bits are informative), and a
@@ -200,14 +200,100 @@ by registering it, not by editing the training loop.
 - **Report negative results plainly.** A clean null (loop ≈ control across the difficulty
   ladder) is a genuine, publishable-internally finding here, not a failure to be buried.
 
-## 9. Scope discipline — do NOT do these yet
+## 9. Scope discipline — what's settled, what's earned, what's still out
 
-- No real / downloaded datasets (ARC, Sudoku, OpenML, the Grinsztajn suite) — synthetic
-  first. Real tabular comes *after* the synthetic story is clear.
-- No RL extension.
-- **No H/L hierarchy** (Task C, two-module HRM split) until the single-loop refinement
-  beats its control on Task A *and* Task B. The autopsy says earn the hierarchy.
-- No large models. No speculative architecture zoo. Tiny-first, one variable at a time.
+**The synthetic story is now clear (M0–M15c).** This section used to be a flat "do-not-do"
+list gated on a single criterion. The program ran that criterion to ground and it is now
+rewritten around what was actually established. Full narratives live in `results/LOG.md`.
+
+### 9.1 The original gate is RETIRED (falsified, not unmet)
+
+The old gate — *"no H/L hierarchy until the single loop beats its control on Task A **and**
+Task B"* — is **structurally unsatisfiable** and is withdrawn. M6a's `multi_parity` both-axes
+probe (built to be the one task needing depth *and* width at a fixed budget, exactly where a
+generalist *should* beat both single-axis controls) produced **zero** loop-beats-both cells and
+**falsified** the weaker "never-worst" claim too. A weight-tied generalist judged against
+single-axis *specialist* controls at a fixed parameter budget cannot dominate on both axes —
+"beats both on A and B" was the wrong success criterion, not a bar the loop narrowly missed. Do
+**not** re-run experiments to satisfy it (M5/M6a closed that), and do **not** treat it as the
+trigger for Task C.
+
+### 9.2 What the loop actually buys (the result Task C must build on)
+
+The defensible positive finding, fully scoped:
+
+> **Tied recurrence with a JOINT multi-output state buys whole-row COHERENCE on LOCAL-UPDATE
+> (CA) HARD multi-output FIXED-POINT targets.**
+
+It decomposes into two mechanisms plus one broad architectural fact (narratives: LOG.md M8–M15c):
+
+- **Leg 1 — joint-state coherence mechanism (deep + local; CLEAN, within-task).** Refining all
+  output cells in one shared latent beats refining them in independent latents (`trm` ≫
+  `trm_decoupled`, budget/recurrence/supervision matched) — ΔEM up to +0.66, 10/0, *growing*
+  with model size (M10/M11), across the whole hard-convergence ECA regime (M12), and it
+  **transfers off-CA** to a non-uniform deep+local map (M15). Needs *deep + local* structure;
+  null on a dense net (M13) and on a shallow one (M14).
+- **Leg 2 — loop-beats-the-shallow-MLP EM edge (needs a UNIFORM local rule).** The loop beats a
+  param-matched MLP on whole-row exact-match only where the per-cell update is a single shared
+  rule; demonstrated depth-distribution-controlled on rule 13 (+0.21 EM, 10/0, hardness against
+  the result), absent on a per-position-mixed rule at identical depth (M15c). EM-only, w≤24.
+- **P1 — tying-positive (broadest leg).** The tied loop beats a *fair* (width-matched) untied
+  stack on coherence — width-robust (M9), survives off-CA in 3/4 cells (M13/M14). The one
+  regime-independent architectural pro-loop fact.
+
+Equally load-bearing, **what the loop does NOT buy** (so Task C isn't designed to chase a ghost):
+*not* depth-extrapolation or a transferable step operator (M1/M3b/M7 — over-unrolling decays even
+on a convergent target, M8); *not* adaptive test-time compute (M8); *not* a token-accuracy edge at
+large w (M9); *not* universal across operator families (ff dominates per-cell-*easy* targets, M11);
+*not* a property of hard-convergence fixed points in general — it is CA/local-update specific
+(M13/M14); *not* a capacity-independent "beats-both" (ff wins at small model size, M11).
+
+### 9.3 Task C, re-imagined — "earn the hierarchy against the LOOP, not the baselines"
+
+The original Task C was a generic `compositional` hierarchy probe gated on the loop beating the FF
+*baselines*. Both halves of that framing are now wrong. The ARC autopsy plus our M0–M2 work
+already showed the *loop*, not the H/L hierarchy, is the active ingredient; and §9.2 shows the
+loop's value is **joint-state coherence on local fixed-point maps**, not depth or composition. So
+if Task C is ever built it must ask the only hierarchy question the evidence leaves genuinely open:
+
+> **Does a two-timescale (H-slow / L-fast) loop buy whole-row coherence that the validated
+> single-timescale joint-state loop CANNOT — on a target that is itself a hierarchy of local
+> fixed points?**
+
+Concretely, re-imagine Task C as **`nested_converge`** (a two-timescale fixed point), *not* a
+generic `compositional` probe:
+
+- **Target.** A **nested fixed point**: an outer local map whose every step is itself the
+  converged fixed point of an inner local CA (e.g. inner = a verified converging rule run to
+  s_inf over blocks; outer = a second local rule over the inner-converged blocks, run to *its*
+  fixed point). Stay in the regime where the loop's mechanism lives — **local + deep + ff-hard**
+  — and **rejection-filter to the convergent basin** exactly as `converge`/`mixed_converge` do.
+  Difficulty dials: nesting levels, inner-vs-outer convergence depth, block size.
+- **The control is now the SINGLE LOOP.** The §4 FF/untied controls still ship, but the
+  *decisive* comparison is **H/L two-module loop vs the validated single-timescale `trm`** (does
+  the second timescale add coherence?), with `trm_decoupled` (still the joint state?) and a
+  depth-matched untied stack (two-timescale *tying* or just more depth?). This is the autopsy's
+  "earn the hierarchy" done honestly: the hierarchy must beat the loop we already trust, not a
+  baseline the loop already beats.
+- **The gate to BUILD it (now satisfiable).** Build Task C only once there is a concrete
+  `nested_converge` instance where the **single-timescale loop's coherence plateaus below the
+  target** (one joint-state timescale is provably insufficient) **and** the structure is genuinely
+  two-timescale. If the single loop already solves the nested target, the hierarchy is unearned —
+  report that null and stop. Unlike the retired gate, this is a *within-loop ablation*, not a
+  generalist-beats-specialists demand, so it can actually be met or cleanly falsified.
+
+**Until that within-loop insufficiency is demonstrated, Task C stays DEFERRED.** Building the H/L
+split before showing the single loop fails on a nested target would repeat the exact HRM mistake
+the autopsy diagnosed.
+
+### 9.4 Still out of scope (rationale updated now that the synthetic story is clear)
+
+- **Real / downloaded datasets** (ARC, Sudoku, OpenML, Grinsztajn). The synthetic story is clear,
+  so the real-tabular bridge is now the *other* legitimate frontier — but it is a deliberate,
+  separately scoped step (port the joint-state-coherence finding to a real multi-output tabular
+  target, §4 control contract intact), **not** a casual download started mid-stream.
+- **No RL extension. No large models. No speculative architecture zoo.** Tiny-first, one variable
+  at a time (§5) still governs everything, a re-imagined Task C included.
 
 ## 10. For agents working in this repo
 
@@ -652,21 +738,14 @@ partly depth (drops to +0.032 ns, becomes ff-easy). Leg 1 + P1 hold at matched d
 depth-controlled (rule 13); only the definitional uniformity↔rule-cardinality entanglement remains.**
 
 **No milestone is currently in flight.** Open threads, in rough priority:
-- **THE highest-value remaining action — relax the literal §9 gate wording (now even better-scoped after the
-  M13 bound).** M6a showed "beats both on A and B" is structurally unsatisfiable. The reframing the evidence
-  supports: the loop's value is **whole-row coherence via the JOINT refinement state, on LOCAL-UPDATE (CA)
-  HARD multi-output fixed-point targets** — robust over a fair untied stack (P1), growing with model size
-  (M11), mechanism = the joint state (M10, all sizes), across the entire hard-convergence ECA regime (M12),
-  **PLUS the broader-but-not-uniform tying-positive P1** (M13: P1 survives off-CA in 3/4 cells). **Scope it
-  precisely:** NOT universal across operator families (ff-dominates easy {140,232}), NOT a capacity-independent
-  "beats-both" (ff wins at small), **NOT a property of hard-convergence fixed points in general — it is
-  CA/local-update specific (M13)**, NOT token-acc, NOT adaptive compute, NOT depth-extrapolation. Rewrite §9's
-  gate around this; do **NOT** build Task C. *(This is a writing task — the experiments are done.)* Note
-  M14/M15 further tighten the scope: it is **not about coupling locality** (M14 — a local non-CA net is
-  ff-easy and the loop loses), and the M8–M12 result **splits into two mechanisms** (M15): a **joint-state
-  coherence mechanism** needing *deep + local* structure (transfers off-CA to a non-uniform local deep
-  map) and a **loop-beats-the-MLP** edge needing the *uniform translation-invariant rule* (does not
-  transfer to a per-position-mixed rule). Frame the §9 rewrite around this two-part decomposition.
+- **DONE — the §9 gate has been rewritten (M16, this branch).** The unsatisfiable "beats both on A and B"
+  gate is retired/falsified (M6a) and §9 is reframed around the actual finding (joint-state coherence on
+  local-update hard fixed-point targets; legs 1/2 + P1, precisely scoped) with Task C re-imagined as
+  `nested_converge` and gated on a *satisfiable* within-loop criterion (§9.3). This was the project's
+  highest-value remaining action and it was a writing task; the experiments were already complete. The two
+  legitimate frontiers are now **(a)** the §9.3 `nested_converge` Task C (only if the single loop is first
+  shown insufficient on a nested target — do NOT build the H/L split before that) and **(b)** the
+  separately-scoped real-tabular bridge (§9.4).
 - **The experimental program is COMPLETE — all leg-2 confounds now controlled.** M14 closed locality;
   M15 established leg 1 (joint-state mechanism = deep+local, transfers off-CA, clean); M15b max-depth-matched
   leg 2; **M15c closed the central-depth residual** (depth-distribution-matched: leg 2 confirmed
@@ -674,9 +753,9 @@ depth-controlled (rule 13); only the definitional uniformity↔rule-cardinality 
   hardness against it; rule 78 shown depth-inflated/inconclusive). The only un-removable leg-2 caveat is the
   DEFINITIONAL uniformity↔rule-cardinality entanglement (a non-uniform local rule must use ≥2 truth tables).
   Lowest-value leftovers only: more uniform rules at matched depth (rule 78 went ff-easy — try a harder
-  matched rule); finer/larger size sweep; radius-2 mix; the operator-sharing *why*. **The default and
-  highest-value next action is the §9-gate rewrite** (leg 1, leg 2 [rule 13, depth-controlled], and P1 all
-  settled).
+  matched rule); finer/larger size sweep; radius-2 mix; the operator-sharing *why*. **The §9-gate rewrite is
+  now DONE (M16);** the next genuine frontiers are the §9.3 `nested_converge` Task C (gated on single-loop
+  insufficiency) and the §9.4 real-tabular bridge — neither is "in flight."
 - **Closed levers (do not redo):** depth-extrapolation via progressive loss / path-independence (M7/M8 —
   decay is intrinsic, not convergence-related); adaptive compute on a fixed-point target (M8 — decays);
   "lift the M4 sample wall" (M5); "re-judge via a both-axes task" (M6a); the decoupled-head mechanism
