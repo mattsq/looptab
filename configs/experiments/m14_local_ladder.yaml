@@ -1,0 +1,118 @@
+# M14 — Does the loop's joint-state coherence edge need LOCALITY? (local-but-non-CA ladder)
+#
+# THE open scientific question after M13 (CLAUDE.md §11(c)): the joint-state coherence result
+# (M8-M12) holds on LOCAL-update CA hard-convergence targets but VANISHES on a DENSE Hopfield net
+# (M13) — so the loop's edge may require a *local, spatially-structured* per-cell map, not just any
+# hard-convergence fixed point. M14 tests it with ONE knob on the M13 threshold net: `bandwidth` b
+# zeros every coupling beyond ring distance b. b small = spatially LOCAL but per-position-irregular
+# (NON-CA); b = w//2 = dense (= M13). This isolates LOCALITY (the knob) from the TRANSLATION-
+# INVARIANCE/uniformity a true CA also has (absent at every b) — the two properties that separate
+# the ECA from M13's dense net.
+#
+# LOCKED REGIME (numpy + 3-seed screen, m14_local_screen, both committed in the M14 LOG entry):
+# w=48, n_patterns=12, gamma=10, distractors=8. The pre-screen found a clean local ladder ONLY at
+# w=48 (smaller w forces a convergence-vs-triviality tension): bandwidth {2,4,8} are all 10/10
+# convergent (both sample seeds, n=5000), balanced (~0.50), non-trivial (triv <=5%), and settle in
+# <=6 steps (>=99%), so n_steps=6 is ample. The DENSE end needs gamma=16 (separate same-w anchor
+# m14_dense_anchor); a single gamma cannot span local+dense at full scale.
+#
+# PRE-REGISTERED reading (§8), from the screen: locality made the task ff-EASY (ff_matched nearly
+# SOLVES b=2: acc 0.999, EM ~0.95), so a shallow per-cell map represents a *local* output map well
+# and the loop LOSES on EM (Δ(loop-ff) <0 across the ladder, worst at the most-local end). The main
+# run confirms this at 10 seeds with the full M10 arm set:
+#   - FALSIFIES the locality hypothesis if Δ(loop-ff) <=0 across the ladder (locality is NOT what
+#     gives the loop its edge — the ECA edge needs the iterated translation-invariant local RULE,
+#     not mere coupling locality). Expected from the screen.
+#   - REVIVES it if the loop beats both controls at small b (locality IS the missing ingredient).
+# Either way the tying-positive P1 (Δ(loop-untied)) is expected to survive (M13's regime-independent
+# leg; screen shows +0.08..+0.23 across the ladder).
+
+task:
+  name: hopfield
+  params:
+    weights: hebbian
+    n_patterns: 12
+    gamma: 10
+    distractors: 8
+    T: 6
+  n_train: 4000
+  n_test: 1000
+  task_seed: 42
+  train_sample_seed: 1
+  test_sample_seed: 2
+
+grid:
+  params:
+    w: [48]
+    bandwidth: [2, 4, 8]   # local -> less-local; dense (b=24) is the separate same-w anchor
+
+curriculum:
+  param: T
+  T_min: 1
+  T_max: 6
+
+couple_n_steps_to_param: T
+
+arms:
+  - name: trm
+    label: trm_nods                 # joint loop, final loss (budget reference)
+    hidden_dim: 64
+    latent_dim: 64
+    n_steps: 6
+    deep_supervision: false
+    ds_mode: final
+  - name: trm_decoupled
+    label: trm_decoupled_nods       # per-cell refinement, equal (final) supervision — THE ablation
+    hidden_dim: 64
+    latent_dim: 64
+    n_steps: 6
+    deep_supervision: false
+    ds_mode: final
+  - name: trm
+    label: trm_stepDS               # joint loop, step-aligned DS
+    hidden_dim: 64
+    latent_dim: 64
+    n_steps: 6
+    deep_supervision: true
+    ds_mode: step_aligned
+  - name: trm_decoupled
+    label: trm_decoupled_stepDS     # per-cell refinement, equal step-aligned supervision
+    hidden_dim: 64
+    latent_dim: 64
+    n_steps: 6
+    deep_supervision: true
+    ds_mode: step_aligned
+  - name: ff_matched
+    label: ff_matched               # §4a shallow MLP grounding
+    hidden_dim: 64
+    latent_dim: 64
+    n_steps: 6
+  - name: untied_matched
+    label: untied_matched           # §4b fair untied stack, final loss
+    hidden_dim: 64
+    latent_dim: 64
+    n_steps: 6
+    deep_supervision: false
+    ds_mode: final
+
+deltas:
+  - [trm_nods, trm_decoupled_nods]      # M10 headline: joint vs decoupled @ equal final loss
+  - [trm_stepDS, trm_decoupled_stepDS]  # joint vs decoupled @ equal step-aligned supervision
+  - [trm_nods, ff_matched]              # loop-beats-both leg vs §4a (the locality test)
+  - [trm_nods, untied_matched]          # tying-positive P1 vs §4b
+  - [trm_decoupled_nods, ff_matched]    # does the decoupled head still beat the shallow MLP?
+  - [trm_decoupled_nods, untied_matched]  # does the decoupled head still beat the fair untied?
+
+budget_reference: trm_nods
+budget_tol: 0.02
+
+train:
+  epochs: 100
+  lr: 1e-3
+  weight_decay: 1e-4
+  batch_size: 256
+  device: cpu
+
+seeds: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
+parallel_workers: 4
+results_dir: results

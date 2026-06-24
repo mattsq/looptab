@@ -234,9 +234,15 @@ behaviour-changing conclusions, and the next pointer. Append detail to LOG.md, n
   hard-convergence probe: a dense binary threshold / Hopfield attractor net, s0 → converged
   attractor; integer symmetric `W` + integer self-coupling `γ` for guaranteed synchronous
   convergence — all-integer ⇒ bit-exact; built to test whether the joint-state result leaves the
-  ECA family). Generators in `src/looptab/data/generators.py`, determinism-tested in
-  `tests/test_generators.py`; `make_trajectory_dataset` dispatches iterated/converge/hopfield. Task
-  C (hierarchy) is **gated, unbuilt** (§9).
+  ECA family; **M14 adds a `bandwidth` knob** — zeros couplings beyond ring distance b, giving a
+  *local-but-non-CA* threshold net (b small = local, b=w//2 = dense), the locality probe), and
+  `mixed_converge` (M15 DEEP+NON-UNIFORM+LOCAL probe: a per-position MIXED CA — each cell runs its
+  own radius-1 rule from a `rule_set`, default orbit1 {78,92,141,197} — iterated to a fixed point,
+  **rejection-filtered to the convergent basin** since a spatial mix is not globally convergent;
+  local + temporally-uniform but spatially non-uniform; `mixed_ca_step` is the per-position step).
+  Generators in `src/looptab/data/generators.py`, determinism-tested in
+  `tests/test_generators.py`; `make_trajectory_dataset` dispatches iterated/converge/hopfield/
+  mixed_converge. Task C (hierarchy) is **gated, unbuilt** (§9).
 - **Models/arms:** `trm` (weight-tied refinement loop, optional per-step readouts),
   `ff_matched` (§4a param-matched shallow MLP), `untied_stack` (§4b untied, ~`n_steps`×
   params — a confounded ceiling, NOT param-matched), `untied_matched` (§4b untied,
@@ -274,7 +280,13 @@ behaviour-changing conclusions, and the next pointer. Append detail to LOG.md, n
   m5_parity_wall_n16k/n64k, m6a_multi_parity_grid, m7_progressive_extrapolation, m7b_progressive_alpha1,
   m8_converge_adaptive, m8b_converge_grid, m8c_converge_fair, m9_converge_width,
   m10_decoupled_converge, m11_size_{small,base,large}, m12_hardconv_orbit,
-  m13_hopfield_{screen,converge,large}).
+  m13_hopfield_{screen,converge,large}, m14_{local_screen,local_ladder,dense_anchor},
+  m15_{mixed_screen,mixed_converge,uniform_anchor}, m15b_uniform_matched{,_screen},
+  m15b_depth_matched).
+- **`hopfield` `bandwidth` regime (M14) — locked setting:** the local ladder needs **w=48** (w≤32 has
+  no clean local regime — convergence-vs-triviality tension); b∈{2,4,8} at `γ=10` all 10/10
+  convergent, balanced, non-trivial (triv ≤5%), settle ≤6 steps; the dense end (b=24) needs `γ=16`
+  (a single γ can't span local+dense, hence the split local-ladder/dense-anchor configs).
 - **`converge` rules — verified converging families:** {13, 78, 92} (M8), {140, 232} (M11), {69, 79, 93,
   141, 197} (M12). **The "balanced+deep converging" ECAs are EXACTLY 8 rules = two symmetry orbits** (M12
   256-rule screen): orbit 0 {13,69,79,93}, orbit 1 {78,92,141,197} — all are ff-hard and show the joint-state
@@ -504,6 +516,78 @@ behaviour-changing conclusions, and the next pointer. Append detail to LOG.md, n
   it is NOT a depth effect (per-row depth is comparable, median ~2–3, to rule 78 where the loop WON). The
   only regime-independent survivor is the tying-positive P1. (Hypothesis for the locality requirement is
   untested — §8; would need an intermediate local-but-non-CA substrate.)
+- **The M13 locality hypothesis is FALSIFIED — the loop's edge is NOT about coupling locality (M14, clean
+  NEGATIVE).** Built the intermediate substrate M13 called for: a `bandwidth` knob on the threshold net
+  giving a *local-but-non-CA* attractor (b small = nearest-neighbour but per-position-irregular, b=w//2 =
+  dense). Ran the M10 arm set across a **local→dense ladder b∈{2,4,8,24} at w=48, 10 seeds**. **(1)
+  Locality does NOT revive the loop's edge:** Δ(loop−ff) is **negative at EVERY bandwidth on accuracy**
+  (all 0/10, p=.002), `ff_matched` is the **best arm across the whole ladder**, and the direct test of
+  M13's hypothesis — the trainability-clean joint-state Δ(stepDS−decoupled_stepDS) — is **null at both the
+  local and dense ends** (ns), nothing like the ECA's +0.32…+0.66. (The dramatic b=2 ΔEM −0.80 is the
+  LEAST informative cell: an *easy* task, ff acc 0.999, where BOTH recurrent arms collapse — recurrence is
+  pointless there. The load-bearing cells are the hard end b=8/dense, where the loop still loses and the
+  mechanism Δ is null.) **(2) ff tracks per-cell FAN-IN, and bandwidth↔depth is CONFOUNDED:** ff-easiness
+  ⇔ small fan-in ≈ light-cone ≈ bandwidth × convergence-depth; the banded net drops the uniform rule AND
+  collapses depth (median 1–2 vs the ECA's tail to ~22) at once, so M14 **cannot separate** "iterated
+  translation-invariant local rule" from "deep convergence" as the loop-edge ingredient — the uniform-rule
+  reading is a HYPOTHESIS, not isolated here. **(3) The joint-state mechanism does NOT transfer** (as M13).
+  **(4) The tying-positive P1 SURVIVES** across the full local→dense ladder (Δ(loop−untied) acc 10/0 p=.002
+  at all four b; budget within ±2%, though `untied` is ~1.7% *under* budget so P1 is conservative not
+  exactly matched, and the local-ladder γ=10 is loud-guard-empirical not PSD-guaranteed) — the one
+  regime-independent leg, demonstrated off-CA at both ends. **Net: the M8–M12 result is bounded to
+  LOCAL-UPDATE (CA) hard-convergence — NOT explained by coupling locality, NOT hard-convergence fixed
+  points in general; only P1 generalizes. Whether the CA-specific ingredient is the uniform rule or the
+  deep convergence is NOT resolved by M14** (resolved in M15 below).
+- **The M8–M12 result decomposes into TWO legs (M15 — partially resolves the M14 confound; leg 1 CLEAN,
+  leg 2 SUGGESTIVE-but-confounded).** Built `mixed_converge` (a per-position MIXED CA: each cell its own
+  radius-1 rule from orbit1, iterated to a fixed point, rejection-filtered to the convergent basin) —
+  **deep + local + ff-hard but spatially NON-uniform (not a CA)** — and contrasted it with the uniform
+  `converge` rule-78 anchor. **Task-matching caveat (adversarial review): the two tasks are NOT
+  single-variable** — beyond translation-invariance the mixed task is per-row *harder* (ff EM 0.255/0.042
+  vs 0.311/0.121 @ w24/w32) and *shallower-tailed* (max depth 6, 0% rows depth>6, vs uniform max 16,
+  ~10–13% depth>6; mixed target fully fixed at T=6). **(1) [CLEAN, within-task] The joint-state coherence
+  mechanism (joint refinement ≫ per-cell, M10) is DEEP+LOCAL, NOT translation-invariance — it TRANSFERS
+  to the non-uniform mixed-CA:** trainability-clean Δ(stepDS−decoupled_stepDS) EM **+0.206 (10/0, p=.002)
+  @ w=24** (+0.053 @ w=32), decoupled BELOW ff (−0.237, 0/10) — the M10/ECA signature on a non-CA. Being a
+  within-task arm contrast, it is immune to the hardness/depth mismatch. With M13 (dense ⇒ null) and M14
+  (shallow ⇒ null), the mechanism needs **local + deep**, uniform or not. **(2) [SUGGESTIVE, cross-task,
+  CONFOUNDED] Loop-beats-the-shallow-MLP (the loop-beats-both headline, M8/M9) does NOT reproduce without
+  the uniform rule:** at w=24 the loop beats ff on EM for uniform-78 (**+0.133, 10/0, p=.002**) but does
+  NOT beat ff on the mixed version (**−0.028, 3/6, p=.51 — point estimate favours ff**). Consistent with
+  uniformity being required, but the mixed/uniform pair is confounded by hardness+depth-tail, so this
+  single cross-task Δ does NOT isolate translation-invariance; it is w≤24 only (both tie at w=32).
+  **[M15b — leg 2 NOW STRONGLY SUPPORTED.]** **(3) P1 survives on both** (conservative; untied over-budget).
+  **Net: leg 1 (deep+local joint-state mechanism, transfers off-CA) is established; leg 2 confirmed by M15b.**
+- **[M15b] Leg 2 STRONGLY SUPPORTED (not fully isolated) — loop-beats-the-MLP needs a UNIFORM local rule.**
+  Added an `accept_max_depth` cap to `make_mixed_converge` (additive; `None` = bit-identical to before, golden-
+  hash + additivity tested) and built a **max-depth-matched uniform control**: a uniform single-rule CA
+  (`rule_set=[r]`) through the same rejection-filter pipeline, capped to depth ≤6 to match the mixed task's
+  depth-*tail* (max 6, target fully fixed at T=6). **Result (w=24, EM, 10 seeds):** uniform rules 78 and 13
+  → loop **beats ff +0.090 / +0.175 (both 9/1, p=.021)**; the non-uniform mixed task (same max-depth) → loop
+  **ties (−0.028, ns)**. The mixed task is *harder* (ff EM 0.255 vs 0.36), which by M11 should *favour* the
+  loop, yet the loop wins only on uniform — so hardness predicts the opposite and can't explain it. Edge
+  vanishes at w=32 for all (M9 w≤24). Leg 1 stays large+significant on both uniform (+0.31) and mixed
+  (+0.206) — orthogonal. **Why NOT "isolated" (2nd adversarial review):** (i) depth is only MAX-matched —
+  uniform controls are ~1 step *deeper* on average (mean 3.9/3.6 vs mixed 2.9), a residual that is NOT
+  conservative (deeper ⇒ wider light-cone, could favour the loop); (ii) "uniform vs non-uniform" is
+  definitionally entangled with rule-cardinality (1 truth table vs 4) — a non-uniform local rule *must* use
+  ≥2 tables, so this can never be separated; (iii) EM-only (loop beats ff on token-acc on none, all ns);
+  (iv) two rules × one width at the 9/1 significance floor; the 3-seed screen is directional (all 4 rules
+  positive) but none significant. So leg 2 = "the loop-beats-MLP EM edge tracks rule-uniformity at matched
+  max-depth and against the hardness gradient," strongly supported, with the central-depth residual the one
+  un-eliminated alternative. (Code/determinism verified clean both reviews.)
+- **[M15c] Central-depth residual CLOSED — leg 2 survives depth-control on rule 13; rule 78 was partly
+  depth.** Added a `depth_profile` stratified-subsample to `make_mixed_converge` and ran mixed/uniform-78/
+  uniform-13 all subsampled to an IDENTICAL depth histogram (intersection profile, mean depth 3.40 for all,
+  verified bit-for-bit). At depth held fixed: uniform rule 13 → loop beats ff **+0.210 EM (10/0, p=.002)**
+  while the non-uniform mixed task **ties** (−0.005, ns) — and mixed is *harder* (ff EM 0.204 vs 0.353), so
+  hardness runs against the result; depth can no longer explain it. **Leg 2 confirmed depth-controlled (the
+  project's cleanest leg-2 cell).** But uniform rule 78's M15b edge (+0.090) **drops to +0.032 (ns)** once
+  depth-distribution-matched (and rule 78 becomes ff-easy, EM 0.44 — no-room/inconclusive), so M15b's
+  two-rule 9/1 overstated: under full depth control leg 2 rests on **rule 13 (robust)**, rule 78
+  inconclusive. Leg 1 (joint-state) holds at matched depth in all three cells (+0.19/+0.29/+0.36, 10/0,
+  decoupled < ff) and P1 survives all (10/0, conservative). Only the definitional uniformity↔rule-cardinality
+  (1 vs 4 truth tables) caveat remains un-removable.
 - Each leg still rests on few configs: Task A now multi-`d`/multi-`k` (M4) and the d≥40 wall has
   been swept over `n_train` (M5 — it is sample-bound and lifts to all-solve, except d=80,k=5 which
   is capacity-bound); Task B depth swept (M3a) but unlearnable past T=4 one-shot; M3b on one rule
@@ -547,6 +631,25 @@ collapse, 10/0) — so it is a property of the regime, not 3 lucky rules. **M13*
 specific** — at base AND large size it does NOT reproduce (loop-beats-both fails, ff is the *best* coherence
 arm; the trainability-clean joint-state mechanism is ns in all 4 cells; scaling does not revive it), with only
 the tying-positive P1 surviving. The M8–M12 result is now BOUNDED to local-update (CA) hard-convergence.
+**M14** built the intermediate substrate M13 asked for (a `bandwidth` knob → a *local-but-non-CA* threshold
+net) and showed **a local-but-non-CA net does NOT revive the loop's edge**: across a local→dense ladder
+(b∈{2,4,8,24}, w=48) the loop loses to ff at every b and the trainability-clean joint-state Δ is null at
+the hard end — so the M8–M12 result is **not explained by coupling locality**. (M14 confounds bandwidth
+with convergence depth — separated in M15.) Only the conservative **tying-positive P1** survives off-CA.
+**M15** built `mixed_converge` (a per-position MIXED CA — deep + local + ff-hard but spatially NON-uniform)
+and contrasted it with uniform rule 78, **partially resolving the M14 confound into a two-leg
+decomposition**: **(leg 1, CLEAN)** the **joint-state coherence mechanism** (joint ≫ per-cell, M10) is
+**deep + local**, NOT translation-invariance — it **TRANSFERS** to the non-uniform mixed-CA (within-task
+trainability-clean ΔEM +0.206, 10/0, p=.002 @ w=24; decoupled < ff); **(leg 2, SUGGESTIVE/CONFOUNDED)**
+**loop-beats-the-MLP** does not reproduce without the uniform rule (loop +0.133 EM on uniform-78 vs −0.028
+ns on mixed) — and **M15b STRONGLY SUPPORTS this with a max-depth-matched uniform control** (uniform CAs
+through the same filter, capped to depth ≤6: loop beats ff +0.090/+0.175 EM, 9/1, p=.021, while mixed
+ties; mixed is *harder* so the hardness gradient runs against the result). P1 survives both. **M15c then
+CLOSED the central-depth residual** with a `depth_profile` stratified-subsample (all tasks at an identical
+depth histogram, mean 3.40): at fixed depth, uniform rule 13 → loop beats ff +0.210 EM (10/0) vs mixed ties
+(−0.005), hardness against the result — **leg 2 confirmed depth-controlled on rule 13**; rule 78's edge was
+partly depth (drops to +0.032 ns, becomes ff-easy). Leg 1 + P1 hold at matched depth. **Leg 2 stands
+depth-controlled (rule 13); only the definitional uniformity↔rule-cardinality entanglement remains.**
 
 **No milestone is currently in flight.** Open threads, in rough priority:
 - **THE highest-value remaining action — relax the literal §9 gate wording (now even better-scoped after the
@@ -558,22 +661,40 @@ the tying-positive P1 surviving. The M8–M12 result is now BOUNDED to local-upd
   precisely:** NOT universal across operator families (ff-dominates easy {140,232}), NOT a capacity-independent
   "beats-both" (ff wins at small), **NOT a property of hard-convergence fixed points in general — it is
   CA/local-update specific (M13)**, NOT token-acc, NOT adaptive compute, NOT depth-extrapolation. Rewrite §9's
-  gate around this; do **NOT** build Task C. *(This is a writing task — the experiments are done.)*
-- **A generality probe still open (lower priority, untested M13 hypothesis):** the loop's coherence edge may
-  require a *local, spatially-structured* per-cell map (CA), not just a globally-coupled fixed point (M13's
-  dense net left no gap for the loop because the shallow MLP already sees the whole row; and it is NOT a
-  depth effect — M13's per-row depth ~2–3 matched rule 78 where the loop won). An intermediate
-  **local-but-non-CA** fixed-point map (e.g. a larger-neighbourhood or multi-state local rule) would test
-  the locality hypothesis directly. Higher-effort; only if more generality is wanted after
-  the §9 rewrite. Lower-value: a finer/larger size sweep; the strictly-budget-clean `untied` fix (over-budget
-  only handicaps the control, so P1 is already conservative).
+  gate around this; do **NOT** build Task C. *(This is a writing task — the experiments are done.)* Note
+  M14/M15 further tighten the scope: it is **not about coupling locality** (M14 — a local non-CA net is
+  ff-easy and the loop loses), and the M8–M12 result **splits into two mechanisms** (M15): a **joint-state
+  coherence mechanism** needing *deep + local* structure (transfers off-CA to a non-uniform local deep
+  map) and a **loop-beats-the-MLP** edge needing the *uniform translation-invariant rule* (does not
+  transfer to a per-position-mixed rule). Frame the §9 rewrite around this two-part decomposition.
+- **The experimental program is COMPLETE — all leg-2 confounds now controlled.** M14 closed locality;
+  M15 established leg 1 (joint-state mechanism = deep+local, transfers off-CA, clean); M15b max-depth-matched
+  leg 2; **M15c closed the central-depth residual** (depth-distribution-matched: leg 2 confirmed
+  depth-controlled on rule 13, +0.21 EM 10/0 with depth held identical to the non-uniform mixed task and
+  hardness against it; rule 78 shown depth-inflated/inconclusive). The only un-removable leg-2 caveat is the
+  DEFINITIONAL uniformity↔rule-cardinality entanglement (a non-uniform local rule must use ≥2 truth tables).
+  Lowest-value leftovers only: more uniform rules at matched depth (rule 78 went ff-easy — try a harder
+  matched rule); finer/larger size sweep; radius-2 mix; the operator-sharing *why*. **The default and
+  highest-value next action is the §9-gate rewrite** (leg 1, leg 2 [rule 13, depth-controlled], and P1 all
+  settled).
 - **Closed levers (do not redo):** depth-extrapolation via progressive loss / path-independence (M7/M8 —
   decay is intrinsic, not convergence-related); adaptive compute on a fixed-point target (M8 — decays);
   "lift the M4 sample wall" (M5); "re-judge via a both-axes task" (M6a); the decoupled-head mechanism
   question (M10 — coherence is the joint state); **the model-size axis (M11 — generalizes & strengthens);
   the rule/operator generality within ECAs (M11/M12 — family-specific to hard-convergence = two symmetry
   orbits, all 8 members confirmed, no other balanced+deep ECA exists); LEAVING the ECA family (M13 — the
-  joint-state result is CA/local-update specific, does not transfer to a dense threshold net at any size).**
+  joint-state result is CA/local-update specific, does not transfer to a dense threshold net at any size);
+  the LOCALITY hypothesis (M14 — a local-but-non-CA threshold net is ff-easy and the loop loses; the
+  M8–M12 edge is NOT explained by coupling locality); the UNIFORM-RULE-vs-DEPTH question (M15 — a
+  per-position MIXED CA, deep+local+ff-hard but non-uniform: leg 1 [joint-state mechanism = deep+local]
+  TRANSFERS to the mixed task and is CLEAN/within-task; leg 2 [loop-beats-the-MLP needs the uniform rule]
+  STRONGLY SUPPORTED by **M15b** — a max-depth-matched uniform control [`accept_max_depth` cap, uniform CA
+  through the mixed pipeline]: loop beats ff +0.090/+0.175 EM 9/1 p=.021 on uniform rules 78/13, ties on
+  the non-uniform mixed task at matched max-depth, with the hardness gradient running against the result.
+  M15c CLOSED the central-depth residual via depth-distribution matching: leg 2 confirmed depth-controlled
+  on rule 13 (+0.21 EM 10/0, depth identical to mixed, hardness against), rule 78 inconclusive at matched
+  depth [ff-easy]. Only the definitional uniformity↔rule-cardinality entanglement is un-removable. Do not
+  re-conflate the two legs).**
   A bigger-model probe of d=80,k=5 must scale the budget for *all* arms (M5).
 
 ## 12. Key references (for grounding a cold agent)

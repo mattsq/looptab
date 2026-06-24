@@ -182,6 +182,182 @@ def make_converge(
     return X.astype(np.float32), s_inf.astype(np.int64)
 
 
+# Default per-position rule pool for `make_mixed_converge`: ECA symmetry orbit 1 (M12), the
+# converging-orbit-mates of rule 78. Mixing these per position breaks translation-invariance while
+# every position still runs a *converging* radius-1 rule (best global-convergence rate of the
+# orbits screened — see M15). Rule 78 itself is in this set, so the uniform `converge` rule-78
+# baseline (M9, loop WINS) is the apples-to-apples uniform anchor.
+MIXED_CONVERGE_ORBIT1 = (78, 92, 141, 197)
+
+
+def mixed_ca_step(s: np.ndarray, rules: np.ndarray) -> np.ndarray:
+    """One CA step with a PER-POSITION rule vector (periodic boundary).
+
+    ``rules`` has shape ``(w,)``: cell ``i`` is updated by its own radius-1 truth table
+    ``rules[i]`` (0..255). Identical to ``ca_step`` when ``rules`` is constant — the only change
+    is that the lookup is broadcast per column, so the update is local but NOT translation-invariant
+    (a non-CA local rule).
+    """
+    left, center, right = np.roll(s, 1, -1), s, np.roll(s, -1, -1)
+    idx = (left << 2) | (center << 1) | right  # (n, w) in 0..7
+    return (rules[None, :] >> idx) & 1
+
+
+def make_mixed_converge(
+    n: int,
+    w: int,
+    task_seed: int,
+    sample_seed: int,
+    rule_set: tuple[int, ...] = MIXED_CONVERGE_ORBIT1,
+    distractors: int = 0,
+    T: int | None = None,
+    return_trajectory: bool = False,
+    max_steps: int | None = None,
+    max_draw_factor: int = 20,
+    accept_max_depth: int | None = None,
+    depth_profile: tuple[float, ...] | None = None,
+):
+    """DEEP + NON-UNIFORM + LOCAL fixed-point task (M15): break the M14 bandwidth↔depth confound.
+
+    M14 showed a *local-but-non-CA* threshold net does not revive the loop's coherence edge, but it
+    confounded two changes from the ECA at once — it dropped the translation-invariant rule AND
+    collapsed convergence depth (shallow ⇒ ff-easy). This task fills the decisive missing cell: a
+    **per-position mixed CA** — each cell runs its own radius-1 rule drawn (by ``task_seed``) from
+    ``rule_set`` — so the map is **local** and **deep-converging** (ff-hard, like the ECA) but
+    **spatially non-uniform** (not a CA). It is still *temporally* uniform (the same per-position
+    update is applied every step, which is what the loop's weight-tying matches). Contrast with the
+    uniform `converge` rule-78 baseline (M9, loop WINS):
+      - loop WINS here  ⇒ the active ingredient is DEEP CONVERGENCE / wide light-cone, NOT the
+        uniform rule (translation-invariance is not required).
+      - loop LOSES here ⇒ the ingredient is the UNIFORM (translation-invariant) local rule.
+
+    A spatial mix of converging rules is NOT globally convergent (~15-85% of random inputs cycle;
+    screened M15), so rows are **rejection-filtered to the convergent basin**: inputs are drawn,
+    iterated, and only those reaching a genuine fixed point within ``max_steps`` are kept (the
+    target is then a true fixed point, ``mixed_ca_step(s_inf)==s_inf``). The input distribution is
+    therefore basin-conditioned — disclosed; all arms see the identical distribution, so the
+    loop-vs-control comparison is unaffected. Filtering is deterministic (fixed sample_seed ⇒ fixed
+    block draws ⇒ fixed accepted rows). All-integer ⇒ bit-exact (no float-matmul determinism risk).
+
+    ``accept_max_depth`` (M15b): if set, additionally reject rows whose convergence depth EXCEEDS it
+    (keep only rows reaching their fixed point within ``accept_max_depth`` steps). This caps the
+    depth-tail of the accepted basin — used to build a DEPTH-MATCHED uniform control
+    (``rule_set=(78,)`` runs the identical pipeline with one rule, i.e. a true CA, restricted to its
+    depth-<=cap basin) so the mixed-vs-uniform contrast holds convergence depth fixed and isolates
+    translation-invariance.
+
+    ``depth_profile`` (M15b-followup): a per-depth target histogram (un-normalised weights, indexed
+    by depth) that the accepted rows are stratified-subsampled to. Two tasks given the SAME profile
+    end up with IDENTICAL convergence-depth distributions, closing the central-depth residual that
+    the max-depth cap leaves (``accept_max_depth`` matches only the tail; mean still differed).
+    Rows deeper than ``len(depth_profile)-1`` get quota 0, so it also bounds depth; it takes
+    precedence over ``accept_max_depth``.
+
+    Returns ``(X, s_inf[, traj])`` mirroring ``make_converge``/``make_hopfield`` exactly, so it
+    slots into the existing dataset/trajectory/curriculum machinery unchanged.
+    """
+    rules = np.asarray(rule_set, dtype=np.int64)
+    fn_rng = np.random.default_rng(task_seed)
+    pos_rules = rules[fn_rng.integers(0, len(rules), size=w)]  # (w,) per-position assignment
+    if max_steps is None:
+        max_steps = 4 * w  # generous; screened convergence depth max ≪ this cap
+
+    row_rng = np.random.default_rng(sample_seed)
+    block = 2 * n
+    max_draw = max_draw_factor * n
+    drawn = 0
+    s0_keep: list[np.ndarray] = []
+    sinf_keep: list[np.ndarray] = []
+    got = 0
+
+    # Optional stratified subsampling to a target per-depth histogram (M15b-followup): fills a
+    # per-depth quota instead of "first n convergent", so two tasks given the same `depth_profile`
+    # end up with IDENTICAL convergence-depth distributions (closes the central-depth residual the
+    # max-depth cap leaves). `depth_profile[d]` is the (un-normalised) target weight for depth d;
+    # rows deeper than len(profile)-1 get quota 0 (so it also bounds depth).
+    quota = filled = None
+    if depth_profile is not None:
+        prof = np.asarray(depth_profile, dtype=np.float64)
+        raw = prof / prof.sum() * n
+        quota = np.floor(raw).astype(np.int64)
+        for d in np.argsort(-(raw - np.floor(raw)))[: n - int(quota.sum())]:
+            quota[d] += 1  # largest-remainder rounding so quota sums to exactly n
+        filled = np.zeros(len(quota), dtype=np.int64)
+
+    def _enough() -> bool:
+        return (filled >= quota).all() if quota is not None else got >= n
+
+    while not _enough():
+        if drawn >= max_draw:
+            raise ValueError(
+                f"make_mixed_converge: only {got}/{n} convergent rows after {drawn} draws "
+                f"(w={w}, rule_set={tuple(rule_set)}, depth_profile={depth_profile}); the mix may "
+                f"cycle too often / a depth bin may be too rare — raise max_draw_factor/max_steps, "
+                f"use a more convergent rule_set, or relax the profile."
+            )
+        b = row_rng.integers(0, 2, size=(block, w))
+        drawn += block
+        s = b.copy()
+        depth = np.full(block, -1, dtype=np.int64)  # first step at which each row is stationary
+        for step in range(max_steps):
+            nxt = mixed_ca_step(s, pos_rules)
+            newly = (nxt == s).all(axis=1) & (depth < 0)  # s already a fixed point at this step
+            depth[newly] = step
+            if (depth >= 0).all():  # whole block settled
+                break
+            s = nxt
+        fixed = depth >= 0  # reached a genuine fixed point within max_steps
+        if accept_max_depth is not None:
+            fixed &= depth <= accept_max_depth  # cap the depth-tail (M15b matched control)
+        if quota is None:
+            s0_keep.append(b[fixed])
+            sinf_keep.append(s[fixed])  # converged rows are stationary, so s holds the fixed point
+            got += int(fixed.sum())
+        else:
+            for d in range(len(quota)):  # fill each depth bin up to its quota (draw order)
+                need = int(quota[d] - filled[d])
+                if need <= 0:
+                    continue
+                take = np.where(fixed & (depth == d))[0][:need]
+                s0_keep.append(b[take])
+                sinf_keep.append(s[take])
+                filled[d] += len(take)
+                got += len(take)
+    s0 = np.concatenate(s0_keep)[:n]
+    s_inf = np.concatenate(sinf_keep)[:n]
+
+    X = s0
+    if distractors > 0:
+        noise = fn_rng.integers(0, 2, size=(n, distractors))  # static, uninformative (task_seed)
+        X = np.concatenate([s0, noise], axis=-1)
+
+    if return_trajectory:
+        traj_len = T if T is not None else max_steps
+        cur = s0.copy()
+        frames = []
+        for _ in range(traj_len):
+            cur = mixed_ca_step(cur, pos_rules)
+            frames.append(cur.copy())
+        traj = np.stack(frames, axis=1).astype(np.int64) if traj_len > 0 else s0[:, :0, :]
+        return X.astype(np.float32), s_inf.astype(np.int64), traj
+    return X.astype(np.float32), s_inf.astype(np.int64)
+
+
+def _ring_band_mask(w: int, bandwidth: int) -> np.ndarray:
+    """Boolean (w, w) mask: True where the ring distance min(|i-j|, w-|i-j|) ≤ bandwidth.
+
+    The M14 locality knob. On a ring of ``w`` cells, ``bandwidth`` controls how far a cell's
+    coupling reaches: ``1`` = nearest-neighbour only (spatially LOCAL, like a CA's 3-neighbour
+    stencil — but with per-position irregular weights, so NON-CA), ``w//2`` = fully dense (no
+    masking, the M13 regime). The mask is symmetric (ring distance is symmetric) so it preserves
+    W's symmetry, and keeps the diagonal (distance 0), which is zeroed separately.
+    """
+    idx = np.arange(w)
+    dist = np.abs(idx[:, None] - idx[None, :])
+    ring = np.minimum(dist, w - dist)
+    return ring <= bandwidth
+
+
 def _build_hopfield_weights(
     w: int,
     task_seed: int,
@@ -189,6 +365,7 @@ def _build_hopfield_weights(
     n_patterns: int,
     weight_scale: int,
     density: float,
+    bandwidth: int | None = None,
 ) -> np.ndarray:
     """Integer symmetric zero-diagonal weight matrix W (the 'function', fixed by task_seed).
 
@@ -200,6 +377,12 @@ def _build_hopfield_weights(
         attractors + complex basins → ff-hard.
       - ``"random"``: symmetric integer matrix, entries in {-weight_scale..weight_scale} at the
         given off-diagonal ``density``. ``weight_scale``/``density`` are the hardness dials.
+
+    ``bandwidth`` (M14 locality probe): if not None, zero every coupling with ring distance
+    > ``bandwidth`` (see ``_ring_band_mask``), turning the dense net into a *local-but-non-CA*
+    threshold net. ``None`` = dense = the M13 regime. The mask is applied to the already-built
+    integer W, preserving symmetry and the all-integer (bit-exact) property; the PSD-guaranteeing
+    ``gamma`` in ``make_hopfield`` is derived from the *masked* W, so convergence still holds.
     """
     fn_rng = np.random.default_rng(task_seed)
     if weights == "hebbian":
@@ -213,6 +396,8 @@ def _build_hopfield_weights(
         W = U + U.T
     else:
         raise ValueError(f"make_hopfield: unknown weights mode {weights!r} (use hebbian|random)")
+    if bandwidth is not None:
+        W = W * _ring_band_mask(w, bandwidth)
     np.fill_diagonal(W, 0)
     return W.astype(np.int64)
 
@@ -237,6 +422,7 @@ def make_hopfield(
     n_patterns: int = 8,
     weight_scale: int = 1,
     density: float = 1.0,
+    bandwidth: int | None = None,
     gamma: int | None = None,
     gamma_margin: int = 1,
     distractors: int = 0,
@@ -260,12 +446,18 @@ def make_hopfield(
     s0 ∈ {-1,+1}^(n,w), iterated synchronously to the global fixed point. Outputs are mapped to
     {0,1} to match the binary readout heads and the ``coherence_excess`` metric.
 
+    ``bandwidth`` (M14 locality probe): zero couplings beyond ring distance ``bandwidth`` to make
+    the net *local-but-non-CA* (``1`` = nearest-neighbour, ``None``/``w//2`` = dense = M13) — the
+    knob that tests whether the M8–M12 joint-state coherence edge needs *locality* or the full CA.
+
     ``gamma``: pass an explicit int for committed runs (keeps the generator purely integer ⇒
     bit-exact). ``None`` auto-derives ``ceil(-λ_min(W)) + gamma_margin`` (guarantees synchronous
     convergence by making W+γI PSD) — this path uses a float eigen-solve, so it is for *screening*;
     the loud guard + a multi-seed screen (M12 lesson) verify the pinned int gamma converges.
     """
-    W = _build_hopfield_weights(w, task_seed, weights, n_patterns, weight_scale, density)
+    W = _build_hopfield_weights(
+        w, task_seed, weights, n_patterns, weight_scale, density, bandwidth
+    )
     if gamma is None:
         lam_min = float(np.linalg.eigvalsh(W.astype(np.float64)).min())
         gamma = max(int(np.ceil(-lam_min - 1e-9)) + gamma_margin, 0)

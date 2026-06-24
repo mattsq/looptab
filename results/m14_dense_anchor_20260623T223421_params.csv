@@ -1,0 +1,7 @@
+config,arm,n_params,ref_params,ratio,role,within_tol
+"w=48, bandwidth=24",trm_nods,24352,24352,1.0000,reference,True
+"w=48, bandwidth=24",trm_decoupled_nods,24254,24352,0.9960,matched,True
+"w=48, bandwidth=24",trm_stepDS,24352,24352,1.0000,matched,True
+"w=48, bandwidth=24",trm_decoupled_stepDS,24254,24352,0.9960,matched,True
+"w=48, bandwidth=24",ff_matched,24443,24352,1.0037,matched,True
+"w=48, bandwidth=24",untied_matched,23942,24352,0.9832,matched,True

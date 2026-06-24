@@ -1,0 +1,105 @@
+# M15b — NAIL leg 2: depth-matched UNIFORM control isolates translation-invariance.
+#
+# M15 leg 2 ("loop-beats-the-MLP needs the uniform rule") was confounded: the mixed task differs
+# from the uniform anchor in hardness AND convergence-depth-tail, not just translation-invariance.
+# M15b removes the confound. A UNIFORM single rule run through the IDENTICAL rejection-filter
+# pipeline as the mixed task (rule_set=[r] => a true CA) but DEPTH-CAPPED to <=6 (accept_max_depth: 6)
+# so its depth-tail matches the mixed task (max depth 6, 0% rows depth>6, target fully fixed at T=6).
+# Everything else (w, curriculum, arms, seeds, distractors, n_steps) matches m15_mixed_converge.
+#
+# The contrast IS the experiment — compare Δ(loop−ff) here vs the mixed run:
+#   mixed (non-uniform, w=24):                 Δ(loop−ff) EM = −0.028 (ns) — loop does NOT beat ff
+#   uniform-matched (this config, w=24):       Δ(loop−ff) EM = ?  — if >0, uniformity is the cause.
+# The 3-seed screen (m15b_uniform_matched_screen) shows ALL of rules {78,197,141,13} give the loop a
+# POSITIVE EM edge at w=24 (+0.065..+0.222) despite being EASIER than the mixed task (ff EM 0.35-0.41
+# vs mixed 0.255) — easier should HANDICAP the loop (M11), so a win here is conservative. Grids rules
+# {78 (the M9 rule), 13} x w {24, 32} to show it is not a single-rule fluke. (w=32 is the M9 "edge
+# vanishes" regime — included to confirm both tasks tie there.)
+
+task:
+  name: mixed_converge
+  params:
+    distractors: 8
+    T: 6
+    accept_max_depth: 6
+  n_train: 4000
+  n_test: 1000
+  task_seed: 42
+  train_sample_seed: 1
+  test_sample_seed: 2
+
+grid:
+  params:
+    rule_set: [[78], [13]]   # two uniform single-rule CAs (orbit1 & orbit0), depth-capped
+    w: [24, 32]
+
+curriculum:
+  param: T
+  T_min: 1
+  T_max: 6
+
+couple_n_steps_to_param: T
+
+arms:
+  - name: trm
+    label: trm_nods
+    hidden_dim: 64
+    latent_dim: 64
+    n_steps: 6
+    deep_supervision: false
+    ds_mode: final
+  - name: trm_decoupled
+    label: trm_decoupled_nods
+    hidden_dim: 64
+    latent_dim: 64
+    n_steps: 6
+    deep_supervision: false
+    ds_mode: final
+  - name: trm
+    label: trm_stepDS
+    hidden_dim: 64
+    latent_dim: 64
+    n_steps: 6
+    deep_supervision: true
+    ds_mode: step_aligned
+  - name: trm_decoupled
+    label: trm_decoupled_stepDS
+    hidden_dim: 64
+    latent_dim: 64
+    n_steps: 6
+    deep_supervision: true
+    ds_mode: step_aligned
+  - name: ff_matched
+    label: ff_matched
+    hidden_dim: 64
+    latent_dim: 64
+    n_steps: 6
+  - name: untied_matched
+    label: untied_matched
+    hidden_dim: 64
+    latent_dim: 64
+    n_steps: 6
+    deep_supervision: false
+    ds_mode: final
+
+deltas:
+  - [trm_nods, trm_decoupled_nods]
+  - [trm_stepDS, trm_decoupled_stepDS]
+  - [trm_nods, ff_matched]
+  - [trm_nods, untied_matched]
+  - [trm_decoupled_nods, ff_matched]
+  - [trm_decoupled_nods, untied_matched]
+
+budget_reference: trm_nods
+budget_tol: 0.02
+
+train:
+  epochs: 100
+  lr: 1e-3
+  weight_decay: 1e-4
+  batch_size: 256
+  device: cpu
+
+seeds: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
+parallel_workers: 4
+results_dir: results

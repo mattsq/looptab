@@ -1,0 +1,19 @@
+config,delta,metric,delta_mean,delta_std,n_seeds,sign_pos,sign_neg,sign_p
+"w=48, bandwidth=24",trm_nods-trm_decoupled_nods,accuracy,0.009758333333333324,0.013081948057118107,10,8,2,0.109375
+"w=48, bandwidth=24",trm_nods-trm_decoupled_nods,exact_match,0.0186,0.013777598565142702,10,9,1,0.021484375
+"w=48, bandwidth=24",trm_nods-trm_decoupled_nods,coherence_excess,0.0169014285027077,0.012657592715435146,10,9,1,0.021484375
+"w=48, bandwidth=24",trm_stepDS-trm_decoupled_stepDS,accuracy,0.007947916666666655,0.011041047545535606,10,8,2,0.109375
+"w=48, bandwidth=24",trm_stepDS-trm_decoupled_stepDS,exact_match,0.013499999999999998,0.016668333250008334,10,8,1,0.0390625
+"w=48, bandwidth=24",trm_stepDS-trm_decoupled_stepDS,coherence_excess,0.010707711961058557,0.015174277806402507,10,9,1,0.021484375
+"w=48, bandwidth=24",trm_nods-ff_matched,accuracy,-0.014585416666666651,0.009334374166914617,10,0,10,0.001953125
+"w=48, bandwidth=24",trm_nods-ff_matched,exact_match,-0.009600000000000003,0.01730895721873504,10,3,7,0.34375
+"w=48, bandwidth=24",trm_nods-ff_matched,coherence_excess,-0.004606947703844251,0.01403851490077342,10,3,7,0.34375
+"w=48, bandwidth=24",trm_nods-untied_matched,accuracy,0.028252083333333344,0.00967529074315114,10,10,0,0.001953125
+"w=48, bandwidth=24",trm_nods-untied_matched,exact_match,0.0177,0.011294541454466695,10,9,1,0.021484375
+"w=48, bandwidth=24",trm_nods-untied_matched,coherence_excess,0.014299306144611178,0.010099392742390682,10,9,1,0.021484375
+"w=48, bandwidth=24",trm_decoupled_nods-ff_matched,accuracy,-0.024343749999999977,0.011643682924433886,10,0,10,0.001953125
+"w=48, bandwidth=24",trm_decoupled_nods-ff_matched,exact_match,-0.028200000000000003,0.010633281086601006,10,0,10,0.001953125
+"w=48, bandwidth=24",trm_decoupled_nods-ff_matched,coherence_excess,-0.021508376206551952,0.008184945295832968,10,0,10,0.001953125
+"w=48, bandwidth=24",trm_decoupled_nods-untied_matched,accuracy,0.01849375000000002,0.0103405741599939,10,10,0,0.001953125
+"w=48, bandwidth=24",trm_decoupled_nods-untied_matched,exact_match,-0.0009000000000000001,0.009243015380996254,10,4,5,1.0
+"w=48, bandwidth=24",trm_decoupled_nods-untied_matched,coherence_excess,-0.0026021223580965204,0.008972842988511184,10,4,6,0.75390625

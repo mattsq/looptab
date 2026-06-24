@@ -1,0 +1,75 @@
+# M15b screen — depth-matched UNIFORM controls: find an ff-hard, hardness-matched uniform rule.
+#
+# Leg 2 of M15 (loop-beats-the-MLP needs the uniform rule) was confounded: the mixed task differs
+# from uniform-78 in hardness AND depth-tail, not just translation-invariance. M15b builds the clean
+# control: a UNIFORM rule run through the SAME rejection-filter pipeline as the mixed task
+# (rule_set=[r] => a true CA) but DEPTH-CAPPED to <=6 (accept_max_depth: 6) so its convergence-depth
+# tail matches the mixed task (max depth 6, 0% rows depth>6, target fully fixed at T=6).
+#
+# This screen picks the uniform rule: we need it (a) still ff-HARD after capping (ff EM ~0.25-0.45;
+# if capping makes it ff-EASY there is no room for a loop edge and a tie would be uninformative,
+# the M14 trap), and (b) ideally hardness-matched to the mixed task (mixed ff EM 0.255 @ w24 /
+# 0.042 @ w32). Grids a few orbit1/orbit0 rules x w. Light: 3 seeds.
+
+task:
+  name: mixed_converge
+  params:
+    distractors: 8
+    T: 6
+    accept_max_depth: 6
+  n_train: 4000
+  n_test: 1000
+  task_seed: 42
+  train_sample_seed: 1
+  test_sample_seed: 2
+
+grid:
+  params:
+    rule_set: [[78], [197], [141], [13]]   # uniform single-rule CAs (orbit members), depth-capped
+    w: [24, 32]
+
+curriculum:
+  param: T
+  T_min: 1
+  T_max: 6
+
+couple_n_steps_to_param: T
+
+arms:
+  - name: ff_matched
+    label: ff_matched               # hardness probe — want EM ~0.25-0.45 (hard, room for a loop edge)
+    hidden_dim: 64
+    latent_dim: 64
+    n_steps: 6
+  - name: trm
+    label: trm_nods                 # does the loop beat ff on a depth-matched UNIFORM task?
+    hidden_dim: 64
+    latent_dim: 64
+    n_steps: 6
+    deep_supervision: false
+    ds_mode: final
+  - name: untied_matched
+    label: untied_matched
+    hidden_dim: 64
+    latent_dim: 64
+    n_steps: 6
+    deep_supervision: false
+    ds_mode: final
+
+deltas:
+  - [trm_nods, ff_matched]
+  - [trm_nods, untied_matched]
+
+budget_reference: trm_nods
+budget_tol: 0.02
+
+train:
+  epochs: 100
+  lr: 1e-3
+  weight_decay: 1e-4
+  batch_size: 256
+  device: cpu
+
+seeds: [0, 1, 2]
+parallel_workers: 4
+results_dir: results

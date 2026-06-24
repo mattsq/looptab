@@ -1,0 +1,99 @@
+# M14 dense anchor — the b = w//2 (fully dense) end of the locality ladder, at the SAME w=48.
+#
+# Companion to m14_local_ladder. M13 already showed the dense Hopfield net kills the loop's edge,
+# but at w in {24,32}; this re-runs the dense end at w=48 with the IDENTICAL arm set / seeds so the
+# local->dense comparison is within one w (no cross-w confound). The dense net needs more self-
+# coupling to converge than the local ladder (gamma=10 leaves the dense b=24 net non-convergent on
+# 3/10 seeds at full scale), so the dense anchor pins gamma=16 (verified 10/10 convergent both
+# sample seeds, n=5000; triv 0; >=93% settle in <=6 steps). A single gamma cannot span local+dense,
+# which is WHY this is a separate config rather than a 4th grid cell.
+
+task:
+  name: hopfield
+  params:
+    weights: hebbian
+    n_patterns: 12
+    gamma: 16          # dense needs more self-coupling than the local ladder's gamma=10
+    distractors: 8
+    T: 6
+  n_train: 4000
+  n_test: 1000
+  task_seed: 42
+  train_sample_seed: 1
+  test_sample_seed: 2
+
+grid:
+  params:
+    w: [48]
+    bandwidth: [24]    # b = w//2 = fully dense = the M13 regime, at the local ladder's w
+
+curriculum:
+  param: T
+  T_min: 1
+  T_max: 6
+
+couple_n_steps_to_param: T
+
+arms:
+  - name: trm
+    label: trm_nods
+    hidden_dim: 64
+    latent_dim: 64
+    n_steps: 6
+    deep_supervision: false
+    ds_mode: final
+  - name: trm_decoupled
+    label: trm_decoupled_nods
+    hidden_dim: 64
+    latent_dim: 64
+    n_steps: 6
+    deep_supervision: false
+    ds_mode: final
+  - name: trm
+    label: trm_stepDS
+    hidden_dim: 64
+    latent_dim: 64
+    n_steps: 6
+    deep_supervision: true
+    ds_mode: step_aligned
+  - name: trm_decoupled
+    label: trm_decoupled_stepDS
+    hidden_dim: 64
+    latent_dim: 64
+    n_steps: 6
+    deep_supervision: true
+    ds_mode: step_aligned
+  - name: ff_matched
+    label: ff_matched
+    hidden_dim: 64
+    latent_dim: 64
+    n_steps: 6
+  - name: untied_matched
+    label: untied_matched
+    hidden_dim: 64
+    latent_dim: 64
+    n_steps: 6
+    deep_supervision: false
+    ds_mode: final
+
+deltas:
+  - [trm_nods, trm_decoupled_nods]
+  - [trm_stepDS, trm_decoupled_stepDS]
+  - [trm_nods, ff_matched]
+  - [trm_nods, untied_matched]
+  - [trm_decoupled_nods, ff_matched]
+  - [trm_decoupled_nods, untied_matched]
+
+budget_reference: trm_nods
+budget_tol: 0.02
+
+train:
+  epochs: 100
+  lr: 1e-3
+  weight_decay: 1e-4
+  batch_size: 256
+  device: cpu
+
+seeds: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
+parallel_workers: 4
+results_dir: results
