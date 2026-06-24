@@ -1,0 +1,107 @@
+# M15b-followup — CLOSE the last leg-2 residual: depth-DISTRIBUTION-matched uniform vs mixed.
+#
+# The 2nd adversarial review noted M15b only MAX-matched depth (cap 6); the uniform controls were
+# still ~1 step DEEPER on average (mean 3.9/3.6 vs mixed 2.9), a non-conservative residual (deeper =>
+# wider light-cone could itself favour the loop). This config removes that residual: a `depth_profile`
+# stratified-subsamples every task to an IDENTICAL per-depth histogram (the intersection of the
+# mixed/uniform-78/uniform-13 depth distributions), so convergence depth is held fixed bin-for-bin
+# (verified: all three tasks -> mean depth 3.399, identical histogram). The ONLY remaining differences
+# between the mixed cell and the uniform cells are then rule-uniformity and (definitionally) rule-
+# cardinality (1 vs 4 truth tables) — depth and tail fully controlled.
+#
+# Decisive comparison (w=24, EM, 10 seeds): if Δ(loop−ff) > 0 on the uniform rules (78, 13) but ≈0 on
+# the mixed rule_set AT IDENTICAL DEPTH, the central-depth residual is closed and leg 2 stands on
+# rule-uniformity alone (modulo the unfixable rule-cardinality entanglement). w=24 only — the M9/M15
+# w≤24 regime (the edge ties at w=32 for all).
+#
+# depth_profile = intersection histogram over depths 0..6 (un-normalised weights; generator
+# normalises). max_draw_factor raised (the rare shallow bins need oversampling).
+
+task:
+  name: mixed_converge
+  params:
+    distractors: 8
+    T: 6
+    depth_profile: [0.0, 0.0188, 0.1256, 0.438, 0.2847, 0.1211, 0.0118]
+    max_draw_factor: 120
+  n_train: 4000
+  n_test: 1000
+  task_seed: 42
+  train_sample_seed: 1
+  test_sample_seed: 2
+
+grid:
+  params:
+    rule_set: [[78, 92, 141, 197], [78], [13]]   # mixed (non-uniform) vs two uniform CAs
+    w: [24]
+
+curriculum:
+  param: T
+  T_min: 1
+  T_max: 6
+
+couple_n_steps_to_param: T
+
+arms:
+  - name: trm
+    label: trm_nods
+    hidden_dim: 64
+    latent_dim: 64
+    n_steps: 6
+    deep_supervision: false
+    ds_mode: final
+  - name: trm_decoupled
+    label: trm_decoupled_nods
+    hidden_dim: 64
+    latent_dim: 64
+    n_steps: 6
+    deep_supervision: false
+    ds_mode: final
+  - name: trm
+    label: trm_stepDS
+    hidden_dim: 64
+    latent_dim: 64
+    n_steps: 6
+    deep_supervision: true
+    ds_mode: step_aligned
+  - name: trm_decoupled
+    label: trm_decoupled_stepDS
+    hidden_dim: 64
+    latent_dim: 64
+    n_steps: 6
+    deep_supervision: true
+    ds_mode: step_aligned
+  - name: ff_matched
+    label: ff_matched
+    hidden_dim: 64
+    latent_dim: 64
+    n_steps: 6
+  - name: untied_matched
+    label: untied_matched
+    hidden_dim: 64
+    latent_dim: 64
+    n_steps: 6
+    deep_supervision: false
+    ds_mode: final
+
+deltas:
+  - [trm_nods, trm_decoupled_nods]
+  - [trm_stepDS, trm_decoupled_stepDS]
+  - [trm_nods, ff_matched]
+  - [trm_nods, untied_matched]
+  - [trm_decoupled_nods, ff_matched]
+  - [trm_decoupled_nods, untied_matched]
+
+budget_reference: trm_nods
+budget_tol: 0.02
+
+train:
+  epochs: 100
+  lr: 1e-3
+  weight_decay: 1e-4
+  batch_size: 256
+  device: cpu
+
+seeds: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
+parallel_workers: 4
+results_dir: results

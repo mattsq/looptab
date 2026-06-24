@@ -215,6 +215,7 @@ def make_mixed_converge(
     max_steps: int | None = None,
     max_draw_factor: int = 20,
     accept_max_depth: int | None = None,
+    depth_profile: tuple[float, ...] | None = None,
 ):
     """DEEP + NON-UNIFORM + LOCAL fixed-point task (M15): break the M14 bandwidth↔depth confound.
 
@@ -245,6 +246,13 @@ def make_mixed_converge(
     depth-<=cap basin) so the mixed-vs-uniform contrast holds convergence depth fixed and isolates
     translation-invariance.
 
+    ``depth_profile`` (M15b-followup): a per-depth target histogram (un-normalised weights, indexed
+    by depth) that the accepted rows are stratified-subsampled to. Two tasks given the SAME profile
+    end up with IDENTICAL convergence-depth distributions, closing the central-depth residual that
+    the max-depth cap leaves (``accept_max_depth`` matches only the tail; mean still differed).
+    Rows deeper than ``len(depth_profile)-1`` get quota 0, so it also bounds depth; it takes
+    precedence over ``accept_max_depth``.
+
     Returns ``(X, s_inf[, traj])`` mirroring ``make_converge``/``make_hopfield`` exactly, so it
     slots into the existing dataset/trajectory/curriculum machinery unchanged.
     """
@@ -261,12 +269,31 @@ def make_mixed_converge(
     s0_keep: list[np.ndarray] = []
     sinf_keep: list[np.ndarray] = []
     got = 0
-    while got < n:
+
+    # Optional stratified subsampling to a target per-depth histogram (M15b-followup): fills a
+    # per-depth quota instead of "first n convergent", so two tasks given the same `depth_profile`
+    # end up with IDENTICAL convergence-depth distributions (closes the central-depth residual the
+    # max-depth cap leaves). `depth_profile[d]` is the (un-normalised) target weight for depth d;
+    # rows deeper than len(profile)-1 get quota 0 (so it also bounds depth).
+    quota = filled = None
+    if depth_profile is not None:
+        prof = np.asarray(depth_profile, dtype=np.float64)
+        raw = prof / prof.sum() * n
+        quota = np.floor(raw).astype(np.int64)
+        for d in np.argsort(-(raw - np.floor(raw)))[: n - int(quota.sum())]:
+            quota[d] += 1  # largest-remainder rounding so quota sums to exactly n
+        filled = np.zeros(len(quota), dtype=np.int64)
+
+    def _enough() -> bool:
+        return (filled >= quota).all() if quota is not None else got >= n
+
+    while not _enough():
         if drawn >= max_draw:
             raise ValueError(
                 f"make_mixed_converge: only {got}/{n} convergent rows after {drawn} draws "
-                f"(w={w}, rule_set={tuple(rule_set)}); the mix may cycle too often — raise "
-                f"max_draw_factor/max_steps or use a more convergent rule_set."
+                f"(w={w}, rule_set={tuple(rule_set)}, depth_profile={depth_profile}); the mix may "
+                f"cycle too often / a depth bin may be too rare — raise max_draw_factor/max_steps, "
+                f"use a more convergent rule_set, or relax the profile."
             )
         b = row_rng.integers(0, 2, size=(block, w))
         drawn += block
@@ -282,9 +309,20 @@ def make_mixed_converge(
         fixed = depth >= 0  # reached a genuine fixed point within max_steps
         if accept_max_depth is not None:
             fixed &= depth <= accept_max_depth  # cap the depth-tail (M15b matched control)
-        s0_keep.append(b[fixed])
-        sinf_keep.append(s[fixed])  # converged rows are stationary, so s holds the fixed point
-        got += int(fixed.sum())
+        if quota is None:
+            s0_keep.append(b[fixed])
+            sinf_keep.append(s[fixed])  # converged rows are stationary, so s holds the fixed point
+            got += int(fixed.sum())
+        else:
+            for d in range(len(quota)):  # fill each depth bin up to its quota (draw order)
+                need = int(quota[d] - filled[d])
+                if need <= 0:
+                    continue
+                take = np.where(fixed & (depth == d))[0][:need]
+                s0_keep.append(b[take])
+                sinf_keep.append(s[take])
+                filled[d] += len(take)
+                got += len(take)
     s0 = np.concatenate(s0_keep)[:n]
     s_inf = np.concatenate(sinf_keep)[:n]
 

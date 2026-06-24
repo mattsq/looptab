@@ -448,6 +448,44 @@ def test_mixed_converge_accept_max_depth_none_is_unchanged():
     np.testing.assert_array_equal(a[1], b[1])
 
 
+def test_mixed_converge_depth_profile_matches_histogram_and_is_deterministic():
+    """depth_profile stratified-subsamples to the target per-depth histogram (M15b-followup): two
+    DIFFERENT rule sets given the SAME profile must end up with the SAME convergence-depth
+    distribution, and the draw must be deterministic."""
+    prof = (0.0, 0.02, 0.13, 0.44, 0.28, 0.12, 0.01)
+
+    def depth_hist(rule_set):
+        rs = np.asarray(rule_set)
+        pos = rs[np.random.default_rng(42).integers(0, len(rs), size=24)]
+        X, _ = make_mixed_converge(
+            n=2000, w=24, task_seed=42, sample_seed=1, rule_set=rule_set,
+            depth_profile=prof, max_draw_factor=120,
+        )
+        s = X[:, :24].astype(np.int64)
+        d = np.full(len(s), -1)
+        for k in range(4 * 24):
+            nx = mixed_ca_step(s, pos)
+            done = (nx == s).all(axis=1) & (d < 0)
+            d[done] = k
+            if (d >= 0).all():
+                break
+            s = nx
+        return np.bincount(d, minlength=7)[:7]
+
+    h_mixed = depth_hist((78, 92, 141, 197))
+    h_uni = depth_hist((78,))
+    # identical depth histograms across two different rule families => depth held fixed bin-for-bin
+    np.testing.assert_array_equal(h_mixed, h_uni)
+    # quotas follow the profile (depth-3 is the modal bin)
+    assert h_mixed.argmax() == 3
+    # deterministic
+    a = make_mixed_converge(n=500, w=24, task_seed=42, sample_seed=1, depth_profile=prof,
+                            max_draw_factor=120)
+    b = make_mixed_converge(n=500, w=24, task_seed=42, sample_seed=1, depth_profile=prof,
+                            max_draw_factor=120)
+    np.testing.assert_array_equal(a[1], b[1])
+
+
 def test_mixed_converge_golden_hash():
     """Pin the committed M15 output bytes so the M15b depth-tracking rewrite (and any future change)
     cannot silently alter the generated data the committed results rest on."""

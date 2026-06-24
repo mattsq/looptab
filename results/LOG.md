@@ -1829,3 +1829,57 @@ mixed mean depth) would remove the central-depth residual; rule-cardinality (B2)
 principle. Caveats: w≤24; orbit rules; rejection-filtered (basin-conditioned) inputs; depth max-matched
 not distribution-matched; hardness directional-not-exact; EM-only. Tracked:
 `results/m15b_uniform_matched_screen_*.{json,csv}`, `results/m15b_uniform_matched_*.{json,csv}`.
+
+---
+
+## M15c — DONE. Close the leg-2 central-depth residual: a depth-DISTRIBUTION-matched uniform control. Leg 2 SURVIVES depth-control on rule 13 (clean), and rule 78's earlier edge is revealed as partly depth.
+
+The 2nd review's one un-eliminated leg-2 alternative was the central-depth residual: M15b only MAX-matched
+depth (cap 6), leaving the uniform controls ~1 step DEEPER on average (mean 3.9/3.6 vs mixed 2.9) — and
+deeper is NOT conservative (wider light-cone could itself favour the loop). M15c removes it.
+
+**The control.** Added a `depth_profile` parameter to `make_mixed_converge`: it stratified-subsamples
+accepted rows to a target per-depth histogram, so any two tasks given the SAME profile have BIT-IDENTICAL
+convergence-depth distributions. Ran mixed {78,92,141,197}, uniform {78}, uniform {13} all subsampled to
+the **intersection** of their depth histograms (profile [0, .019, .126, .438, .285, .121, .012],
+**mean depth = 3.40 for all three, verified**), w=24, full M10 arm set, 10 seeds. Determinism + matched-
+histogram + golden-hash tests added (162 tests, ruff clean). Now depth is held fixed bin-for-bin; the only
+remaining mixed-vs-uniform differences are rule-uniformity and (definitionally) rule-cardinality.
+
+**Result — Δ(loop−ff) EM at IDENTICAL depth distribution (10 seeds, sign-test p):**
+
+| task @ w=24, depth-dist-matched (mean 3.4) | ff EM | Δ(loop−ff) EM | Δ(stepDS−dec_stepDS) EM | Δ(loop−untied) EM |
+|---|---|---|---|---|
+| **uniform rule 13** | 0.353 | **+0.210 (10/0, p=.002)** | +0.359 (10/0) | +0.454 (10/0) |
+| **uniform rule 78** | 0.443 | +0.032 (7/3, p=.34 **ns**) | +0.287 (10/0) | +0.333 (10/0) |
+| **mixed orbit1** (non-uniform) | 0.204 | −0.005 (4/6, p=.75 ns) | +0.188 (10/0) | +0.166 (10/0) |
+
+**Reading (per §8) — the residual is closed; leg 2 survives on rule 13, and rule 78 is shown to have been
+depth-inflated.**
+- **Leg 2 CONFIRMED depth-controlled on rule 13 — the cleanest single piece of leg-2 evidence in the
+  project.** At a depth distribution *identical* to the mixed task (same histogram, mean 3.4), the loop
+  beats ff on uniform rule 13 by **+0.210 EM (10/0, p=.002)** while the non-uniform mixed task **ties**
+  (−0.005, ns). And the mixed task is *harder* (ff EM 0.204 vs 0.353), so by M11 it should favour the loop
+  *more* — yet only the uniform rule shows the edge. Depth is no longer a possible explanation (held fixed
+  bin-for-bin), hardness runs against the result, budget is conservative (untied over). So **a uniform
+  local rule yields a loop-beats-ff coherence edge that depth cannot explain, absent on the non-uniform
+  map at identical depth** — leg 2 stands on its own.
+- **Rule 78's M15b edge was PARTLY DEPTH (honest correction).** At max-match (depth mean 3.9) rule 78 gave
+  +0.090 (9/1, p=.021); at depth-distribution-match (mean 3.4) it drops to **+0.032 (ns)**. Matching depth
+  down also made rule 78 ff-*easy* (ff EM 0.44 — little coherence headroom, an M14-style no-room cell), so
+  this is *inconclusive* for rule 78, not a refutation — but it does show the M15b two-rule 9/1 result
+  overstated: under full depth control, leg 2 rests on **rule 13 (robust)**, with rule 78 inconclusive.
+- **Leg 1 fully confirmed at matched depth:** Δ(stepDS−dec_stepDS) EM is +0.19 / +0.29 / +0.36 (all 10/0,
+  p=.002) across mixed and both uniform cells, with decoupled < ff everywhere (0/10) — the joint-state
+  mechanism is robust to depth-control and present regardless of uniformity, as expected for a within-task
+  contrast. **P1 survives all three** (10/0, conservative).
+
+**Net.** Closing the central-depth residual *strengthens* the evidential basis even as it trims the count:
+leg 2 now rests on **one fully depth-controlled rule (13: +0.21, 10/0, hardness-conservative)** rather than
+two depth-confounded floor-significant ones, and rule 78 is honestly downgraded to inconclusive-at-matched-
+depth. Combined statement: **the loop-beats-the-MLP EM edge requires a uniform local rule — demonstrated
+depth-controlled on rule 13 (depth held identical to the non-uniform mixed task, hardness against the
+result); it is rule-dependent and was partly depth-inflated for rule 78.** The only leg-2 caveat now
+un-removable is the definitional uniformity↔rule-cardinality entanglement (1 vs 4 truth tables). Leg 1
+(joint-state = deep+local, transfers off-CA) and P1 remain clean and depth-controlled. Tracked:
+`results/m15b_depth_matched_*.{json,csv}`.

@@ -281,7 +281,8 @@ behaviour-changing conclusions, and the next pointer. Append detail to LOG.md, n
   m8_converge_adaptive, m8b_converge_grid, m8c_converge_fair, m9_converge_width,
   m10_decoupled_converge, m11_size_{small,base,large}, m12_hardconv_orbit,
   m13_hopfield_{screen,converge,large}, m14_{local_screen,local_ladder,dense_anchor},
-  m15_{mixed_screen,mixed_converge,uniform_anchor}, m15b_uniform_matched{,_screen}).
+  m15_{mixed_screen,mixed_converge,uniform_anchor}, m15b_uniform_matched{,_screen},
+  m15b_depth_matched).
 - **`hopfield` `bandwidth` regime (M14) — locked setting:** the local ladder needs **w=48** (w≤32 has
   no clean local regime — convergence-vs-triviality tension); b∈{2,4,8} at `γ=10` all 10/10
   convergent, balanced, non-trivial (triv ≤5%), settle ≤6 steps; the dense end (b=24) needs `γ=16`
@@ -575,6 +576,18 @@ behaviour-changing conclusions, and the next pointer. Append detail to LOG.md, n
   positive) but none significant. So leg 2 = "the loop-beats-MLP EM edge tracks rule-uniformity at matched
   max-depth and against the hardness gradient," strongly supported, with the central-depth residual the one
   un-eliminated alternative. (Code/determinism verified clean both reviews.)
+- **[M15c] Central-depth residual CLOSED — leg 2 survives depth-control on rule 13; rule 78 was partly
+  depth.** Added a `depth_profile` stratified-subsample to `make_mixed_converge` and ran mixed/uniform-78/
+  uniform-13 all subsampled to an IDENTICAL depth histogram (intersection profile, mean depth 3.40 for all,
+  verified bit-for-bit). At depth held fixed: uniform rule 13 → loop beats ff **+0.210 EM (10/0, p=.002)**
+  while the non-uniform mixed task **ties** (−0.005, ns) — and mixed is *harder* (ff EM 0.204 vs 0.353), so
+  hardness runs against the result; depth can no longer explain it. **Leg 2 confirmed depth-controlled (the
+  project's cleanest leg-2 cell).** But uniform rule 78's M15b edge (+0.090) **drops to +0.032 (ns)** once
+  depth-distribution-matched (and rule 78 becomes ff-easy, EM 0.44 — no-room/inconclusive), so M15b's
+  two-rule 9/1 overstated: under full depth control leg 2 rests on **rule 13 (robust)**, rule 78
+  inconclusive. Leg 1 (joint-state) holds at matched depth in all three cells (+0.19/+0.29/+0.36, 10/0,
+  decoupled < ff) and P1 survives all (10/0, conservative). Only the definitional uniformity↔rule-cardinality
+  (1 vs 4 truth tables) caveat remains un-removable.
 - Each leg still rests on few configs: Task A now multi-`d`/multi-`k` (M4) and the d≥40 wall has
   been swept over `n_train` (M5 — it is sample-bound and lifts to all-solve, except d=80,k=5 which
   is capacity-bound); Task B depth swept (M3a) but unlearnable past T=4 one-shot; M3b on one rule
@@ -631,9 +644,12 @@ trainability-clean ΔEM +0.206, 10/0, p=.002 @ w=24; decoupled < ff); **(leg 2, 
 **loop-beats-the-MLP** does not reproduce without the uniform rule (loop +0.133 EM on uniform-78 vs −0.028
 ns on mixed) — and **M15b STRONGLY SUPPORTS this with a max-depth-matched uniform control** (uniform CAs
 through the same filter, capped to depth ≤6: loop beats ff +0.090/+0.175 EM, 9/1, p=.021, while mixed
-ties; mixed is *harder* so the hardness gradient runs against the result). P1 survives both. **Leg 2
-strongly supported, not fully isolated** — residual: uniform controls ~1 step deeper on average (only the
-max is matched) and uniformity is definitionally entangled with rule-cardinality (see §11(b)).
+ties; mixed is *harder* so the hardness gradient runs against the result). P1 survives both. **M15c then
+CLOSED the central-depth residual** with a `depth_profile` stratified-subsample (all tasks at an identical
+depth histogram, mean 3.40): at fixed depth, uniform rule 13 → loop beats ff +0.210 EM (10/0) vs mixed ties
+(−0.005), hardness against the result — **leg 2 confirmed depth-controlled on rule 13**; rule 78's edge was
+partly depth (drops to +0.032 ns, becomes ff-easy). Leg 1 + P1 hold at matched depth. **Leg 2 stands
+depth-controlled (rule 13); only the definitional uniformity↔rule-cardinality entanglement remains.**
 
 **No milestone is currently in flight.** Open threads, in rough priority:
 - **THE highest-value remaining action — relax the literal §9 gate wording (now even better-scoped after the
@@ -651,17 +667,16 @@ max is matched) and uniformity is definitionally entangled with rule-cardinality
   coherence mechanism** needing *deep + local* structure (transfers off-CA to a non-uniform local deep
   map) and a **loop-beats-the-MLP** edge needing the *uniform translation-invariant rule* (does not
   transfer to a per-position-mixed rule). Frame the §9 rewrite around this two-part decomposition.
-- **The experimental program is essentially complete; ONE optional tightening remains for leg 2.** M14
-  closed locality; M15 established leg 1 (joint-state mechanism = deep+local, transfers off-CA, clean);
-  M15b **strongly supports** leg 2 (loop-beats-the-MLP needs a uniform rule) but does not fully isolate it
-  — the max-depth-matched uniform control is still ~1 step deeper *on average* than the mixed task (only
-  the tail is capped), a non-conservative residual. **The one available tightening: a
-  depth-DISTRIBUTION-matched uniform control** (subsample/recap the uniform task to the mixed task's mean
-  depth ~2.9, or stratified-subsample to its depth histogram) to remove that residual. (The other leg-2
-  caveat — uniformity entangled with rule-cardinality, 1 vs 4 truth tables — is DEFINITIONAL and cannot be
-  removed.) Other lowest-value leftovers: finer/larger size sweep; more rule families / radius-2 mix;
-  recover the (w≤24) edge at larger w; the operator-sharing *why*. **Default highest-value next action is
-  the §9-gate rewrite** (leg 1 + P1 fully settled; leg 2 strongly supported with the residual noted).
+- **The experimental program is COMPLETE — all leg-2 confounds now controlled.** M14 closed locality;
+  M15 established leg 1 (joint-state mechanism = deep+local, transfers off-CA, clean); M15b max-depth-matched
+  leg 2; **M15c closed the central-depth residual** (depth-distribution-matched: leg 2 confirmed
+  depth-controlled on rule 13, +0.21 EM 10/0 with depth held identical to the non-uniform mixed task and
+  hardness against it; rule 78 shown depth-inflated/inconclusive). The only un-removable leg-2 caveat is the
+  DEFINITIONAL uniformity↔rule-cardinality entanglement (a non-uniform local rule must use ≥2 truth tables).
+  Lowest-value leftovers only: more uniform rules at matched depth (rule 78 went ff-easy — try a harder
+  matched rule); finer/larger size sweep; radius-2 mix; the operator-sharing *why*. **The default and
+  highest-value next action is the §9-gate rewrite** (leg 1, leg 2 [rule 13, depth-controlled], and P1 all
+  settled).
 - **Closed levers (do not redo):** depth-extrapolation via progressive loss / path-independence (M7/M8 —
   decay is intrinsic, not convergence-related); adaptive compute on a fixed-point target (M8 — decays);
   "lift the M4 sample wall" (M5); "re-judge via a both-axes task" (M6a); the decoupled-head mechanism
@@ -676,8 +691,10 @@ max is matched) and uniformity is definitionally entangled with rule-cardinality
   STRONGLY SUPPORTED by **M15b** — a max-depth-matched uniform control [`accept_max_depth` cap, uniform CA
   through the mixed pipeline]: loop beats ff +0.090/+0.175 EM 9/1 p=.021 on uniform rules 78/13, ties on
   the non-uniform mixed task at matched max-depth, with the hardness gradient running against the result.
-  NOT fully isolated — uniform controls remain ~1 step deeper on average (only max-depth matched) and
-  uniformity is definitionally entangled with rule-cardinality. Do not re-conflate the two legs).**
+  M15c CLOSED the central-depth residual via depth-distribution matching: leg 2 confirmed depth-controlled
+  on rule 13 (+0.21 EM 10/0, depth identical to mixed, hardness against), rule 78 inconclusive at matched
+  depth [ff-easy]. Only the definitional uniformity↔rule-cardinality entanglement is un-removable. Do not
+  re-conflate the two legs).**
   A bigger-model probe of d=80,k=5 must scale the budget for *all* arms (M5).
 
 ## 12. Key references (for grounding a cold agent)
