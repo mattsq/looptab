@@ -1,0 +1,114 @@
+# M17 — the §9.3 Task C BUILD-GATE: is the validated SINGLE-TIMESCALE loop INSUFFICIENT on a
+# genuinely two-timescale (H-slow / L-fast) nested fixed-point target?
+#
+# §9.3 makes building the H/L hierarchy conditional on a *within-loop* demonstration: build Task C
+# only once a concrete `nested_converge` instance shows the single-timescale `trm`'s whole-row
+# coherence PLATEAUS BELOW the target (one joint-state timescale is provably insufficient). This is
+# that experiment. It does NOT build the H/L module (that would repeat the HRM mistake the ARC
+# autopsy diagnosed); it runs the SINGLE loop + the §4 controls and reads whether the loop saturates
+# the nested target or leaves a coherence gap.
+#
+# Substrate (M17 structural screen, scratchpad/screen_nested.py): inner_rule=13 (FAST, per-block
+# ring relax), outer_rule=79 (SLOW, full-ring coupling), block_w=8. Both are ff-hard converging ECAs
+# (orbit 0), uniform at each level. Screened convergent (>0.97), perfectly balanced (0.50), zero
+# trivial targets, and genuinely two-timescale (mean ~4-5 outer rounds, each ~4-5 inner steps).
+# n_blocks∈{3,4} => w∈{24,32}, the M9-M12 regime where the loop's coherence mechanism lives.
+#
+# Arm set + training are IDENTICAL to m12_hardconv_orbit.yaml (the M10/M11/M12 converge protocol):
+# trm (loop) vs ff_matched (§4a), untied_matched (§4b), trm_decoupled (joint-state ablation), with a
+# T~1..6 curriculum + step-aligned DS. The DECISIVE reads (§9.3):
+#   - trm's ABSOLUTE exact-match: does it plateau well below 1.0 (gate MET) or solve it (null)?
+#   - leg-1 mechanism Δ(trm_nods − trm_decoupled_nods) > 0: confirms we are in the joint-state regime;
+#   - leg-2 Δ(trm_nods − ff_matched): does the loop beat the shallow MLP on this nested target?
+#   - P1 Δ(trm_nods − untied_matched): the regime-independent tying-positive.
+# Verdict: gate MET (build Task C / H-L module next) if single-loop EM plateaus below the target;
+# clean NULL (Task C stays deferred) if the single loop already solves it.
+
+task:
+  name: nested_converge
+  params:
+    block_w: 8
+    inner_rule: 13   # FAST inner per-block relax (orbit-0 ff-hard converging ECA)
+    outer_rule: 79   # SLOW outer full-ring coupling (orbit-0 mate)
+    T: 6
+    distractors: 8
+  n_train: 4000
+  n_test: 1000
+  task_seed: 42
+  train_sample_seed: 1
+  test_sample_seed: 2
+
+grid:
+  params:
+    n_blocks: [3, 4]   # w = 24, 32
+
+curriculum:
+  param: T
+  T_min: 1
+  T_max: 6
+
+couple_n_steps_to_param: T
+
+arms:
+  - name: trm
+    label: trm_nods
+    hidden_dim: 64
+    latent_dim: 64
+    n_steps: 6
+    deep_supervision: false
+    ds_mode: final
+  - name: trm_decoupled
+    label: trm_decoupled_nods
+    hidden_dim: 64
+    latent_dim: 64
+    n_steps: 6
+    deep_supervision: false
+    ds_mode: final
+  - name: trm
+    label: trm_stepDS
+    hidden_dim: 64
+    latent_dim: 64
+    n_steps: 6
+    deep_supervision: true
+    ds_mode: step_aligned
+  - name: trm_decoupled
+    label: trm_decoupled_stepDS
+    hidden_dim: 64
+    latent_dim: 64
+    n_steps: 6
+    deep_supervision: true
+    ds_mode: step_aligned
+  - name: ff_matched
+    label: ff_matched
+    hidden_dim: 64
+    latent_dim: 64
+    n_steps: 6
+  - name: untied_matched
+    label: untied_matched
+    hidden_dim: 64
+    latent_dim: 64
+    n_steps: 6
+    deep_supervision: false
+    ds_mode: final
+
+deltas:
+  - [trm_nods, trm_decoupled_nods]
+  - [trm_stepDS, trm_decoupled_stepDS]
+  - [trm_nods, ff_matched]
+  - [trm_nods, untied_matched]
+  - [trm_decoupled_nods, ff_matched]
+  - [trm_decoupled_nods, untied_matched]
+
+budget_reference: trm_nods
+budget_tol: 0.02
+
+train:
+  epochs: 100
+  lr: 1e-3
+  weight_decay: 1e-4
+  batch_size: 256
+  device: cpu
+
+seeds: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
+parallel_workers: 4
+results_dir: results
