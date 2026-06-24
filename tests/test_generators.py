@@ -404,6 +404,18 @@ def test_mixed_converge_raises_when_cycling():
         )
 
 
+def test_mixed_converge_trajectory_path_matches_splits_path():
+    """Curriculum-alignment invariant: the rejection filter must accept the SAME rows whether
+    called for the (X, s_inf) target or for the trajectory — else the step-aligned DS target
+    would not correspond to the s_inf the other arms are trained on (M15)."""
+    X1, y1 = make_mixed_converge(n=400, w=24, task_seed=42, sample_seed=1, distractors=8)
+    X2, y2, traj = make_mixed_converge(
+        n=400, w=24, task_seed=42, sample_seed=1, distractors=8, T=6, return_trajectory=True
+    )
+    np.testing.assert_array_equal(X1, X2)  # identical accepted inputs (incl. distractors)
+    np.testing.assert_array_equal(y1, y2)  # identical fixed-point targets
+
+
 def test_ca_step_rule90():
     """Rule 90 is XOR of neighbors."""
     s = np.array([[1, 0, 0, 1, 0]])
