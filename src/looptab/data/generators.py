@@ -343,6 +343,167 @@ def make_mixed_converge(
     return X.astype(np.float32), s_inf.astype(np.int64)
 
 
+def _inner_relax(
+    s: np.ndarray, n_blocks: int, block_w: int, inner_rule: int, max_inner: int
+) -> np.ndarray:
+    """FAST ("L") timescale: relax every block to its OWN per-block ring fixed point.
+
+    ``ca_step`` only touches axis -1, so reshaping ``(n, w)`` -> ``(n, n_blocks, block_w)``
+    iterates each block as an INDEPENDENT ring of width ``block_w`` (no coupling across block
+    boundaries). We run ``inner_rule`` to a per-block fixed point (whole-batch stationary, capped
+    at ``max_inner``). Rows whose blocks do NOT settle within ``max_inner`` are returned in a
+    non-converged state; the acceptance check in ``make_nested_converge`` rejection-filters them
+    via an explicit ``_inner_stationary`` test (NOT merely via the round-level fixed-point check —
+    see that function: a cycling inner rule whose period divides ``max_inner`` can make the round
+    map periodic at a non-stationary state, which the outer check alone would wrongly accept).
+    """
+    blk = s.reshape(s.shape[0], n_blocks, block_w)
+    for _ in range(max_inner):
+        nxt = ca_step(blk, inner_rule)
+        if np.array_equal(nxt, blk):  # every block of every row stationary
+            break
+        blk = nxt
+    return blk.reshape(s.shape[0], n_blocks * block_w)
+
+
+def _inner_stationary(
+    s: np.ndarray, n_blocks: int, block_w: int, inner_rule: int
+) -> np.ndarray:
+    """Per-row mask: is EVERY block of ``s`` at an inner fixed point (one inner step is a no-op)?
+
+    The load-bearing half of the rejection filter. ``round_(s) == s`` alone only proves the *round
+    map* is periodic at ``s`` — for a cycling ``inner_rule`` whose period divides ``max_inner``,
+    ``_inner_relax`` can cap out and return a state that round-repeats without any block being
+    stationary (e.g. inner_rule=1 / outer_rule=0: all-zeros round-repeats but one inner step flips
+    every bit). Requiring inner-stationarity here makes "``s_inf`` is a hierarchy of inner fixed
+    points" a verified invariant, not an assumption about the rule pair. Note: if ``s`` is
+    inner-stationary, ``_inner_relax`` provably converged to it (a fixed point is absorbing), so
+    this check is exactly equivalent to "the inner relax that produced ``s`` genuinely settled."
+    """
+    blk = s.reshape(s.shape[0], n_blocks, block_w)
+    return (ca_step(blk, inner_rule) == blk).all(axis=(1, 2))
+
+
+def make_nested_converge(
+    n: int,
+    n_blocks: int,
+    block_w: int,
+    task_seed: int,
+    sample_seed: int,
+    inner_rule: int = 232,
+    outer_rule: int = 232,
+    distractors: int = 0,
+    T: int | None = None,
+    return_trajectory: bool = False,
+    max_rounds: int | None = None,
+    max_inner: int | None = None,
+    max_draw_factor: int = 20,
+    accept_max_depth: int | None = None,
+):
+    """Task C (§9.3): a TWO-TIMESCALE (H-slow / L-fast) fixed-point target — a hierarchy of
+    local fixed points.
+
+    A ROUND is one SLOW outer step then a full FAST inner relax:
+      - inner (FAST, "L"): ``_inner_relax`` settles each block to its own per-block ring fixed
+        point under ``inner_rule`` (blocks are independent rings — no cross-block coupling).
+      - outer (SLOW, "H"): one ``outer_rule`` ``ca_step`` on the FULL ring couples neighbouring
+        blocks (it is the only operation that moves information across block boundaries).
+    The target ``s_inf`` is the JOINT fixed point of ``round_ = inner_relax ∘ outer_step`` — a
+    state where one more outer coupling, fully re-relaxed, changes nothing. Two timescales by
+    construction; local + (screen for) deep + ff-hard; spatially uniform at each level (so the
+    leg-2 uniform-rule reading can apply). Difficulty dials: ``n_blocks``, ``block_w``, inner
+    depth (``inner_rule`` / ``block_w``), and #outer rounds to converge.
+
+    WHY this is the §9.3 build-gate substrate: a SINGLE-timescale joint refinement (``trm``) must
+    discover it has to FULLY relax the inner blocks between every outer coupling. If one joint
+    timescale cannot, its whole-row coherence plateaus below the target — the within-loop
+    insufficiency the gate tests for, the only honest precondition for building an H/L module.
+
+    The composed map is NOT globally convergent (an inner mix / an outer rule may leave some
+    inputs cycling), so rows are **rejection-filtered to the convergent basin** EXACTLY as
+    ``make_mixed_converge``: draw ``2n`` inputs, iterate ``round_`` to a joint fixed point, keep
+    convergent rows, ``depth`` = #rounds (the OUTER timescale). Raise loudly if too few converge
+    (a non-converging rule pair). All-integer ⇒ bit-exact. ``accept_max_depth`` caps the
+    outer-round depth-tail (mirrors ``make_mixed_converge``; ``None`` = no cap).
+
+    Returns ``(X, s_inf[, traj])`` mirroring ``make_converge``/``make_mixed_converge`` exactly, so
+    it slots into the existing dataset/trajectory/curriculum machinery unchanged. With
+    ``return_trajectory=True`` the frames are the state AFTER EACH ROUND (loops ≈ outer rounds),
+    for step-aligned DS.
+    """
+    w = n_blocks * block_w
+    if max_rounds is None:
+        max_rounds = 4 * n_blocks  # outer timescale ~ #blocks
+    if max_inner is None:
+        max_inner = 4 * block_w  # inner timescale ~ block width
+
+    def round_(s: np.ndarray) -> np.ndarray:  # one SLOW round: outer couple, then inner relax
+        return _inner_relax(ca_step(s, outer_rule), n_blocks, block_w, inner_rule, max_inner)
+
+    row_rng = np.random.default_rng(sample_seed)
+    fn_rng = np.random.default_rng(task_seed)
+    block_draw = 2 * n
+    max_draw = max_draw_factor * n
+    drawn = 0
+    s0_keep: list[np.ndarray] = []
+    sinf_keep: list[np.ndarray] = []
+    got = 0
+
+    while got < n:
+        if drawn >= max_draw:
+            raise ValueError(
+                f"make_nested_converge: only {got}/{n} convergent rows after {drawn} draws "
+                f"(n_blocks={n_blocks}, block_w={block_w}, inner_rule={inner_rule}, "
+                f"outer_rule={outer_rule}); the round map may cycle too often — raise "
+                f"max_draw_factor/max_rounds/max_inner or pick a more convergent rule pair."
+            )
+        b = row_rng.integers(0, 2, size=(block_draw, w))
+        drawn += block_draw
+        s = b.copy()
+        depth = np.full(block_draw, -1, dtype=np.int64)  # first round at which a row is stationary
+        for step in range(max_rounds):
+            nxt = round_(s)
+            # A genuine JOINT fixed point needs BOTH: (a) the round map fixes s, AND (b) every inner
+            # block of s is actually stationary. (b) rejects the capped-cycling case where
+            # round_(s)==s only because _inner_relax hit its cap on a periodic orbit (see
+            # _inner_stationary). For a genuinely-converging pair (locked inner=13/outer=79), (b)
+            # holds wherever (a) does, so it is bit-identical there; it only filters bad pairs.
+            newly = (
+                (nxt == s).all(axis=1)
+                & _inner_stationary(s, n_blocks, block_w, inner_rule)
+                & (depth < 0)
+            )
+            depth[newly] = step
+            if (depth >= 0).all():  # whole block of rows settled
+                break
+            s = nxt
+        fixed = depth >= 0  # reached a genuine joint fixed point within max_rounds
+        if accept_max_depth is not None:
+            fixed &= depth <= accept_max_depth
+        s0_keep.append(b[fixed])
+        sinf_keep.append(s[fixed])  # converged rows are stationary, so s holds the fixed point
+        got += int(fixed.sum())
+
+    s0 = np.concatenate(s0_keep)[:n]
+    s_inf = np.concatenate(sinf_keep)[:n]
+
+    X = s0
+    if distractors > 0:
+        noise = fn_rng.integers(0, 2, size=(n, distractors))  # static, uninformative (task_seed)
+        X = np.concatenate([s0, noise], axis=-1)
+
+    if return_trajectory:
+        traj_len = T if T is not None else max_rounds
+        cur = s0.copy()
+        frames = []
+        for _ in range(traj_len):
+            cur = round_(cur)  # one frame per OUTER round (loops ≈ rounds)
+            frames.append(cur.copy())
+        traj = np.stack(frames, axis=1).astype(np.int64) if traj_len > 0 else s0[:, :0, :]
+        return X.astype(np.float32), s_inf.astype(np.int64), traj
+    return X.astype(np.float32), s_inf.astype(np.int64)
+
+
 def _ring_band_mask(w: int, bandwidth: int) -> np.ndarray:
     """Boolean (w, w) mask: True where the ring distance min(|i-j|, w-|i-j|) ≤ bandwidth.
 

@@ -1,0 +1,61 @@
+# M18h — review-2 Experiment 2: is the shared nested ceiling a SAMPLE wall (lifts with data) or a
+# capacity/structural ceiling? M18g showed that at equal compute (400 epochs, train_acc≈1.0) the
+# single-timescale loop (EM 0.750 @ w24) and the param-matched feedforward (0.714) share the ceiling
+# — so it is NOT a single-timescale deficit. This run 4×s the data (n_train 4000→16000) at the same
+# saturated budget, w24, to see which lever moves it. Compare to the m18g w24 points (trm 0.750 /
+# ff 0.714, n_train=4000), same arm/task/seeds — n_train the only knob (M5-style; n_train isn't a
+# sweepable task.param, hence a sibling config).
+#
+# DECISION: if EM climbs toward ~1.0 with 4× data (both arms together) ⇒ SAMPLE wall — the nested
+# "insufficiency" is a data limit, the constructive lever is more data (M5), NOT a second timescale
+# ⇒ M19 stays unearned. If EM flat at ~0.75 with train_acc pinned ~1.0 ⇒ capacity/structural ceiling
+# at this model size (more data won't help; the lever is capacity, still not specifically H/L).
+
+task:
+  name: nested_converge
+  params:
+    block_w: 8
+    inner_rule: 13
+    outer_rule: 79
+    T: 6
+    distractors: 8
+  n_train: 16000
+  n_test: 1000
+  task_seed: 42
+  train_sample_seed: 1
+  test_sample_seed: 2
+
+grid:
+  params:
+    n_blocks: [3]   # w = 24 (the leg-2 regime)
+
+arms:
+  - name: trm
+    label: trm_nods
+    hidden_dim: 64
+    latent_dim: 64
+    n_steps: 6
+    deep_supervision: false
+    ds_mode: final
+  - name: ff_matched
+    label: ff_matched
+    hidden_dim: 64
+    latent_dim: 64
+    n_steps: 6
+
+deltas:
+  - [trm_nods, ff_matched]
+
+budget_reference: trm_nods
+budget_tol: 0.02
+
+train:
+  epochs: 400
+  lr: 1e-3
+  weight_decay: 1e-4
+  batch_size: 256
+  device: cpu
+
+seeds: [0, 1, 2, 3, 4, 5, 6, 7]
+parallel_workers: 4
+results_dir: results

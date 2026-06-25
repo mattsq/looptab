@@ -1,0 +1,9 @@
+config,arm,n_params,ref_params,ratio,role,within_tol
+"rule=30, w=16, T=8",trm_nods,13792,13792,1.0000,reference,True
+"rule=30, w=16, T=8",trm_faithful,13856,13792,1.0046,matched,True
+"rule=30, w=16, T=8",ff_matched,13703,13792,0.9935,matched,True
+"rule=30, w=16, T=8",untied_matched,14191,13792,1.0289,matched,False
+"rule=30, w=16, T=16",trm_nods,13792,13792,1.0000,reference,True
+"rule=30, w=16, T=16",trm_faithful,13856,13792,1.0046,matched,True
+"rule=30, w=16, T=16",ff_matched,13703,13792,0.9935,matched,True
+"rule=30, w=16, T=16",untied_matched,13576,13792,0.9843,matched,True

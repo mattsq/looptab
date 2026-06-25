@@ -1,0 +1,81 @@
+# M18i — review-3 EXP-1 (DECISIVE, closes the gate-story hole): equal-compute controls at hidden=128.
+# The re-deferral (M18g) was established at hidden=64. But the ORIGINAL "structural ceiling" claim came
+# from M17b at hidden=128 (1×-compute), where P1 REVERSED (untied 0.634 beats loop 0.593) and the loop
+# looked capacity-robustly stuck. That capacity point was NEVER run at equal compute — so a skeptic can
+# say "you only equalized compute where the ceiling was already shared." This run equalizes compute at
+# hidden=128 (400 epochs, n_sup=1, all arms) on the same nested instance, w24.
+#
+# DECISION TABLE:
+#   - ff stays in the loop's band (Δ(trm−ff) small/tie, both ≪ 1.0)  ⇒ gate verdict AIRTIGHT at both
+#                                                                       scales; re-deferral confirmed.
+#   - ff separates BELOW the loop AND loop → ~1.0                    ⇒ a timescale-specific insufficiency
+#                                                                       may exist at scale ⇒ RE-OPEN gate.
+#   - untied still beats the loop at equal compute (M17b reversal    ⇒ "more operators" extracts headroom
+#     persists)                                                        tying can't ⇒ lever is operators/
+#                                                                       capacity, still not a timescale.
+# Same nested instance (inner=13/outer=79/block_w=8), n_blocks=3 (w24), 8 seeds.
+
+task:
+  name: nested_converge
+  params:
+    block_w: 8
+    inner_rule: 13
+    outer_rule: 79
+    T: 6
+    distractors: 8
+  n_train: 4000
+  n_test: 1000
+  task_seed: 42
+  train_sample_seed: 1
+  test_sample_seed: 2
+
+grid:
+  params:
+    n_blocks: [3]   # w = 24 (the leg-2 regime; matches the M17b capacity-probe width)
+
+arms:
+  - name: trm
+    label: trm_nods
+    hidden_dim: 128
+    latent_dim: 128
+    n_steps: 6
+    deep_supervision: false
+    ds_mode: final
+  - name: ff_matched
+    label: ff_matched
+    hidden_dim: 128
+    latent_dim: 128
+    n_steps: 6
+  - name: untied_matched
+    label: untied_matched
+    hidden_dim: 128
+    latent_dim: 128
+    n_steps: 6
+    deep_supervision: false
+    ds_mode: final
+  - name: trm_decoupled
+    label: trm_decoupled_nods
+    hidden_dim: 128
+    latent_dim: 128
+    n_steps: 6
+    deep_supervision: false
+    ds_mode: final
+
+deltas:
+  - [trm_nods, ff_matched]          # decisive: loop vs MLP at equal compute, hidden=128
+  - [trm_nods, untied_matched]      # does M17b's P1-reversal survive equal compute?
+  - [trm_nods, trm_decoupled_nods]  # leg-1 at scale + equal compute
+
+budget_reference: trm_nods
+budget_tol: 0.02
+
+train:
+  epochs: 400
+  lr: 1e-3
+  weight_decay: 1e-4
+  batch_size: 256
+  device: cpu
+
+seeds: [0, 1, 2, 3, 4, 5, 6, 7]
+parallel_workers: 4
+results_dir: results

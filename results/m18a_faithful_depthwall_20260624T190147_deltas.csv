@@ -1,0 +1,25 @@
+config,delta,metric,delta_mean,delta_std,n_seeds,sign_pos,sign_neg,sign_p
+"rule=30, w=16, T=8",trm_faithful-trm_nods,accuracy,0.0011874999999999941,0.004398026140050959,8,4,4,1.0
+"rule=30, w=16, T=8",trm_faithful-trm_nods,exact_match,0.0,0.0,8,0,0,1.0
+"rule=30, w=16, T=8",trm_faithful-trm_nods,coherence_excess,-1.1444258737597061e-06,4.386710484445934e-06,8,4,4,1.0
+"rule=30, w=16, T=8",trm_faithful-ff_matched,accuracy,-0.0007265624999999998,0.005082021170175013,8,4,4,1.0
+"rule=30, w=16, T=8",trm_faithful-ff_matched,exact_match,0.0,0.0005345224838248487,8,1,1,1.0
+"rule=30, w=16, T=8",trm_faithful-ff_matched,coherence_excess,1.0674506873187587e-06,0.0005352344887473281,8,5,3,0.7265625
+"rule=30, w=16, T=8",trm_nods-ff_matched,accuracy,-0.001914062499999994,0.005052176146668311,8,3,5,0.7265625
+"rule=30, w=16, T=8",trm_nods-ff_matched,exact_match,0.0,0.0005345224838248487,8,1,1,1.0
+"rule=30, w=16, T=8",trm_nods-ff_matched,coherence_excess,2.2118765610785335e-06,0.0005373775739489205,8,5,3,0.7265625
+"rule=30, w=16, T=8",trm_nods-untied_matched,accuracy,0.0052578125,0.007539659834774199,8,5,3,0.7265625
+"rule=30, w=16, T=8",trm_nods-untied_matched,exact_match,0.0,0.0005345224838248487,8,1,1,1.0
+"rule=30, w=16, T=8",trm_nods-untied_matched,coherence_excess,-4.609027345510662e-06,0.0005333961095122663,8,3,5,0.7265625
+"rule=30, w=16, T=16",trm_faithful-trm_nods,accuracy,0.0007031250000000058,0.0045861970220434185,8,4,4,1.0
+"rule=30, w=16, T=16",trm_faithful-trm_nods,exact_match,0.0,0.0,8,0,0,1.0
+"rule=30, w=16, T=16",trm_faithful-trm_nods,coherence_excess,-3.7128467358579733e-07,2.571334801608567e-06,8,4,4,1.0
+"rule=30, w=16, T=16",trm_faithful-ff_matched,accuracy,-0.0017656250000000068,0.0032873455286902813,8,2,6,0.2890625
+"rule=30, w=16, T=16",trm_faithful-ff_matched,exact_match,0.0,0.0,8,0,0,1.0
+"rule=30, w=16, T=16",trm_faithful-ff_matched,coherence_excess,1.1021667514868123e-06,1.9951202466694607e-06,8,6,2,0.2890625
+"rule=30, w=16, T=16",trm_nods-ff_matched,accuracy,-0.0024687500000000126,0.005781358589713752,8,3,5,0.7265625
+"rule=30, w=16, T=16",trm_nods-ff_matched,exact_match,0.0,0.0,8,0,0,1.0
+"rule=30, w=16, T=16",trm_nods-ff_matched,coherence_excess,1.4734514250726096e-06,3.3594304701082946e-06,8,5,3,0.7265625
+"rule=30, w=16, T=16",trm_nods-untied_matched,accuracy,0.002296874999999976,0.0059247278041755875,8,5,3,0.7265625
+"rule=30, w=16, T=16",trm_nods-untied_matched,exact_match,0.0,0.0,8,0,0,1.0
+"rule=30, w=16, T=16",trm_nods-untied_matched,coherence_excess,-1.1586447041971731e-06,3.1149851805521565e-06,8,3,5,0.7265625

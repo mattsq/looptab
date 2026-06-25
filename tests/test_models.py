@@ -417,3 +417,57 @@ def test_param_counts_roughly_matched():
     )
     ratio_mo = ff_mo.count_params() / trm_mo.count_params()
     assert 0.8 <= ratio_mo <= 1.2, f"FF/TRM param ratio (multi) = {ratio_mo:.3f}"
+
+
+# --- M18: TRM-faithful ingredients (RMSNorm, n:1 cadence) -----------------------------------
+
+
+def test_trm_m18_defaults_bit_identical():
+    """use_rmsnorm=False, n_latent=1 must reproduce the pre-M18 forward byte-for-byte.
+
+    Same seed → identical construction (the new knobs add no params / no ops when off), so the
+    additive M18 change cannot perturb any committed result.
+    """
+    kw = dict(in_features=12, num_classes=2, hidden_dim=16, latent_dim=16, n_steps=3)
+    torch.manual_seed(0)
+    base = TRM(**kw)
+    torch.manual_seed(0)
+    same = TRM(**kw, use_rmsnorm=False, n_latent=1)
+    assert base.count_params() == same.count_params()
+    X = torch.randn(8, 12)
+    lb, sb = base(X)[0], same(X)[0]
+    assert torch.equal(lb, sb)
+
+
+def test_trm_rmsnorm_adds_params_and_changes_output():
+    kw = dict(in_features=12, num_classes=2, hidden_dim=16, latent_dim=16, n_steps=3)
+    torch.manual_seed(0)
+    plain = TRM(**kw)
+    torch.manual_seed(0)
+    normed = TRM(**kw, use_rmsnorm=True)
+    # One learned gain vector of size latent_dim.
+    assert normed.count_params() == plain.count_params() + 16
+    X = torch.randn(8, 12)
+    assert not torch.equal(plain(X)[0], normed(X)[0])
+
+
+def test_trm_n_latent_holds_answer_fixed_across_inner_updates():
+    """n_latent inner z-updates per answer update; n_latent=1 == one z-update + readout."""
+    kw = dict(in_features=12, num_classes=2, hidden_dim=16, latent_dim=16, n_steps=2)
+    torch.manual_seed(0)
+    m1 = TRM(**kw, n_latent=1)
+    torch.manual_seed(0)
+    m3 = TRM(**kw, n_latent=3)
+    # Same params (cadence is a forward-only knob), different dynamics.
+    assert m1.count_params() == m3.count_params()
+    X = torch.randn(4, 12)
+    out1 = m1(X)[0]
+    out3 = m3(X)[0]
+    assert not torch.equal(out1, out3)
+    # Deep-supervision readout count tracks the OUTER step count, not n_latent.
+    assert len(m3(X, n_steps=2)[1]) == 2
+
+
+def test_trm_n_latent_invalid():
+    with pytest.raises(ValueError):
+        TRM(in_features=4, num_classes=2, hidden_dim=8, latent_dim=8, n_latent=0)

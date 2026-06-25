@@ -18,7 +18,8 @@ from pydantic import BaseModel, Field, model_validator
 
 class TaskConfig(BaseModel):
     name: Literal[
-        "linear", "parity", "multi_parity", "iterated", "converge", "hopfield", "mixed_converge"
+        "linear", "parity", "multi_parity", "iterated", "converge", "hopfield", "mixed_converge",
+        "nested_converge",
     ]
     params: dict = Field(default_factory=dict)
     n_train: int = 4000
@@ -60,6 +61,29 @@ class ModelConfig(BaseModel):
     # progressive loss: L = alpha·L_progressive + (1−alpha)·L_full. Deep Thinking keeps both
     # (the full term anchors the model so it doesn't collapse). Only used by progressive ds_modes.
     progressive_alpha: float = 0.5
+
+    # --- M18: TRM-faithful ingredients (all default to OFF = bit-identical to pre-M18) -------
+    # 2024–26 work on looped models (TRM ablations, HRM autopsy) flags four ingredients the
+    # repo lacked. Each is opt-in per arm so a single "trm_faithful" arm bundles them and the
+    # Δ vs plain `trm` attributes their joint effect (CLAUDE.md §4/§8; bundle-first per the
+    # plan, ablate if it moves).
+    #   use_rmsnorm — RMSNorm on the latent each update (ingredient 3; stability for the loop).
+    #   n_latent    — z-updates per answer update (ingredient 4; TRM uses 6). 1 = original 1:1.
+    #   n_sup       — detached deep-supervision passes carrying (z,a) across them (ingredient 1;
+    #                 the autopsy's active ingredient; the repo's old DS is a *different* thing).
+    #                 1 = a single supervised forward (one pass; a distinct routine from `train`,
+    #                 not asserted bit-identical to it). >1 routes to
+    #                 train_deep_supervision (standard-train path only; errors under curriculum).
+    #   ema_decay   — EMA of weights folded in for eval (ingredient 2; TRM uses 0.999). None=off.
+    use_rmsnorm: bool = False
+    n_latent: int = 1
+    n_sup: int = 1
+    ema_decay: Optional[float] = None
+    # `n_sup_carry` (review fix B1): with n_sup>1, whether the detached (z,a) is carried across
+    # passes (True = the real deep-supervision mechanism) or each pass restarts fresh (False = the
+    # COMPUTE-MATCHED control: same optimizer-step count, no carry). Δ(carry − no-carry) isolates
+    # the carry from the raw 4× step-count. Only used when n_sup>1.
+    n_sup_carry: bool = True
 
     def resolved_label(self) -> str:
         return self.label or self.name

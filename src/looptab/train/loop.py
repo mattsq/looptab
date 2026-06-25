@@ -5,6 +5,37 @@ import torch.nn as nn
 from torch.utils.data import DataLoader
 
 
+class EMA:
+    """Exponential moving average of model weights (M18 ingredient 2).
+
+    TRM's ablation ranks EMA as its 2nd-largest training knob (no-EMA 79.9% vs 87.4% on
+    Sudoku-Extreme); it stabilizes small-data / weight-tied training and is the natural
+    variance-reducer for this repo's seed-sensitive regime. ``decay`` is the smoothing
+    coefficient (TRM uses 0.999). ``update`` is called after every optimizer step; ``copy_to``
+    folds the averaged weights into the model so evaluation runs on the EMA copy (the canonical
+    TRM eval). Deterministic given the weight trajectory, so it does not break reproducibility.
+    """
+
+    def __init__(self, model: nn.Module, decay: float):
+        self.decay = decay
+        # Shadow copy of the trainable params, detached from the graph.
+        self.shadow = {
+            n: p.detach().clone() for n, p in model.named_parameters() if p.requires_grad
+        }
+
+    @torch.no_grad()
+    def update(self, model: nn.Module) -> None:
+        for n, p in model.named_parameters():
+            if p.requires_grad:
+                self.shadow[n].mul_(self.decay).add_(p.detach(), alpha=1.0 - self.decay)
+
+    @torch.no_grad()
+    def copy_to(self, model: nn.Module) -> None:
+        for n, p in model.named_parameters():
+            if p.requires_grad and n in self.shadow:
+                p.copy_(self.shadow[n])
+
+
 def _loss_fn(logits: torch.Tensor, targets: torch.Tensor) -> torch.Tensor:
     """Cross-entropy that handles both single-output (B,C) and multi-output (B,W,C)."""
     if targets.ndim == 1:
@@ -23,12 +54,19 @@ def train(
     lr: float = 1e-3,
     weight_decay: float = 1e-4,
     deep_supervision_weight: float = 1.0,
+    ema_decay: float | None = None,
     device: str = "cpu",
     verbose: bool = False,
 ) -> list[float]:
-    """Train model; return per-epoch train losses."""
+    """Train model; return per-epoch train losses.
+
+    ``ema_decay`` (M18 ingredient 2): if set, maintain an EMA of the weights and fold it into
+    the model at the end, so evaluation runs on the averaged weights. ``None`` = no EMA,
+    bit-identical to the pre-M18 routine.
+    """
     model = model.to(device)
     opt = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=weight_decay)
+    ema = EMA(model, ema_decay) if ema_decay is not None else None
     losses = []
 
     for epoch in range(epochs):
@@ -47,6 +85,8 @@ def train(
                 loss = loss + deep_supervision_weight * ds_loss
             loss.backward()
             opt.step()
+            if ema is not None:
+                ema.update(model)
             epoch_loss += loss.item()
             n_batches += 1
         avg = epoch_loss / max(n_batches, 1)
@@ -54,6 +94,92 @@ def train(
         if verbose and (epoch % 10 == 0 or epoch == epochs - 1):
             print(f"  epoch {epoch:3d}  loss={avg:.4f}")
 
+    if ema is not None:
+        ema.copy_to(model)
+    return losses
+
+
+def train_deep_supervision(
+    model: nn.Module,
+    train_loader: DataLoader,
+    *,
+    n_sup: int,
+    carry: bool = True,
+    n_steps: int | None = None,
+    epochs: int = 100,
+    lr: float = 1e-3,
+    weight_decay: float = 1e-4,
+    deep_supervision_weight: float = 1.0,
+    ema_decay: float | None = None,
+    device: str = "cpu",
+    verbose: bool = False,
+) -> list[float]:
+    """Canonical TRM/HRM deep supervision (M18 ingredient 1).
+
+    The repo's existing "deep supervision" is per-step readout losses *inside one fully
+    back-propagated forward* — NOT the mechanism the ARC autopsy credits. This routine adds the
+    real thing: an OUTER loop of ``n_sup`` supervised passes per batch, where the recurrent
+    state ``(z, a)`` is **carried across passes and detached** between them. Each pass runs the
+    loop for ``n_steps``, takes a loss, steps the optimizer, then detaches ``(z, a)`` and feeds
+    them as the init of the next pass. This emulates a very deep network (``n_sup × n_steps``
+    effective depth) without long backprop-through-time — the bounded gradient horizon is one
+    pass. Requires a model whose ``forward`` accepts ``init_state`` / ``return_state`` (TRM,
+    TRMDecoupled). ``n_sup=1`` reduces to one ordinary supervised forward.
+
+    ``deep_supervision_weight`` still weights the within-pass per-step readout losses (when the
+    model emits them); the cross-pass carry is the new axis. ``ema_decay`` folds an EMA of the
+    weights into the model at the end (ingredient 2). Deterministic given seed: the detach and
+    EMA are pure functions of the weight/state trajectory.
+
+    ``carry`` (M18 review fix B1 — the COMPUTE-MATCHED control). With ``carry=True`` (default) the
+    detached ``(z, a)`` is fed as the init of the next pass — the actual deep-supervision
+    mechanism. With ``carry=False`` every pass restarts from the fresh ``z0`` / zero answer, so the
+    routine becomes *exactly ``n_sup`` independent supervised forwards per batch* — the SAME
+    optimizer-step count and per-pass compute, MINUS the carry. Δ(carry − no-carry) therefore
+    isolates whether the detached **carry** helps beyond the raw 4× step-count it also buys, closing
+    the §8 confound the bundle/ablation otherwise leaves open.
+    """
+    if n_sup < 1:
+        raise ValueError(f"n_sup must be >= 1, got {n_sup}")
+    model = model.to(device)
+    opt = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=weight_decay)
+    ema = EMA(model, ema_decay) if ema_decay is not None else None
+    losses = []
+
+    for epoch in range(epochs):
+        model.train()
+        epoch_loss = 0.0
+        n_passes = 0
+        for X, y in train_loader:
+            X, y = X.to(device), y.to(device)
+            state = None  # fresh (learned z0 / zero answer) at the start of each batch
+            for _ in range(n_sup):
+                opt.zero_grad()
+                logits, all_logits, state = model(
+                    X, n_steps=n_steps, init_state=state, return_state=True
+                )
+                loss = _loss_fn(logits, y)
+                if all_logits is not None and deep_supervision_weight > 0:
+                    ds_loss = sum(_loss_fn(sl, y) for sl in all_logits) / len(all_logits)
+                    loss = loss + deep_supervision_weight * ds_loss
+                loss.backward()
+                opt.step()
+                if ema is not None:
+                    ema.update(model)
+                # Detach the carried state so the next pass's gradient stops here — the bounded
+                # horizon that lets effective depth grow with n_sup without long BPTT. With
+                # carry=False, drop the state so the next pass restarts fresh (the compute-matched
+                # control: same step count, no carry).
+                state = (state[0].detach(), state[1].detach()) if carry else None
+                epoch_loss += loss.item()
+                n_passes += 1
+        avg = epoch_loss / max(n_passes, 1)
+        losses.append(avg)
+        if verbose and (epoch % 10 == 0 or epoch == epochs - 1):
+            print(f"  epoch {epoch:3d}  loss={avg:.4f}")
+
+    if ema is not None:
+        ema.copy_to(model)
     return losses
 
 

@@ -1,0 +1,84 @@
+# M18g — review-2 Experiment 1 (DECISIVE for the M19 go/no-go): equal-compute controls on the
+# nested gate. The M17/M18d "single-timescale loop insufficient ⇒ build H/L (M19)" verdict compared
+# the faithful loop (4× compute via n_sup=4) against §4 controls trained at 1× — and m18d shows the
+# faithful loop's train_acc hits 0.999 while test EM is only 0.82, i.e. the "plateau" is a
+# GENERALIZATION gap, never checked against equal-compute controls (§8 trap). This run trains EVERY
+# arm to the SAME 4× budget (epochs=400, n_sup=1 for all — standard-train, only ARCHITECTURE varies),
+# so trm_nods@400 IS the well-trained single loop (≈ the faithful loop per m18e/m18f).
+#
+# DECISION TABLE (read per-arm test EM + train_acc, and Δ(trm_nods − ff/untied/decoupled)):
+#   - all train_acc→~1.0, test EM clusters, Δ(trm−ff)≈0   ⇒ SHARED data/generalization ceiling, NOT a
+#                                                           single-TIMESCALE deficit ⇒ GATE FAILS, do
+#                                                           NOT build M19 (would repeat the HRM mistake).
+#   - trm_nods EM stays meaningfully ABOVE ff/untied at equal compute (Δ>0, 7+/8) ⇒ genuine
+#                                                           single-timescale ceiling the controls share
+#                                                           ⇒ GATE MET properly ⇒ M19 earned.
+#   - untied ≥ trm (P1 reversal under equal compute)      ⇒ M17b reversal is compute-robust ⇒ M19's
+#                                                           must-beat bar includes the untied stack.
+# Also re-reads leg-1 Δ(trm_nods − decoupled) at equal compute (review Experiment 3).
+# nested inner_rule=13/outer_rule=79/block_w=8, w∈{24,32}, 8 seeds.
+
+task:
+  name: nested_converge
+  params:
+    block_w: 8
+    inner_rule: 13
+    outer_rule: 79
+    T: 6
+    distractors: 8
+  n_train: 4000
+  n_test: 1000
+  task_seed: 42
+  train_sample_seed: 1
+  test_sample_seed: 2
+
+grid:
+  params:
+    n_blocks: [3, 4]   # w = 24, 32
+
+arms:
+  - name: trm
+    label: trm_nods                 # the single-timescale loop, well-trained (400 epochs)
+    hidden_dim: 64
+    latent_dim: 64
+    n_steps: 6
+    deep_supervision: false
+    ds_mode: final
+  - name: ff_matched
+    label: ff_matched               # §4a shallow MLP, SAME 400-epoch budget
+    hidden_dim: 64
+    latent_dim: 64
+    n_steps: 6
+  - name: untied_matched
+    label: untied_matched           # §4b fair untied stack, SAME budget (P1 / "more operators")
+    hidden_dim: 64
+    latent_dim: 64
+    n_steps: 6
+    deep_supervision: false
+    ds_mode: final
+  - name: trm_decoupled
+    label: trm_decoupled_nods       # joint-state ablation, SAME budget (leg-1 at equal compute)
+    hidden_dim: 64
+    latent_dim: 64
+    n_steps: 6
+    deep_supervision: false
+    ds_mode: final
+
+deltas:
+  - [trm_nods, ff_matched]          # THE decisive read: loop vs shallow MLP at equal compute
+  - [trm_nods, untied_matched]      # P1 / second-operator at equal compute
+  - [trm_nods, trm_decoupled_nods]  # leg-1 joint-state at equal compute
+
+budget_reference: trm_nods
+budget_tol: 0.02
+
+train:
+  epochs: 400
+  lr: 1e-3
+  weight_decay: 1e-4
+  batch_size: 256
+  device: cpu
+
+seeds: [0, 1, 2, 3, 4, 5, 6, 7]
+parallel_workers: 4
+results_dir: results

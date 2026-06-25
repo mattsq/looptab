@@ -1,0 +1,4 @@
+config,arm,n_params,ref_params,ratio,role,within_tol
+"rule=78, w=24",trm_nods,16624,16624,1.0000,reference,True
+"rule=78, w=24",trm_nsup,16624,16624,1.0000,matched,True
+"rule=78, w=24",trm_nsup_nocarry,16624,16624,1.0000,matched,True

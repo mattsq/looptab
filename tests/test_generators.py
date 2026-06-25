@@ -5,6 +5,7 @@ import pytest
 
 from looptab.data.generators import (
     _build_hopfield_weights,
+    _inner_relax,
     _ring_band_mask,
     _threshold_step,
     ca_step,
@@ -14,9 +15,15 @@ from looptab.data.generators import (
     make_linear,
     make_mixed_converge,
     make_multi_parity,
+    make_nested_converge,
     make_parity,
     mixed_ca_step,
 )
+
+
+def _nested_round(s, n_blocks, block_w, inner_rule, outer_rule, max_inner):
+    """Reference one-round operator for nested_converge tests: outer couple then inner relax."""
+    return _inner_relax(ca_step(s, outer_rule), n_blocks, block_w, inner_rule, max_inner)
 
 
 def test_linear_determinism():
@@ -494,6 +501,198 @@ def test_mixed_converge_golden_hash():
     X, y = make_mixed_converge(n=200, w=24, task_seed=42, sample_seed=1, distractors=8)
     assert hashlib.sha256(X.tobytes()).hexdigest()[:16] == "7b862a85c0038032"
     assert hashlib.sha256(y.tobytes()).hexdigest()[:16] == "40e789486f31084a"
+
+
+# --- Task C (§9.3): make_nested_converge, the two-timescale fixed-point target (M17) ----------
+NESTED_KW = dict(inner_rule=13, outer_rule=79, block_w=8)  # the M17 screened instance
+
+
+def test_inner_relax_treats_blocks_as_independent_rings():
+    """The FAST/inner step relaxes each block on its OWN ring (no cross-block coupling)."""
+    rng = np.random.default_rng(0)
+    n_blocks, block_w = 4, 8
+    s = rng.integers(0, 2, size=(10, n_blocks * block_w))
+    one = _inner_relax(s, n_blocks, block_w, inner_rule=13, max_inner=4 * block_w)
+    # Reshaping to (n, n_blocks, block_w) and relaxing each block independently must agree.
+    blk = s.reshape(10, n_blocks, block_w)
+    for _ in range(4 * block_w):
+        nxt = ca_step(blk, 13)
+        if np.array_equal(nxt, blk):
+            break
+        blk = nxt
+    np.testing.assert_array_equal(one, blk.reshape(10, n_blocks * block_w))
+
+
+def test_nested_converge_determinism():
+    """Same seeds (incl. the rejection filter) => identical bytes."""
+    a = make_nested_converge(n=200, n_blocks=3, task_seed=42, sample_seed=1, distractors=8,
+                             **NESTED_KW)
+    b = make_nested_converge(n=200, n_blocks=3, task_seed=42, sample_seed=1, distractors=8,
+                             **NESTED_KW)
+    np.testing.assert_array_equal(a[0], b[0])
+    np.testing.assert_array_equal(a[1], b[1])
+
+
+@pytest.mark.parametrize("n_blocks", [3, 4])
+def test_nested_converge_target_is_a_joint_fixed_point(n_blocks):
+    """Every kept row's target is a genuine JOINT fixed point: one round leaves it unchanged."""
+    block_w = NESTED_KW["block_w"]
+    X, s_inf = make_nested_converge(n=400, n_blocks=n_blocks, task_seed=7, sample_seed=2,
+                                    **NESTED_KW)
+    rnd = _nested_round(s_inf, n_blocks, block_w, NESTED_KW["inner_rule"],
+                        NESTED_KW["outer_rule"], max_inner=4 * block_w)
+    np.testing.assert_array_equal(rnd, s_inf)
+
+
+def test_nested_converge_is_two_timescale():
+    """The target needs BOTH timescales: >1 outer round AND a non-trivial inner relax to reach.
+
+    If a single inner relax (or a single round) already produced the target for most rows, the
+    task would be single-timescale and the §9.3 gate would be vacuous. Assert that, from s0, the
+    first inner relax alone is NOT the target for most rows (outer coupling matters) and that the
+    first round is NOT yet the target for a substantial fraction (more than one round needed).
+    """
+    n_blocks, block_w = 4, NESTED_KW["block_w"]
+    X, s_inf = make_nested_converge(n=2000, n_blocks=n_blocks, task_seed=42, sample_seed=1,
+                                    **NESTED_KW)
+    s0 = X[:, : n_blocks * block_w].astype(np.int64)
+    inner_only = _inner_relax(s0, n_blocks, block_w, NESTED_KW["inner_rule"], max_inner=4 * block_w)
+    one_round = _nested_round(s0, n_blocks, block_w, NESTED_KW["inner_rule"],
+                              NESTED_KW["outer_rule"], max_inner=4 * block_w)
+    # Inner-relax-alone differs from the target for the vast majority (the slow outer step matters).
+    assert (inner_only != s_inf).any(axis=1).mean() > 0.9
+    # And one round is not yet the joint fixed point for a substantial fraction (multi-round depth).
+    assert (one_round != s_inf).any(axis=1).mean() > 0.5
+
+
+@pytest.mark.parametrize("n_blocks", [3, 4])
+def test_nested_converge_balance_and_nontrivial(n_blocks):
+    """Balanced (per-cell mean ~0.5) and non-trivial (most rows move off s0)."""
+    block_w = NESTED_KW["block_w"]
+    w = n_blocks * block_w
+    X, y = make_nested_converge(n=3000, n_blocks=n_blocks, task_seed=42, sample_seed=1, **NESTED_KW)
+    cell_means = y.mean(axis=0)
+    assert np.all((cell_means > 0.25) & (cell_means < 0.75))
+    moved = ~(y == X[:, :w]).all(axis=1)
+    assert moved.mean() > 0.9
+
+
+def test_nested_converge_shapes_distractors_and_coding():
+    X, y = make_nested_converge(n=50, n_blocks=3, task_seed=0, sample_seed=0, distractors=8,
+                                **NESTED_KW)
+    assert X.shape == (50, 32)  # w (3*8) + distractors
+    assert y.shape == (50, 24)
+    assert set(np.unique(y)).issubset({0, 1})
+
+
+def test_nested_converge_trajectory_width_contract_with_distractors():
+    """With distractors, X is width w+d but the trajectory frames are width w (the CA state only).
+
+    The M17 gate runs nested_converge under a curriculum with distractors=8; step-aligned DS
+    supervises the width-w model output against width-w trajectory frames, so the traj must NOT
+    carry the distractor columns (review S6 — lock the contract the gate depends on).
+    """
+    n_blocks, block_w, d = 3, NESTED_KW["block_w"], 8
+    w = n_blocks * block_w
+    X, s_inf, traj = make_nested_converge(
+        n=40, n_blocks=n_blocks, task_seed=1, sample_seed=2, T=4 * n_blocks, distractors=d,
+        return_trajectory=True, **NESTED_KW
+    )
+    assert X.shape == (40, w + d)            # input carries distractors
+    assert traj.shape == (40, 4 * n_blocks, w)  # trajectory is the CA state only (no distractors)
+    assert s_inf.shape == (40, w)
+    np.testing.assert_array_equal(traj[:, -1, :], s_inf)
+
+
+def test_nested_converge_trajectory_chains_by_round_to_fixed_point_tail():
+    n_blocks, block_w = 4, NESTED_KW["block_w"]
+    X, s_inf, traj = make_nested_converge(
+        n=80, n_blocks=n_blocks, task_seed=3, sample_seed=4, T=4 * n_blocks,
+        return_trajectory=True, **NESTED_KW
+    )
+    assert traj.shape == (80, 4 * n_blocks, n_blocks * block_w)
+    # Each frame is one ROUND after the previous (loops ≈ outer rounds).
+    for i in range(1, traj.shape[1]):
+        expected = _nested_round(traj[:, i - 1, :], n_blocks, block_w, NESTED_KW["inner_rule"],
+                                 NESTED_KW["outer_rule"], max_inner=4 * block_w)
+        np.testing.assert_array_equal(traj[:, i, :], expected)
+    # T = 4*n_blocks = max_rounds exceeds the filtered convergence depth, so the tail is s_inf.
+    np.testing.assert_array_equal(traj[:, -1, :], s_inf)
+
+
+def test_nested_converge_trajectory_path_matches_splits_path():
+    """The non-trajectory target equals the trajectory build's target (same X, same s_inf)."""
+    X1, y1 = make_nested_converge(n=400, n_blocks=3, task_seed=42, sample_seed=1, distractors=8,
+                                  **NESTED_KW)
+    X2, y2, traj = make_nested_converge(n=400, n_blocks=3, task_seed=42, sample_seed=1,
+                                        distractors=8, T=12, return_trajectory=True, **NESTED_KW)
+    np.testing.assert_array_equal(X1, X2)
+    np.testing.assert_array_equal(y1, y2)
+
+
+def test_nested_converge_accept_max_depth_caps_depth():
+    """accept_max_depth keeps only rows converging within the cap; None is a bit-identical no-op."""
+    a = make_nested_converge(n=200, n_blocks=3, task_seed=42, sample_seed=1, distractors=8,
+                             accept_max_depth=None, **NESTED_KW)
+    b = make_nested_converge(n=200, n_blocks=3, task_seed=42, sample_seed=1, distractors=8,
+                             **NESTED_KW)
+    np.testing.assert_array_equal(a[0], b[0])  # None is the no-op default => bit-identical
+    np.testing.assert_array_equal(a[1], b[1])
+    # A cap of 2 must still produce a valid (smaller-or-equal-depth) joint fixed point.
+    n_blocks, block_w = 3, NESTED_KW["block_w"]
+    X, s_inf = make_nested_converge(n=150, n_blocks=n_blocks, task_seed=42, sample_seed=1,
+                                    accept_max_depth=2, **NESTED_KW)
+    rnd = _nested_round(s_inf, n_blocks, block_w, NESTED_KW["inner_rule"], NESTED_KW["outer_rule"],
+                        max_inner=4 * block_w)
+    np.testing.assert_array_equal(rnd, s_inf)
+
+
+def test_nested_converge_raises_when_cycling():
+    """A non-converging rule pair must fail loudly rather than return non-fixed states."""
+    with pytest.raises(ValueError):
+        # rule 30 (chaotic) never settles => the round map never reaches a joint fixed point
+        # (0% convergent in this nested setup), so the rejection filter exhausts its draw budget.
+        make_nested_converge(n=200, n_blocks=3, block_w=8, inner_rule=30, outer_rule=30,
+                             task_seed=0, sample_seed=0, max_draw_factor=4)
+
+
+def test_nested_converge_accepts_only_inner_fixed_points():
+    """Every accepted s_inf must be a genuine hierarchy of inner fixed points — each block
+    stationary under inner_rule, not merely round-periodic.
+
+    Regression for a rejection-filter hole (PR review): for a cycling inner rule whose period
+    divides max_inner, the round map can be periodic at a NON-stationary state, which the
+    outer-only check wrongly accepted. The fix requires inner-stationarity at acceptance.
+    """
+    n_blocks, block_w = 3, NESTED_KW["block_w"]
+    for sample_seed in (1, 2, 7):
+        _, s_inf = make_nested_converge(n=500, n_blocks=n_blocks, task_seed=42,
+                                        sample_seed=sample_seed, distractors=8, **NESTED_KW)
+        blk = s_inf.reshape(s_inf.shape[0], n_blocks, block_w)
+        # one inner step changes nothing => every block is at its own inner fixed point
+        np.testing.assert_array_equal(ca_step(blk, NESTED_KW["inner_rule"]), blk)
+
+
+def test_nested_converge_rejects_inner_cycling_pair():
+    """The exact PR-review counterexample: inner_rule=1 / outer_rule=0 makes all-zeros round-repeat
+    (outer→zeros, inner relax of zeros cap-cycles back to zeros at even max_inner) while one inner
+    step flips every bit. None of these are valid inner fixed points, so the filter must reject them
+    all and exhaust its draw budget rather than emit invalid labels."""
+    with pytest.raises(ValueError):
+        make_nested_converge(n=50, n_blocks=2, block_w=4, inner_rule=1, outer_rule=0,
+                             task_seed=0, sample_seed=0, max_inner=4, max_rounds=8,
+                             max_draw_factor=50)
+
+
+def test_nested_converge_golden_hash():
+    """Pin the committed M17 output bytes so any future change to the two-timescale generator
+    cannot silently alter the data the committed gate results rest on."""
+    import hashlib
+
+    X, y = make_nested_converge(n=200, n_blocks=3, task_seed=42, sample_seed=1, distractors=8,
+                                **NESTED_KW)
+    assert hashlib.sha256(X.tobytes()).hexdigest()[:16] == "23c4775c987efd78"
+    assert hashlib.sha256(y.tobytes()).hexdigest()[:16] == "2c5cfc7048adafec"
 
 
 def test_ca_step_rule90():

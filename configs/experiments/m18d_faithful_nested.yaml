@@ -1,0 +1,101 @@
+# M18d — the M17×M18 cross-check: does the FAITHFUL-DS lever lift the single-timescale loop on the
+# Task C nested target, i.e. does M17's build-gate verdict survive the training lever M17 never had?
+#
+# M17 ran the §9.3 build-gate with the OLD training (curriculum + step-aligned DS) and concluded the
+# single-timescale loop's coherence PLATEAUS below the nested target (EM ~0.56/0.37 ≪ 1.0) and is
+# CAPACITY-ROBUST (3× params → +0.03 EM) ⇒ H/L build (M19) earned. But M18 found a *training* lever
+# M17 did not test: canonical detached `N_sup` deep supervision is a +0.295 EM lift on the
+# single-timescale `converge` anchor. Since `nested_converge` is the SAME class of convergent
+# local-update fixed-point target, the gate's "insufficiency" must be re-checked against THIS lever
+# before the hierarchy is truly earned (§8: verify, don't assume).
+#
+# DECISIVE READ — trm_faithful's ABSOLUTE EM vs the target (EM=1.0) and vs M17's single-loop plateau:
+#   - if faithful still plateaus well below 1.0 → the gate STRENGTHENS (insufficiency is robust to BOTH
+#     capacity (M17b) AND the canonical-DS training lever) → M19 H/L build remains earned, and M19
+#     should itself train with faithful DS;
+#   - if faithful approaches ~1.0 → the single loop was UNDER-TRAINED, the gate verdict is at risk, and
+#     M19 must be reconsidered (do not build the hierarchy on a beatable baseline — the HRM mistake).
+#
+# Their locked instance (block_w=8, inner_rule=13, outer_rule=79, n_blocks∈{3,4} ⇒ w∈{24,32}), but on
+# the STANDARD-train path (no curriculum) so the faithful `n_sup` arm applies (it errors under a
+# curriculum by design). trm_nods is in-run for a clean within-run Δ. Faithful bundle = M18's lite
+# setting (n_sup=4, ema 0.999, rmsnorm, n_latent=2).
+
+task:
+  name: nested_converge
+  params:
+    block_w: 8
+    inner_rule: 13
+    outer_rule: 79
+    T: 6
+    distractors: 8
+  n_train: 4000
+  n_test: 1000
+  task_seed: 42
+  train_sample_seed: 1
+  test_sample_seed: 2
+
+grid:
+  params:
+    n_blocks: [3, 4]   # w = 24, 32
+
+arms:
+  - name: trm
+    label: trm_nods                 # single-timescale loop, standard-train final loss (budget ref)
+    hidden_dim: 64
+    latent_dim: 64
+    n_steps: 6
+    deep_supervision: false
+    ds_mode: final
+  - name: trm
+    label: trm_faithful             # SAME loop + M18 ingredients (the lever M17's gate didn't test)
+    hidden_dim: 64
+    latent_dim: 64
+    n_steps: 6
+    deep_supervision: false
+    ds_mode: final
+    n_sup: 4
+    ema_decay: 0.999
+    use_rmsnorm: true
+    n_latent: 2
+  - name: trm_decoupled
+    label: trm_decoupled_nods       # joint-state ablation (still in the leg-1 regime on nested?)
+    hidden_dim: 64
+    latent_dim: 64
+    n_steps: 6
+    deep_supervision: false
+    ds_mode: final
+  - name: ff_matched
+    label: ff_matched               # §4a grounding
+    hidden_dim: 64
+    latent_dim: 64
+    n_steps: 6
+  - name: untied_matched
+    label: untied_matched           # §4b — M17b found this BEATS the tied loop at scale on nested
+    hidden_dim: 64
+    latent_dim: 64
+    n_steps: 6
+    deep_supervision: false
+    ds_mode: final
+
+deltas:
+  - [trm_faithful, trm_nods]        # THE cross-check: does faithful DS lift the single loop?
+  - [trm_faithful, ff_matched]
+  - [trm_faithful, untied_matched]  # does faithful DS reclaim P1 that M17b saw reverse at scale?
+  - [trm_nods, ff_matched]          # in-run leg-2 anchor on nested
+  - [trm_nods, untied_matched]      # in-run P1 anchor on nested
+  - [trm_nods, trm_decoupled_nods]  # in-run leg-1 anchor on nested
+
+budget_reference: trm_nods
+budget_tol: 0.02
+
+train:
+  epochs: 100
+  lr: 1e-3
+  weight_decay: 1e-4
+  batch_size: 256
+  device: cpu
+
+seeds: [0, 1, 2, 3, 4, 5, 6, 7]
+parallel_workers: 4
+results_dir: results

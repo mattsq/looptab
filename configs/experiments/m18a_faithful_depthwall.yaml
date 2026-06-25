@@ -1,0 +1,87 @@
+# M18a — TRM-faithful ingredients at the M3a depth wall (Task B / iterated CA).
+#
+# M3a found s0→s_T UNLEARNABLE one-shot for EVERY arm at T≥8 (train AND test collapse to
+# baseline) — an optimization/learnability wall, not a capacity separation. The ARC autopsy
+# credits DEEP SUPERVISION (the detached N_sup outer loop) as the mechanism for reaching depth
+# without long BPTT — exactly the lever M3a lacked. M18a tests whether the four faithful
+# ingredients (chiefly ingredient 1, N_sup detached-carry deep supervision) lift the wall.
+#
+# Read the TRAIN accuracy, not just test: if trm_faithful fits T=16 where plain trm_nods can't
+# (train lifts off baseline), the wall was an optimization artifact of missing deep supervision.
+# If both stay at baseline, the wall is intrinsic — a clean, autopsy-relevant negative.
+#
+# Faithful arm ingredients (OFF on every other arm): n_sup=3 (detached deep supervision),
+# ema_decay=0.999, use_rmsnorm=true, n_latent=2 — a tractable "lite" TRM setting (see m18b).
+# Depth is coupled to T (couple_n_steps_to_param), so each N_sup pass unrolls T steps × n_latent.
+# Narrowed vs M3a's full grid (rule 30 only, w=16, T∈{8,16}) to bound the faithful arm's compute;
+# T=8 is the wall onset, T=16 the deep end.
+
+task:
+  name: iterated
+  params:
+    distractors: 4
+  n_train: 4000
+  n_test: 1000
+  task_seed: 42
+  train_sample_seed: 1
+  test_sample_seed: 2
+
+grid:
+  params:
+    rule: [30]
+    w: [16]
+    T: [8, 16]
+
+couple_n_steps_to_param: T
+
+arms:
+  - name: trm
+    label: trm_nods       # the loop, final-step loss — pre-M18 baseline (budget reference)
+    hidden_dim: 64
+    latent_dim: 64
+    n_steps: 4            # ignored — coupled to T
+    deep_supervision: false
+    deep_supervision_weight: 0.0
+  - name: trm
+    label: trm_faithful   # SAME loop + the four M18 ingredients (the bundle under test)
+    hidden_dim: 64
+    latent_dim: 64
+    n_steps: 4            # ignored — coupled to T
+    deep_supervision: false
+    deep_supervision_weight: 0.0
+    n_sup: 3
+    ema_decay: 0.999
+    use_rmsnorm: true
+    n_latent: 2
+  - name: ff_matched
+    label: ff_matched     # §4a param-matched shallow MLP
+    hidden_dim: 64
+    latent_dim: 64
+    n_steps: 4
+  - name: untied_matched
+    label: untied_matched # §4b deep-narrow, width-shrunk to the loop's budget
+    hidden_dim: 64
+    latent_dim: 64
+    n_steps: 4            # ignored — block count coupled to T
+    deep_supervision: false
+    deep_supervision_weight: 0.0
+
+deltas:
+  - [trm_faithful, trm_nods]      # THE M18a headline: do the ingredients lift the depth wall?
+  - [trm_faithful, ff_matched]    # faithful loop vs §4a shallow
+  - [trm_nods, ff_matched]        # anchor: reproduce the M3a no-separation wall on this path
+  - [trm_nods, untied_matched]    # anchor: tying at fixed budget+depth
+
+budget_reference: trm_nods
+budget_tol: 0.02
+
+train:
+  epochs: 100
+  lr: 1e-3
+  weight_decay: 1e-4
+  batch_size: 256
+  device: cpu
+
+seeds: [0, 1, 2, 3, 4, 5, 6, 7]
+parallel_workers: 4
+results_dir: results
