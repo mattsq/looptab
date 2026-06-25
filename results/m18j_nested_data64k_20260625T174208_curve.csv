@@ -1,0 +1,12 @@
+config,arm,metric,mean,std,n_params
+n_blocks=3,baseline,accuracy,0.5,0.0,0
+n_blocks=3,trm_nods,accuracy,0.9962760416666667,0.0017180960155505792,16624
+n_blocks=3,trm_nods,train_accuracy,0.99902880859375,0.0004046192345164844,16624
+n_blocks=3,trm_nods,exact_match,0.99,0.0037796447300922757,16624
+n_blocks=3,trm_nods,coherence_excess,0.07499350267619244,0.03429055846682463,16624
+n_blocks=3,trm_nods,mean_wrong_per_row,0.08937500000000001,0.04123430437321402,16624
+n_blocks=3,ff_matched,accuracy,0.9887083333333333,0.0014631722440892213,16592
+n_blocks=3,ff_matched,train_accuracy,0.9999817708333334,5.15598694615036e-05,16592
+n_blocks=3,ff_matched,exact_match,0.96875,0.00420034012228262,16592
+n_blocks=3,ff_matched,coherence_excess,0.20690794997226478,0.02297067399188896,16592
+n_blocks=3,ff_matched,mean_wrong_per_row,0.271,0.035116133858140726,16592

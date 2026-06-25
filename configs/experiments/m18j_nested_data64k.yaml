@@ -1,0 +1,58 @@
+# M18j — review-3 EXP-2: a 2nd data point (64k) to distinguish SAMPLE wall from CAPACITY plateau on the
+# nested target. M18h is a single 4k→16k step (both arms reach ~0.91, not 1.0), so "sample wall ⇒ more
+# data is the lever" rests on one point. This adds n_train=64000 (16× the gate's 4k) at w24, 400 epochs.
+# Compare absolute EM to m18g (4k: trm 0.750 / ff 0.714) and m18h (16k: 0.925 / 0.900), same arm/task/seeds.
+#
+# DECISION: both → ~1.0 ⇒ SAMPLE wall confirmed; "more data is the lever" airtight, M19 firmly unmotivated.
+#           both plateau ~0.92 with the +0.025 gap intact ⇒ capacity co-binds; soften "sample wall" to
+#           "data lifts both substantially; capacity may co-bind." Either way the re-defer verdict is the
+#           same — this only sharpens the LEVER claim.
+
+task:
+  name: nested_converge
+  params:
+    block_w: 8
+    inner_rule: 13
+    outer_rule: 79
+    T: 6
+    distractors: 8
+  n_train: 64000
+  n_test: 1000
+  task_seed: 42
+  train_sample_seed: 1
+  test_sample_seed: 2
+
+grid:
+  params:
+    n_blocks: [3]   # w = 24
+
+arms:
+  - name: trm
+    label: trm_nods
+    hidden_dim: 64
+    latent_dim: 64
+    n_steps: 6
+    deep_supervision: false
+    ds_mode: final
+  - name: ff_matched
+    label: ff_matched
+    hidden_dim: 64
+    latent_dim: 64
+    n_steps: 6
+
+deltas:
+  - [trm_nods, ff_matched]
+
+budget_reference: trm_nods
+budget_tol: 0.02
+
+train:
+  epochs: 400
+  lr: 1e-3
+  weight_decay: 1e-4
+  batch_size: 256
+  device: cpu
+
+seeds: [0, 1, 2, 3, 4, 5, 6, 7]
+parallel_workers: 4
+results_dir: results

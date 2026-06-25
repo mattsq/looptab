@@ -1,0 +1,100 @@
+# M18b — TRM-faithful ingredients on the converge coherence anchor (rule 78).
+#
+# Tests whether the four 2024–26 ingredients the repo lacked (CLAUDE.md §11 M18; TRM ablations
+# + HRM autopsy) move the project's cleanest positive — the joint-state whole-row coherence
+# result (M9/M10: loop beats ff on EM @ w=24; joint loop ≫ decoupled). BUNDLE-FIRST: one
+# `trm_faithful` arm stacks all four ingredients vs the plain `trm_nods`; Δ attributes their
+# JOINT effect. If it moves, a follow-up ablates each knob (per the plan).
+#
+# Ingredients on the faithful arm (each OFF on every other arm = pre-M18 behaviour):
+#   1  n_sup=4    — detached deep-supervision passes carrying (z,a) across them (the autopsy's
+#                   active ingredient; the repo's old per-step DS is a DIFFERENT thing).
+#   2  ema_decay  — 0.999 weight EMA folded in for eval (TRM's 2nd-largest training knob).
+#   3  use_rmsnorm— RMSNorm on the latent each update (loop stability).
+#   4  n_latent=2 — 2 latent z-updates per answer update (TRM uses 6); 1 = original 1:1.
+# These are a tractable "lite" setting of TRM's (n=6, N_sup=16) — chosen so the faithful arm's
+# ~8× compute stays affordable on this CPU box. If the bundle is null, that is a LITE-bundle
+# null (note the under-powered settings before concluding), not a refutation of the ingredients.
+#
+# STANDARD-train path (no curriculum) on the fixed-point target s_inf, final loss — the M8c
+# "fair arms" recipe. The plain arms (trm_nods / ff_matched / untied_matched / decoupled) are
+# the within-run baseline that re-establishes the M9/M10 result on this path; trm_faithful vs
+# trm_nods is the new test. n_steps=6 fixed (no depth coupling). Widths straddle the M9 w≤24
+# coherence regime (w=24 inside, w=32 just outside).
+
+task:
+  name: converge
+  params:
+    T: 6
+    distractors: 8
+  n_train: 4000
+  n_test: 1000
+  task_seed: 42
+  train_sample_seed: 1
+  test_sample_seed: 2
+
+grid:
+  params:
+    rule: [78]
+    w: [24, 32]
+
+arms:
+  - name: trm
+    label: trm_nods                 # joint loop, final loss (budget reference) — pre-M18 baseline
+    hidden_dim: 64
+    latent_dim: 64
+    n_steps: 6
+    deep_supervision: false
+    ds_mode: final
+  - name: trm
+    label: trm_faithful             # SAME loop + the four M18 ingredients (the bundle under test)
+    hidden_dim: 64
+    latent_dim: 64
+    n_steps: 6
+    deep_supervision: false         # only DS axis is the N_sup outer loop, not within-pass DS
+    ds_mode: final
+    n_sup: 4
+    ema_decay: 0.999
+    use_rmsnorm: true
+    n_latent: 2
+  - name: trm_decoupled
+    label: trm_decoupled_nods       # per-cell refinement (M10 anchor: joint-state mechanism)
+    hidden_dim: 64
+    latent_dim: 64
+    n_steps: 6
+    deep_supervision: false
+    ds_mode: final
+  - name: ff_matched
+    label: ff_matched               # §4a shallow MLP grounding
+    hidden_dim: 64
+    latent_dim: 64
+    n_steps: 6
+  - name: untied_matched
+    label: untied_matched           # §4b fair untied stack
+    hidden_dim: 64
+    latent_dim: 64
+    n_steps: 6
+    deep_supervision: false
+    ds_mode: final
+
+deltas:
+  - [trm_faithful, trm_nods]        # THE M18b headline: do the four ingredients move the loop?
+  - [trm_faithful, ff_matched]      # faithful loop vs §4a (does loop-beats-both strengthen?)
+  - [trm_faithful, untied_matched]  # faithful loop vs §4b (tying-positive under the ingredients)
+  - [trm_nods, ff_matched]          # anchor: reproduce M9 loop-beats-both on this path
+  - [trm_nods, untied_matched]      # anchor: reproduce M9 tying-positive
+  - [trm_nods, trm_decoupled_nods]  # anchor: reproduce M10 joint-state mechanism
+
+budget_reference: trm_nods
+budget_tol: 0.02
+
+train:
+  epochs: 100
+  lr: 1e-3
+  weight_decay: 1e-4
+  batch_size: 256
+  device: cpu
+
+seeds: [0, 1, 2, 3, 4, 5, 6, 7]
+parallel_workers: 4
+results_dir: results

@@ -1,0 +1,7 @@
+config,arm,metric,mean,std,n_params
+"rule=78, w=24",baseline,accuracy,0.5617708333333333,0.0006802923041219966,0
+"rule=78, w=24",trm_nods_4xepochs,accuracy,0.9907552083333333,0.0013686609831893317,16624
+"rule=78, w=24",trm_nods_4xepochs,train_accuracy,1.0,0.0,16624
+"rule=78, w=24",trm_nods_4xepochs,exact_match,0.872625,0.01550978953527648,16624
+"rule=78, w=24",trm_nods_4xepochs,coherence_excess,0.0720727222752059,0.013043006887799182,16624
+"rule=78, w=24",trm_nods_4xepochs,mean_wrong_per_row,0.221875,0.03284786359654372,16624

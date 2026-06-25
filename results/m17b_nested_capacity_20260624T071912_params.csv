@@ -1,0 +1,5 @@
+config,arm,n_params,ref_params,ratio,role,within_tol
+n_blocks=3,trm_nods,49584,49584,1.0000,reference,True
+n_blocks=3,trm_decoupled_nods,49766,49584,1.0037,matched,True
+n_blocks=3,ff_matched,49443,49584,0.9972,matched,True
+n_blocks=3,untied_matched,48999,49584,0.9882,matched,True

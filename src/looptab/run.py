@@ -25,7 +25,7 @@ from .config import ExperimentConfig, ModelConfig
 from .data.dataset import make_loaders, make_splits, make_trajectory_dataset
 from .eval.metrics import accuracy, delta_report, evaluate, majority_baseline
 from .registry import get_model
-from .train.loop import train, train_curriculum, train_progressive
+from .train.loop import train, train_curriculum, train_deep_supervision, train_progressive
 
 
 def _git_sha() -> str:
@@ -56,6 +56,11 @@ def _build_model(
     # supervision can be ablated on the same axis for each.
     if arm.name in ("trm", "trm_decoupled", "untied_stack", "untied_matched"):
         kwargs["deep_supervision"] = arm.deep_supervision
+    # M18 ingredients 3 & 4 live in the recurrent core (TRM); pass them only to arms that
+    # accept them so controls keep their byte-identical construction. Off by default.
+    if arm.name == "trm":
+        kwargs["use_rmsnorm"] = arm.use_rmsnorm
+        kwargs["n_latent"] = arm.n_latent
     return get_model(arm.name, **kwargs)
 
 
@@ -120,6 +125,14 @@ def run_point(cfg: ExperimentConfig, task_params: dict, seed: int) -> tuple[dict
         # shuffle stream are identical across arms and independent of arm order.
         torch.manual_seed(seed)
         m = _build_model(arm, in_features, num_classes, out_features, n_steps=coupled_steps)
+        if curriculum is not None and arm.n_sup > 1:
+            # The N_sup detached-carry routine is a standard-train mechanism; combining it with
+            # the trajectory curriculum would conflate two different supervision schemes. Fail
+            # loudly rather than silently picking one (CLAUDE.md §5.6, one knob per ablation).
+            raise ValueError(
+                f"arm '{arm.resolved_label()}' sets n_sup>1, which is incompatible with a "
+                "curriculum run (train_deep_supervision is for the standard-train path)."
+            )
         if curriculum is not None and arm.ds_mode in ("progressive_final", "progressive_step"):
             # M7: Deep Thinking progressive loss (TRM loop arms only; controls take the
             # standard curriculum path below via their "final" ds_mode).
@@ -150,6 +163,31 @@ def run_point(cfg: ExperimentConfig, task_params: dict, seed: int) -> tuple[dict
                 device=device,
                 seed=seed,
             )
+        elif arm.n_sup > 1:
+            # M18 ingredient 1: canonical TRM deep supervision (N_sup detached-carry passes).
+            # Coupled depth (if any) flows in as n_steps so each pass unrolls to the task T.
+            if arm.name not in ("trm", "trm_decoupled"):
+                # train_deep_supervision needs init_state/return_state (TRM, TRMDecoupled only);
+                # the feedforward/untied controls would crash on those kwargs. Fail loudly with a
+                # clear message rather than an opaque TypeError (review fix S3).
+                raise ValueError(
+                    f"arm '{arm.resolved_label()}' (name '{arm.name}') sets n_sup>1, but only "
+                    "'trm'/'trm_decoupled' support the detached-carry routine "
+                    "(init_state/return_state)."
+                )
+            train_deep_supervision(
+                m,
+                train_loader,
+                n_sup=arm.n_sup,
+                carry=arm.n_sup_carry,
+                n_steps=coupled_steps,
+                epochs=cfg.train.epochs,
+                lr=cfg.train.lr,
+                weight_decay=cfg.train.weight_decay,
+                deep_supervision_weight=arm.deep_supervision_weight,
+                ema_decay=arm.ema_decay,
+                device=device,
+            )
         else:
             train(
                 m,
@@ -158,6 +196,7 @@ def run_point(cfg: ExperimentConfig, task_params: dict, seed: int) -> tuple[dict
                 lr=cfg.train.lr,
                 weight_decay=cfg.train.weight_decay,
                 deep_supervision_weight=arm.deep_supervision_weight,
+                ema_decay=arm.ema_decay,
                 device=device,
             )
         # One forward pass over the test set yields both accuracy and (for multi-output

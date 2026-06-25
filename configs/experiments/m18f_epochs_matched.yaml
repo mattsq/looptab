@@ -1,0 +1,44 @@
+# M18f — review B1, final nail: is the N_sup "win" literally just more training epochs?
+# M18e showed the detached CARRY adds ~nothing (+0.012 EM ns) over a no-carry control at the same 4×
+# optimizer steps — so the win is "4× more optimization," delivered as 4 passes/batch. This config
+# checks the most mundane delivery: a PLAIN trm_nods trained for 4× the EPOCHS (400 vs the standard
+# 100). If trm_nods@400 ≈ trm_nsup@100 (EM ~0.88, m18e), the N_sup structure buys nothing a longer
+# plain run doesn't — the "canonical deep supervision" framing is fully retired. Single diagnostic arm
+# (compare its absolute EM across runs to trm_nods@100 = 0.584 and trm_nsup@100 = 0.879, same seeds/task,
+# epochs the only knob). converge rule 78 w=24, 8 seeds.
+
+task:
+  name: converge
+  params:
+    T: 6
+    distractors: 8
+  n_train: 4000
+  n_test: 1000
+  task_seed: 42
+  train_sample_seed: 1
+  test_sample_seed: 2
+
+grid:
+  params:
+    rule: [78]
+    w: [24]
+
+arms:
+  - name: trm
+    label: trm_nods_4xepochs        # plain loop, n_sup=1, 4× epochs (the "just more training" control)
+    hidden_dim: 64
+    latent_dim: 64
+    n_steps: 6
+    deep_supervision: false
+    ds_mode: final
+
+train:
+  epochs: 400
+  lr: 1e-3
+  weight_decay: 1e-4
+  batch_size: 256
+  device: cpu
+
+seeds: [0, 1, 2, 3, 4, 5, 6, 7]
+parallel_workers: 4
+results_dir: results

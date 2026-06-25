@@ -1,0 +1,4 @@
+config,delta,metric,delta_mean,delta_std,n_seeds,sign_pos,sign_neg,sign_p
+n_blocks=3,trm_nods-ff_matched,accuracy,0.010088541666666659,0.0030189084589848283,8,8,0,0.0078125
+n_blocks=3,trm_nods-ff_matched,exact_match,0.025375000000000023,0.0063231434316440216,8,8,0,0.0078125
+n_blocks=3,trm_nods-ff_matched,coherence_excess,-0.09098559644237422,0.03178615824053372,8,0,8,0.0078125

@@ -11,6 +11,26 @@ import torch
 import torch.nn as nn
 
 
+class RMSNorm(nn.Module):
+    """Root-mean-square layer norm on the latent (TRM/HRM use this; M18 ingredient 3).
+
+    A weight-tied loop iterates the same ``update_net`` many times, so the latent ``z`` can
+    drift or blow up across steps; normalizing ``z`` each step is the standard stabilizer for
+    looped / deep-equilibrium models. No mean-centering (RMS only), one learned gain per
+    feature. ``forward`` is shape-agnostic (normalizes the last dim) so it serves the joint
+    (B, d) latent and any future per-cell (B, w, d) latent alike.
+    """
+
+    def __init__(self, dim: int, eps: float = 1e-6):
+        super().__init__()
+        self.eps = eps
+        self.weight = nn.Parameter(torch.ones(dim))
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        rms = torch.rsqrt(x.pow(2).mean(dim=-1, keepdim=True) + self.eps)
+        return x * rms * self.weight
+
+
 class TRM(nn.Module):
     def __init__(
         self,
@@ -21,12 +41,22 @@ class TRM(nn.Module):
         n_steps: int = 4,
         deep_supervision: bool = True,
         out_features: Optional[int] = None,
+        use_rmsnorm: bool = False,
+        n_latent: int = 1,
     ):
         super().__init__()
         self.n_steps = n_steps
         self.deep_supervision = deep_supervision
         self.num_classes = num_classes
         self.out_features = out_features
+        # M18 ingredient 4 — n:1 cadence: ``n_latent`` latent updates of z per ONE answer
+        # update of a (TRM uses n=6 z-updates per a-update). ``n_latent=1`` collapses to the
+        # original 1:1 loop and is bit-identical to the pre-M18 model. The answer a is held
+        # fixed across the inner z-updates (it only enters the readout once per outer step), so
+        # the recurrent core gets more "latent thinking" between answer revisions.
+        if n_latent < 1:
+            raise ValueError(f"n_latent must be >= 1, got {n_latent}")
+        self.n_latent = n_latent
 
         # Projects input + latent + answer into the update space
         answer_dim = out_features * num_classes if out_features is not None else num_classes
@@ -36,6 +66,9 @@ class TRM(nn.Module):
             nn.Linear(hidden_dim, latent_dim),
         )
         self.readout = nn.Linear(latent_dim, answer_dim)
+        # M18 ingredient 3 — RMSNorm on z each update. ``Identity`` when off keeps the forward
+        # path (and parameter set) byte-identical to the pre-M18 model.
+        self.norm = RMSNorm(latent_dim) if use_rmsnorm else nn.Identity()
 
         # Initial latent
         self.z0 = nn.Parameter(torch.zeros(latent_dim))
@@ -79,8 +112,11 @@ class TRM(nn.Module):
         all_logits = [] if self.deep_supervision else None
 
         for _ in range(steps):
-            inp = torch.cat([X, z, a], dim=-1)
-            z = self.update_net(inp)
+            # n_latent inner z-updates (answer a held fixed), then one answer update. With the
+            # default n_latent=1 this is exactly one z-update + one readout — the original loop.
+            for _ in range(self.n_latent):
+                inp = torch.cat([X, z, a], dim=-1)
+                z = self.norm(self.update_net(inp))
             a = self.readout(z)
             if self.deep_supervision:
                 if self.out_features is not None:

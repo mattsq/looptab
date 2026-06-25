@@ -1,0 +1,113 @@
+# M18c — per-ingredient ablation of the TRM-faithful bundle (converge rule 78, w=24).
+#
+# The bundle (m18b, 8 seeds) MOVED the coherence anchor hard (Δ(faithful−nods) EM +0.359 @
+# w=24 / +0.59 @ w=32, and loop-beats-both extends to w=32). Per the plan ("bundle first,
+# ablate if it moves"), this isolates which of the four ingredients carries the gain — §5.6 one
+# knob per arm. Every arm is the SAME `trm` loop; arms differ in exactly one M18 knob vs the
+# all-off `trm_nods` baseline, plus the all-on `trm_faithful`.
+#
+#   trm_nods      — all four OFF (pre-M18 baseline / budget reference)
+#   trm_rmsnorm   — ingredient 3 only (RMSNorm on the latent)
+#   trm_nlatent   — ingredient 4 only (2 z-updates per answer update)
+#   trm_ema       — ingredient 2 only (0.999 weight EMA, standard train)
+#   trm_nsup      — ingredient 1 only (N_sup=4 detached deep-supervision passes)
+#   trm_faithful  — all four ON (reproduces the m18b bundle as the within-run ceiling)
+#   ff_matched    — §4a grounding (is the per-ingredient gain enough to beat the MLP?)
+#
+# w=24 only (the canonical clean coherence regime) to bound compute — the nsup/faithful arms
+# are 4×/8× the cost of a plain loop. Read EM (the loop's coherence signal), not just accuracy.
+
+task:
+  name: converge
+  params:
+    T: 6
+    distractors: 8
+  n_train: 4000
+  n_test: 1000
+  task_seed: 42
+  train_sample_seed: 1
+  test_sample_seed: 2
+
+grid:
+  params:
+    rule: [78]
+    w: [24]
+
+arms:
+  - name: trm
+    label: trm_nods
+    hidden_dim: 64
+    latent_dim: 64
+    n_steps: 6
+    deep_supervision: false
+    ds_mode: final
+  - name: trm
+    label: trm_rmsnorm
+    hidden_dim: 64
+    latent_dim: 64
+    n_steps: 6
+    deep_supervision: false
+    ds_mode: final
+    use_rmsnorm: true
+  - name: trm
+    label: trm_nlatent
+    hidden_dim: 64
+    latent_dim: 64
+    n_steps: 6
+    deep_supervision: false
+    ds_mode: final
+    n_latent: 2
+  - name: trm
+    label: trm_ema
+    hidden_dim: 64
+    latent_dim: 64
+    n_steps: 6
+    deep_supervision: false
+    ds_mode: final
+    ema_decay: 0.999
+  - name: trm
+    label: trm_nsup
+    hidden_dim: 64
+    latent_dim: 64
+    n_steps: 6
+    deep_supervision: false
+    ds_mode: final
+    n_sup: 4
+  - name: trm
+    label: trm_faithful
+    hidden_dim: 64
+    latent_dim: 64
+    n_steps: 6
+    deep_supervision: false
+    ds_mode: final
+    n_sup: 4
+    ema_decay: 0.999
+    use_rmsnorm: true
+    n_latent: 2
+  - name: ff_matched
+    label: ff_matched
+    hidden_dim: 64
+    latent_dim: 64
+    n_steps: 6
+
+deltas:
+  - [trm_rmsnorm, trm_nods]      # ingredient 3 alone
+  - [trm_nlatent, trm_nods]      # ingredient 4 alone
+  - [trm_ema, trm_nods]          # ingredient 2 alone
+  - [trm_nsup, trm_nods]         # ingredient 1 alone
+  - [trm_faithful, trm_nods]     # all four (ceiling)
+  - [trm_faithful, ff_matched]   # does the bundle beat the MLP?
+
+budget_reference: trm_nods
+budget_tol: 0.02
+
+train:
+  epochs: 100
+  lr: 1e-3
+  weight_decay: 1e-4
+  batch_size: 256
+  device: cpu
+
+seeds: [0, 1, 2, 3, 4, 5, 6, 7]
+parallel_workers: 4
+results_dir: results

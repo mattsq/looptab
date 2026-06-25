@@ -1,0 +1,8 @@
+config,arm,n_params,ref_params,ratio,role,within_tol
+"rule=78, w=24",trm_nods,16624,16624,1.0000,reference,True
+"rule=78, w=24",trm_rmsnorm,16688,16624,1.0038,matched,True
+"rule=78, w=24",trm_nlatent,16624,16624,1.0000,matched,True
+"rule=78, w=24",trm_ema,16624,16624,1.0000,matched,True
+"rule=78, w=24",trm_nsup,16624,16624,1.0000,matched,True
+"rule=78, w=24",trm_faithful,16688,16624,1.0038,matched,True
+"rule=78, w=24",ff_matched,16592,16624,0.9981,matched,True

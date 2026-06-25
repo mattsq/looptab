@@ -223,3 +223,82 @@ def test_curriculum_depth_schedule_is_deterministic():
         )
 
     assert run() == run()
+
+
+# --- M18: train_deep_supervision (N_sup detached carry) + EMA -------------------------------
+
+from looptab.train.loop import train_deep_supervision  # noqa: E402
+
+
+def test_train_deep_supervision_runs_and_is_deterministic():
+    """N_sup detached-carry training: runs, and same seed → identical weights (reproducible)."""
+    def _make():
+        torch.manual_seed(0)
+        return TRM(in_features=10, num_classes=2, hidden_dim=16, latent_dim=16, n_steps=3)
+
+    loader = _small_loader()
+    m1 = _make()
+    train_deep_supervision(m1, loader, n_sup=3, epochs=4, lr=1e-3, device="cpu")
+    m2 = _make()
+    train_deep_supervision(m2, loader, n_sup=3, epochs=4, lr=1e-3, device="cpu")
+    for p1, p2 in zip(m1.parameters(), m2.parameters()):
+        assert torch.equal(p1, p2)
+
+
+def test_train_deep_supervision_nsup1_matches_plain_single_pass():
+    """n_sup=1 is one supervised forward per batch — distinct routine, same gradient content.
+
+    We don't assert byte-equality with ``train`` (loss aggregation differs), only that the
+    routine trains a model to a finite loss and changes the weights.
+    """
+    torch.manual_seed(0)
+    m = TRM(in_features=10, num_classes=2, hidden_dim=16, latent_dim=16, n_steps=2,
+            deep_supervision=False)
+    before = [p.detach().clone() for p in m.parameters()]
+    losses = train_deep_supervision(m, _small_loader(), n_sup=1, epochs=3, device="cpu")
+    assert len(losses) == 3 and all(v == v for v in losses)  # no NaN
+    assert any(not torch.equal(a, b) for a, b in zip(before, m.parameters()))
+
+
+def test_ema_changes_weights_and_is_deterministic():
+    """EMA folds averaged weights in → differs from no-EMA, and is reproducible."""
+    def _run(ema_decay):
+        torch.manual_seed(0)
+        m = TRM(in_features=10, num_classes=2, hidden_dim=16, latent_dim=16, n_steps=2)
+        train(m, _small_loader(), epochs=6, lr=1e-2, ema_decay=ema_decay, device="cpu")
+        return [p.detach().clone() for p in m.parameters()]
+
+    no_ema = _run(None)
+    ema_a = _run(0.9)
+    ema_b = _run(0.9)
+    # EMA weights are reproducible...
+    for a, b in zip(ema_a, ema_b):
+        assert torch.equal(a, b)
+    # ...and differ from the un-averaged endpoint.
+    assert any(not torch.equal(a, b) for a, b in zip(no_ema, ema_a))
+
+
+def test_ema_invalid_nsup():
+    m = TRM(in_features=10, num_classes=2, hidden_dim=8, latent_dim=8, n_steps=2)
+    with pytest.raises(ValueError):
+        train_deep_supervision(m, _small_loader(), n_sup=0, epochs=1, device="cpu")
+
+
+def test_train_deep_supervision_carry_flag_matches_compute_changes_result():
+    """carry=False (compute-matched control) runs, is deterministic, and differs from carry=True.
+
+    Both do n_sup forward+backward+step per batch (same compute); only the detached-carry differs,
+    so they must train to *different* weights — the isolation the B1 review fix needs.
+    """
+    def _run(carry):
+        torch.manual_seed(0)
+        m = TRM(in_features=10, num_classes=2, hidden_dim=16, latent_dim=16, n_steps=3)
+        train_deep_supervision(m, _small_loader(), n_sup=3, carry=carry, epochs=4, device="cpu")
+        return [p.detach().clone() for p in m.parameters()]
+
+    carry_a = _run(True)
+    carry_b = _run(True)
+    nocarry = _run(False)
+    for a, b in zip(carry_a, carry_b):   # deterministic
+        assert torch.equal(a, b)
+    assert any(not torch.equal(a, b) for a, b in zip(carry_a, nocarry))  # carry matters

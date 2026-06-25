@@ -1,0 +1,73 @@
+# M18e — review fix B1: is the N_sup deep-supervision win the detached-CARRY mechanism, or just 4×
+# more optimizer steps? The m18c ablation isolated N_sup as the active ingredient (+0.295 EM), but
+# the `trm_nsup` arm runs n_sup× the optimizer steps/batch at equal epochs — so "the carry is the
+# mechanism" is confounded with "4× more SGD" (§8). This config adds the COMPUTE-MATCHED control:
+# `trm_nsup_nocarry` does the SAME n_sup=4 passes/batch (same step count, same per-pass compute) but
+# RESTARTS each pass from a fresh z0 (no detached carry). The decisive read is:
+#   Δ(trm_nsup − trm_nsup_nocarry)  > 0  ⇒ the detached CARRY helps beyond the raw step-count (the
+#                                          mechanism is real, not just compute);
+#                                  ≈ 0  ⇒ the m18c "N_sup win" was just 4× more optimization → the
+#                                          headline must be downgraded to "more compute helps."
+# converge rule 78 w=24 (the m18c cell), 8 seeds. trm_nods (n_sup=1) is the in-run reference.
+
+task:
+  name: converge
+  params:
+    T: 6
+    distractors: 8
+  n_train: 4000
+  n_test: 1000
+  task_seed: 42
+  train_sample_seed: 1
+  test_sample_seed: 2
+
+grid:
+  params:
+    rule: [78]
+    w: [24]
+
+arms:
+  - name: trm
+    label: trm_nods                 # n_sup=1 baseline (budget reference)
+    hidden_dim: 64
+    latent_dim: 64
+    n_steps: 6
+    deep_supervision: false
+    ds_mode: final
+  - name: trm
+    label: trm_nsup                 # n_sup=4 WITH detached carry (the real mechanism)
+    hidden_dim: 64
+    latent_dim: 64
+    n_steps: 6
+    deep_supervision: false
+    ds_mode: final
+    n_sup: 4
+    n_sup_carry: true
+  - name: trm
+    label: trm_nsup_nocarry         # n_sup=4, NO carry — compute-matched control (same 4× steps)
+    hidden_dim: 64
+    latent_dim: 64
+    n_steps: 6
+    deep_supervision: false
+    ds_mode: final
+    n_sup: 4
+    n_sup_carry: false
+
+deltas:
+  - [trm_nsup, trm_nsup_nocarry]    # THE B1 isolation: carry vs no-carry at matched compute
+  - [trm_nsup, trm_nods]            # the m18c "N_sup win" (carry + 4× steps vs 1×)
+  - [trm_nsup_nocarry, trm_nods]    # how much of the win is JUST the 4× steps?
+
+budget_reference: trm_nods
+budget_tol: 0.02
+
+train:
+  epochs: 100
+  lr: 1e-3
+  weight_decay: 1e-4
+  batch_size: 256
+  device: cpu
+
+seeds: [0, 1, 2, 3, 4, 5, 6, 7]
+parallel_workers: 4
+results_dir: results
