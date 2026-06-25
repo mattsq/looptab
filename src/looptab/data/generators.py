@@ -351,9 +351,11 @@ def _inner_relax(
     ``ca_step`` only touches axis -1, so reshaping ``(n, w)`` -> ``(n, n_blocks, block_w)``
     iterates each block as an INDEPENDENT ring of width ``block_w`` (no coupling across block
     boundaries). We run ``inner_rule`` to a per-block fixed point (whole-batch stationary, capped
-    at ``max_inner``). Rows whose blocks do not settle within ``max_inner`` simply return a
-    non-fixed state — the OUTER fixed-point check then never fires for them, so they are
-    rejection-filtered out (exactly as a cycling row is in ``make_mixed_converge``).
+    at ``max_inner``). Rows whose blocks do NOT settle within ``max_inner`` are returned in a
+    non-converged state; the acceptance check in ``make_nested_converge`` rejection-filters them
+    via an explicit ``_inner_stationary`` test (NOT merely via the round-level fixed-point check —
+    see that function: a cycling inner rule whose period divides ``max_inner`` can make the round
+    map periodic at a non-stationary state, which the outer check alone would wrongly accept).
     """
     blk = s.reshape(s.shape[0], n_blocks, block_w)
     for _ in range(max_inner):
@@ -362,6 +364,24 @@ def _inner_relax(
             break
         blk = nxt
     return blk.reshape(s.shape[0], n_blocks * block_w)
+
+
+def _inner_stationary(
+    s: np.ndarray, n_blocks: int, block_w: int, inner_rule: int
+) -> np.ndarray:
+    """Per-row mask: is EVERY block of ``s`` at an inner fixed point (one inner step is a no-op)?
+
+    The load-bearing half of the rejection filter. ``round_(s) == s`` alone only proves the *round
+    map* is periodic at ``s`` — for a cycling ``inner_rule`` whose period divides ``max_inner``,
+    ``_inner_relax`` can cap out and return a state that round-repeats without any block being
+    stationary (e.g. inner_rule=1 / outer_rule=0: all-zeros round-repeats but one inner step flips
+    every bit). Requiring inner-stationarity here makes "``s_inf`` is a hierarchy of inner fixed
+    points" a verified invariant, not an assumption about the rule pair. Note: if ``s`` is
+    inner-stationary, ``_inner_relax`` provably converged to it (a fixed point is absorbing), so
+    this check is exactly equivalent to "the inner relax that produced ``s`` genuinely settled."
+    """
+    blk = s.reshape(s.shape[0], n_blocks, block_w)
+    return (ca_step(blk, inner_rule) == blk).all(axis=(1, 2))
 
 
 def make_nested_converge(
@@ -443,7 +463,16 @@ def make_nested_converge(
         depth = np.full(block_draw, -1, dtype=np.int64)  # first round at which a row is stationary
         for step in range(max_rounds):
             nxt = round_(s)
-            newly = (nxt == s).all(axis=1) & (depth < 0)  # s already a JOINT fixed point
+            # A genuine JOINT fixed point needs BOTH: (a) the round map fixes s, AND (b) every inner
+            # block of s is actually stationary. (b) rejects the capped-cycling case where
+            # round_(s)==s only because _inner_relax hit its cap on a periodic orbit (see
+            # _inner_stationary). For a genuinely-converging pair (locked inner=13/outer=79), (b)
+            # holds wherever (a) does, so it is bit-identical there; it only filters bad pairs.
+            newly = (
+                (nxt == s).all(axis=1)
+                & _inner_stationary(s, n_blocks, block_w, inner_rule)
+                & (depth < 0)
+            )
             depth[newly] = step
             if (depth >= 0).all():  # whole block of rows settled
                 break

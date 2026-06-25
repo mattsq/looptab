@@ -656,6 +656,34 @@ def test_nested_converge_raises_when_cycling():
                              task_seed=0, sample_seed=0, max_draw_factor=4)
 
 
+def test_nested_converge_accepts_only_inner_fixed_points():
+    """Every accepted s_inf must be a genuine hierarchy of inner fixed points — each block
+    stationary under inner_rule, not merely round-periodic.
+
+    Regression for a rejection-filter hole (PR review): for a cycling inner rule whose period
+    divides max_inner, the round map can be periodic at a NON-stationary state, which the
+    outer-only check wrongly accepted. The fix requires inner-stationarity at acceptance.
+    """
+    n_blocks, block_w = 3, NESTED_KW["block_w"]
+    for sample_seed in (1, 2, 7):
+        _, s_inf = make_nested_converge(n=500, n_blocks=n_blocks, task_seed=42,
+                                        sample_seed=sample_seed, distractors=8, **NESTED_KW)
+        blk = s_inf.reshape(s_inf.shape[0], n_blocks, block_w)
+        # one inner step changes nothing => every block is at its own inner fixed point
+        np.testing.assert_array_equal(ca_step(blk, NESTED_KW["inner_rule"]), blk)
+
+
+def test_nested_converge_rejects_inner_cycling_pair():
+    """The exact PR-review counterexample: inner_rule=1 / outer_rule=0 makes all-zeros round-repeat
+    (outer→zeros, inner relax of zeros cap-cycles back to zeros at even max_inner) while one inner
+    step flips every bit. None of these are valid inner fixed points, so the filter must reject them
+    all and exhaust its draw budget rather than emit invalid labels."""
+    with pytest.raises(ValueError):
+        make_nested_converge(n=50, n_blocks=2, block_w=4, inner_rule=1, outer_rule=0,
+                             task_seed=0, sample_seed=0, max_inner=4, max_rounds=8,
+                             max_draw_factor=50)
+
+
 def test_nested_converge_golden_hash():
     """Pin the committed M17 output bytes so any future change to the two-timescale generator
     cannot silently alter the data the committed gate results rest on."""

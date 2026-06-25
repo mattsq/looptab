@@ -424,7 +424,11 @@ behaviour-changing conclusions, and the next pointer. Append detail to LOG.md, n
   and `nested_converge` (**M17 Task C substrate**: a TWO-TIMESCALE fixed point — a ROUND = one SLOW
   outer full-ring `ca_step` then a full FAST inner relax (`_inner_relax` settles each block on its
   OWN ring); target = the JOINT fixed point of `round_ = inner_relax ∘ outer_step`, basin-rejection-
-  filtered like `mixed_converge`; locked instance inner_rule=13 / outer_rule=79 / block_w=8,
+  filtered like `mixed_converge` — **and the acceptance check requires INNER-STATIONARITY
+  (`_inner_stationary`), not just `round_(s)==s`** (a PR-review fix: a cycling inner rule whose period
+  divides `max_inner` can make the round map periodic at a non-fixed state; the locked inner=13/outer=79
+  is genuinely convergent so this is bit-identical — golden hash unchanged — and only hardens the filter
+  for arbitrary rule pairs); locked instance inner_rule=13 / outer_rule=79 / block_w=8,
   n_blocks∈{3,4} ⇒ w∈{24,32}; built for the §9.3 single-loop-insufficiency gate).
   Generators in `src/looptab/data/generators.py`, determinism-tested in
   `tests/test_generators.py`; `make_trajectory_dataset` dispatches iterated/converge/hopfield/
