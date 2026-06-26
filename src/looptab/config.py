@@ -160,6 +160,28 @@ class CurriculumConfig(BaseModel):
     T_max: int = 8
 
 
+class DiagnosticsConfig(BaseModel):
+    """Opt-in latent / weight introspection pass (M21). OFF by default = bit-identical.
+
+    When ``enabled``, the runner runs ``eval.introspection.run_introspection`` on each trained
+    arm over the first test batch and writes a side-car ``*_diagnostics.csv``. It is a *measurement-
+    only* layer: it reads the trained model with forward / autograd passes (the M7
+    ``init_state``/``return_state`` API + forward hooks), never perturbing training or any committed
+    metric (CLAUDE.md §5/§8). Diagnostics are per-arm descriptors; the deliverable reports them
+    across all arms and both anchor regimes (the contrast is the finding, never a lone loop number).
+    """
+
+    enabled: bool = False
+    # Over-unroll horizon = factor × the arm's trained n_steps (M1/M8 decay is read off the tail).
+    overunroll_factor: int = 4
+    # Random z0 inits for the path-independence / asymptotic-alignment probe (Anil 2022).
+    n_random_inits: int = 5
+    # Power-iteration steps for the Jacobian spectral-radius / operator-norm estimate.
+    power_iter_steps: int = 20
+    # Number of examples the (per-example) Jacobian spectrum is averaged over.
+    jac_n_examples: int = 8
+
+
 class ExperimentConfig(BaseModel):
     task: TaskConfig
     arms: list[ModelConfig]
@@ -168,6 +190,7 @@ class ExperimentConfig(BaseModel):
     grid: Optional[GridConfig] = None
     extrapolation: Optional[ExtrapolationConfig] = None
     curriculum: Optional[CurriculumConfig] = None
+    diagnostics: Optional[DiagnosticsConfig] = None
     # Pairs of arm labels to diff: [[recurrent, control], ...]. If omitted, every
     # non-last arm is diffed against the last arm (assumed to be the control).
     deltas: Optional[list[list[str]]] = None

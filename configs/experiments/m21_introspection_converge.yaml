@@ -1,0 +1,79 @@
+# M21 — Introspection on the `converge` fixed-point task (the regime where the loop WINS).
+#
+# Measurement-only (CLAUDE.md §8): no new model, no architectural change. Trains the standard
+# arm set, then runs the latent/weight introspection pass (eval.introspection) on each trained
+# arm and writes a `*_diagnostics.csv`. Paired with m21_introspection_iterated.yaml (same suite,
+# the regime where the loop's OPERATOR FAILS) — the converge-vs-iterated contrast is the finding.
+#
+# Anchor = converge rule 78, w=24 (the loop's clean EM-win cell, M9): the target is a genuine
+# multi-output FIXED POINT, so the hypothesis is that the loop is comparatively CONTRACTIVE here
+# (spectral radius ρ≲1, residual→0, high path-independence) — i.e. the coherence win is a settled
+# attractor, not a static deep-net circuit. Standard `train` (n_steps=6 fixed, final loss) so the
+# trained dynamics are the plain loop's, not a curriculum's.
+
+task:
+  name: converge
+  params:
+    T: 6
+    rule: 78
+    w: 24
+    distractors: 8
+  n_train: 4000
+  n_test: 1000
+  task_seed: 42
+  train_sample_seed: 1
+  test_sample_seed: 2
+
+arms:
+  - name: trm
+    label: trm
+    hidden_dim: 64
+    latent_dim: 64
+    n_steps: 6
+    deep_supervision: false
+    ds_mode: final
+  - name: trm_decoupled
+    label: trm_decoupled
+    hidden_dim: 64
+    latent_dim: 64
+    n_steps: 6
+    deep_supervision: false
+    ds_mode: final
+  - name: ff_matched
+    label: ff_matched
+    hidden_dim: 64
+    latent_dim: 64
+    n_steps: 6
+  - name: untied_matched
+    label: untied_matched
+    hidden_dim: 64
+    latent_dim: 64
+    n_steps: 6
+    deep_supervision: false
+    ds_mode: final
+
+deltas:
+  - [trm, trm_decoupled]   # leg-1 joint-state (anchor the accuracy story alongside the diagnostics)
+  - [trm, ff_matched]      # leg-2 loop-beats-the-MLP
+  - [trm, untied_matched]  # P1 tying
+
+budget_reference: trm
+budget_tol: 0.02
+
+diagnostics:
+  enabled: true
+  overunroll_factor: 4
+  n_random_inits: 5
+  power_iter_steps: 50   # ≥50 to curb the upward |λ_max| bias of power iteration on non-normal J
+  jac_n_examples: 8
+
+train:
+  epochs: 100
+  lr: 1e-3
+  weight_decay: 1e-4
+  batch_size: 256
+  device: cpu
+
+seeds: [0, 1, 2, 3, 4]
+parallel_workers: 4
+results_dir: results

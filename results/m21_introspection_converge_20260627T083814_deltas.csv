@@ -1,0 +1,10 @@
+config,delta,metric,delta_mean,delta_std,n_seeds,sign_pos,sign_neg,sign_p
+single,trm-trm_decoupled,accuracy,0.04829166666666664,0.02191490407994828,5,5,0,0.0625
+single,trm-trm_decoupled,exact_match,0.3332,0.09180250541243416,5,5,0,0.0625
+single,trm-trm_decoupled,coherence_excess,0.03131981533684297,0.009858865516199175,5,5,0,0.0625
+single,trm-ff_matched,accuracy,-0.0018666666666666831,0.0040436421289064255,5,1,4,0.375
+single,trm-ff_matched,exact_match,0.024800000000000023,0.03560477496067069,5,4,1,0.375
+single,trm-ff_matched,coherence_excess,0.045047125716854174,0.012740732979865695,5,5,0,0.0625
+single,trm-untied_matched,accuracy,0.024524999999999974,0.006157270431503469,5,5,0,0.0625
+single,trm-untied_matched,exact_match,0.2166,0.044724713526192665,5,5,0,0.0625
+single,trm-untied_matched,coherence_excess,0.009034695735403669,0.01785286720943196,5,3,2,1.0

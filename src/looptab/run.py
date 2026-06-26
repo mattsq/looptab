@@ -23,6 +23,7 @@ import yaml
 
 from .config import ExperimentConfig, ModelConfig
 from .data.dataset import make_loaders, make_splits, make_trajectory_dataset
+from .eval.introspection import run_introspection
 from .eval.metrics import (
     accuracy,
     delta_report,
@@ -240,7 +241,26 @@ def run_point(cfg: ExperimentConfig, task_params: dict, seed: int) -> tuple[dict
         results[arm.resolved_label()] = metrics
         models[arm.resolved_label()] = m
 
-    return results, models, _baselines(test_loader, want_exact_match=multi_output)
+    # M21: optional measurement-only introspection pass. Runs AFTER training on each trained
+    # model over a single fixed batch (the first test batch), so it cannot perturb any metric
+    # above; when `diagnostics` is unset the whole block is skipped → byte-identical to before.
+    diagnostics = {}
+    if cfg.diagnostics is not None and cfg.diagnostics.enabled:
+        Xb, yb = next(iter(test_loader))
+        Xb = Xb.to(device)
+        for arm in cfg.arms:
+            lbl = arm.resolved_label()
+            diagnostics[lbl] = run_introspection(
+                models[lbl],
+                (Xb, yb),
+                overunroll_factor=cfg.diagnostics.overunroll_factor,
+                n_random_inits=cfg.diagnostics.n_random_inits,
+                power_iter_steps=cfg.diagnostics.power_iter_steps,
+                jac_n_examples=cfg.diagnostics.jac_n_examples,
+                seed=seed,
+            )
+
+    return results, models, _baselines(test_loader, want_exact_match=multi_output), diagnostics
 
 
 def _std(xs: list[float]) -> float:
@@ -297,6 +317,36 @@ def _aggregate(per_seed: list[dict], labels: list[str]) -> dict:
                 "std": _std(vals),
                 "per_seed": vals,
             }
+    return out
+
+
+def _aggregate_diagnostics(per_seed: list[dict], labels: list[str]) -> dict:
+    """Mean/std (+ per-seed) of every *scalar* introspection metric, per arm across seeds (M21).
+
+    List-valued trajectories (e.g. the residual curve) are kept per-seed in the JSON record but
+    not reduced here — the CSV/summary report the scalar descriptors. Returns ``{}`` when the
+    seeds carry no diagnostics (the off path), so callers can treat it as 'no diagnostics ran'.
+    """
+    if not per_seed or "diagnostics" not in per_seed[0]:
+        return {}
+    out: dict = {}
+    for lbl in labels:
+        metrics = {}
+        # Union of scalar keys across seeds (recurrent arms carry Some keys controls don't).
+        keys = [
+            k
+            for k, v in per_seed[0]["diagnostics"].get(lbl, {}).items()
+            if isinstance(v, (int, float))
+        ]
+        for k in keys:
+            vals = [
+                s["diagnostics"][lbl][k]
+                for s in per_seed
+                if lbl in s.get("diagnostics", {}) and k in s["diagnostics"][lbl]
+            ]
+            if vals:
+                metrics[k] = {"mean": float(np.mean(vals)), "std": _std(vals), "per_seed": vals}
+        out[lbl] = metrics
     return out
 
 
@@ -360,8 +410,10 @@ def _compute_seed(
     ``(cfg, task_params, seed)``: ``run_point`` self-reseeds every arm, so parallel execution
     is bit-identical to serial (CLAUDE.md §5.3).
     """
-    r, models, baselines = run_point(cfg, task_params, seed)
+    r, models, baselines, diagnostics = run_point(cfg, task_params, seed)
     r_rec = {"seed": seed, "baseline": baselines["accuracy"], "baselines": baselines, **r}
+    if diagnostics:
+        r_rec["diagnostics"] = diagnostics
     seed_extrap = None
     if cfg.extrapolation is not None:
         seed_extrap = {}
@@ -504,12 +556,12 @@ def cv_sign_test_status(task_name: str, task_params: dict, seeds: list[int]) -> 
     """Whether the paired sign test is valid for ONE axis point, plus a human-readable reason.
 
     Synthetic tasks always qualify: each seed draws a fresh function + rows, so the per-seed Δs are
-    independent. Real ``multilabel`` qualifies ONLY under K-fold CV — i.e. ``n_folds`` is set AND the
-    selected seeds map to **distinct** folds (``fold = seed % n_folds``, the mapping `run_point` →
-    `make_multilabel_splits(fold=seed)` uses), so every per-seed Δ is on a DISJOINT, independent test
-    fold. It is suppressed when:
+    independent. Real ``multilabel`` qualifies ONLY under K-fold CV — i.e. ``n_folds`` is set AND
+    the selected seeds map to **distinct** folds (``fold = seed % n_folds``, the mapping `run_point`
+    → `make_multilabel_splits(fold=seed)` uses), so every per-seed Δ is on a DISJOINT, independent
+    test fold. It is suppressed when:
       - there is no ``n_folds`` (legacy random-split mode — successive test sets overlap ~0.30), or
-      - two selected seeds share a fold (``seed % n_folds`` collides, e.g. ``n_folds < len(seeds)``) —
+      - two selected seeds share a fold (``seed % n_folds`` collides, e.g. ``n_folds < len(seeds)``)
         then those per-seed Δs are on the SAME/overlapping test data, so a binomial p-value would be
         anti-conservative (the exact non-independence CV was meant to remove; M20 review).
     Computed from the **per-point** ``task_params`` (not the base config) so a sweep/grid that
@@ -668,6 +720,20 @@ def main():
                         arm_summaries.append(summary_str)
                     print(f"    Unroll R'={R:2d}:  " + "  ".join(arm_summaries))
 
+        # M21: aggregate the introspection descriptors (no-op when diagnostics are off).
+        diag_agg = _aggregate_diagnostics(per_seed, labels)
+        if diag_agg:
+            print("  --- diagnostics (mean over seeds) ---")
+            for lbl in labels:
+                dm = diag_agg.get(lbl, {})
+                bits = []
+                for k in ("spectral_radius_mean", "operator_norm_mean", "za_alignment",
+                          "acc_overunroll_drop", "effective_rank", "lipschitz_product"):
+                    if k in dm:
+                        bits.append(f"{k}={dm[k]['mean']:.3f}")
+                if bits:
+                    print(f"  {lbl:>16}: " + "  ".join(bits))
+
         points.append(
             {
                 "label": point_label,
@@ -675,6 +741,7 @@ def main():
                 "multi_output": multi_output,
                 "agg": agg,
                 "deltas": deltas,
+                "diagnostics": diag_agg,
                 "seeds": per_seed,
             }
         )
@@ -832,6 +899,21 @@ def main():
     print(f"\nResults : {json_path}")
     print(f"Curve   : {csv_path}")
     print(f"Deltas  : {deltas_csv_path}")
+
+    # M21: side-car introspection table — one row per (config, arm, diagnostic) with mean ± std
+    # across seeds. Written only when diagnostics ran (the off path skips it entirely).
+    if any(p.get("diagnostics") for p in points):
+        diag_csv_path = out_dir / f"{tag}_{stamp}_diagnostics.csv"
+        with open(diag_csv_path, "w", newline="") as f:
+            w = csv.writer(f)
+            w.writerow(["config", "arm", "metric", "mean", "std", "n_seeds"])
+            for p in points:
+                for lbl in labels:
+                    for metric, st in p.get("diagnostics", {}).get(lbl, {}).items():
+                        w.writerow(
+                            [p["label"], lbl, metric, st["mean"], st["std"], len(st["per_seed"])]
+                        )
+        print(f"Diag    : {diag_csv_path}")
 
     # Budget-parity audit (M3a confound guard): write the realized-param table and flag any
     # matched arm that drifted out of tolerance. `audit` was computed above for the run record.

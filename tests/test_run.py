@@ -74,7 +74,7 @@ def _cfg(**over):
 
 def test_run_point_returns_all_arms():
     cfg = _cfg()
-    out, models, baselines = run_point(cfg, cfg.task.params, seed=0)
+    out, models, baselines, _ = run_point(cfg, cfg.task.params, seed=0)
     assert set(out.keys()) == {"trm_ds", "trm_nods", "ff_matched"}
     for v in out.values():
         assert "accuracy" in v and "n_params" in v
@@ -86,7 +86,7 @@ def test_run_point_returns_all_arms():
 def test_exact_match_suppressed_for_single_output():
     """Parity is single-output: exact_match == accuracy, so it isn't reported."""
     cfg = _cfg()
-    out, _, _ = run_point(cfg, cfg.task.params, seed=0)
+    out, _, _, _ = run_point(cfg, cfg.task.params, seed=0)
     for v in out.values():
         assert "exact_match" not in v
 
@@ -174,8 +174,8 @@ def test_coherence_excess_dispersion_confound_m9():
 def test_run_point_deterministic():
     """C3/§5.3: same seed => identical metrics, bit for bit."""
     cfg = _cfg()
-    a, _, _ = run_point(cfg, cfg.task.params, seed=0)
-    b, _, _ = run_point(cfg, cfg.task.params, seed=0)
+    a, _, _, _ = run_point(cfg, cfg.task.params, seed=0)
+    b, _, _, _ = run_point(cfg, cfg.task.params, seed=0)
     for lbl in a:
         assert a[lbl]["accuracy"] == b[lbl]["accuracy"]
 
@@ -201,8 +201,8 @@ def test_arm_init_independent_of_order():
     cfg = _cfg()
     rev = _cfg()
     rev.arms = list(reversed(rev.arms))
-    out, _, _ = run_point(cfg, cfg.task.params, seed=0)
-    out_rev, _, _ = run_point(rev, rev.task.params, seed=0)
+    out, _, _, _ = run_point(cfg, cfg.task.params, seed=0)
+    out_rev, _, _, _ = run_point(rev, rev.task.params, seed=0)
     assert out["ff_matched"]["accuracy"] == out_rev["ff_matched"]["accuracy"]
     assert out["trm_ds"]["accuracy"] == out_rev["trm_ds"]["accuracy"]
 
@@ -211,8 +211,8 @@ def test_function_varies_across_seeds():
     """I1: different outer seeds use different task_seeds => different informative
     bits => the parity functions differ, so metrics generally differ across seeds."""
     cfg = _cfg()
-    s0, _, _ = run_point(cfg, cfg.task.params, seed=0)
-    s1, _, _ = run_point(cfg, cfg.task.params, seed=1)
+    s0, _, _, _ = run_point(cfg, cfg.task.params, seed=0)
+    s1, _, _, _ = run_point(cfg, cfg.task.params, seed=1)
     # At least one arm should land on a different accuracy (different function).
     assert any(s0[lbl]["accuracy"] != s1[lbl]["accuracy"] for lbl in s0)
 
@@ -221,7 +221,7 @@ def test_run_point_multi_output():
     cfg = _cfg()
     cfg.task.name = "iterated"
     cfg.task.params = {"w": 8, "T": 2, "rule": 90, "distractors": 2}
-    out, models, baselines = run_point(cfg, cfg.task.params, seed=0)
+    out, models, baselines, _ = run_point(cfg, cfg.task.params, seed=0)
     for lbl in out:
         assert "exact_match" in out[lbl]
         assert "accuracy" in out[lbl]
@@ -284,7 +284,7 @@ def test_grid_point_runs_factorial_with_overrides():
     cfg = _cfg(grid=dict(params={"k": [2, 3]}))
     for _, overrides in cfg.axis_points():
         params = {**cfg.task.params, **overrides}
-        out, _, _ = run_point(cfg, params, seed=0)
+        out, _, _, _ = run_point(cfg, params, seed=0)
         assert set(out.keys()) == {"trm_ds", "trm_nods", "ff_matched"}
 
 
@@ -362,7 +362,7 @@ def test_run_point_with_untied_stack_arm():
     """M2: the untied-stack control (§4b) is a first-class arm the runner trains."""
     cfg = _cfg()
     cfg.arms.append(_untied_arm(cfg))
-    out, models, _ = run_point(cfg, cfg.task.params, seed=0)
+    out, models, _, _ = run_point(cfg, cfg.task.params, seed=0)
     assert "untied_stack" in out
     assert out["untied_stack"]["accuracy"] >= 0.0
     # §4b: depth/compute-matched, not param-matched — it has more params than the loop.
@@ -384,7 +384,7 @@ def test_untied_matched_arm_is_param_matched_in_runner():
     """The clean control reports a param count close to the loop's (not ~4×)."""
     cfg = _cfg()
     cfg.arms.append(_untied_matched_arm(cfg))
-    out, _, _ = run_point(cfg, cfg.task.params, seed=0)
+    out, _, _, _ = run_point(cfg, cfg.task.params, seed=0)
     ratio = out["untied_matched"]["n_params"] / out["trm_nods"]["n_params"]
     assert 0.8 <= ratio <= 1.2, f"untied_matched/loop param ratio = {ratio:.3f}"
 
@@ -394,8 +394,8 @@ def test_untied_arms_deterministic():
     cfg = _cfg()
     cfg.arms.append(_untied_arm(cfg))
     cfg.arms.append(_untied_matched_arm(cfg))
-    a, _, _ = run_point(cfg, cfg.task.params, seed=0)
-    b, _, _ = run_point(cfg, cfg.task.params, seed=0)
+    a, _, _, _ = run_point(cfg, cfg.task.params, seed=0)
+    b, _, _, _ = run_point(cfg, cfg.task.params, seed=0)
     for lbl in ("untied_stack", "untied_matched"):
         assert a[lbl]["accuracy"] == b[lbl]["accuracy"]
 
@@ -407,7 +407,7 @@ def test_untied_stack_routed_as_fixed_depth_in_extrapolation():
     cfg.task.name = "iterated"
     cfg.task.params = {"w": 8, "T": 2, "rule": 90, "distractors": 2}
     cfg.arms.append(_untied_arm(cfg))
-    _, models, _ = run_point(cfg, cfg.task.params, seed=0)
+    _, models, _, _ = run_point(cfg, cfg.task.params, seed=0)
 
     from looptab.run import run_extrapolation_point
 
@@ -484,7 +484,7 @@ def test_couple_n_steps_sets_model_depth_to_T():
     )
     for _, overrides in cfg.axis_points():
         params = {**cfg.task.params, **overrides}
-        _, models, _ = run_point(cfg, params, seed=0)
+        _, models, _, _ = run_point(cfg, params, seed=0)
         T = overrides["T"]
         # Loop: n_steps coupled to T despite arm config saying 4.
         assert models["trm_nods"].n_steps == T
@@ -497,14 +497,14 @@ def test_couple_n_steps_absent_uses_static_n_steps():
     """Without coupling, depth stays at the per-arm n_steps (no silent override)."""
     cfg = _iter_cfg(grid=dict(params={"T": [3]}))
     params = {**cfg.task.params, "T": 3}
-    _, models, _ = run_point(cfg, params, seed=0)
+    _, models, _, _ = run_point(cfg, params, seed=0)
     assert models["trm_nods"].n_steps == 4  # the arm's static value, not T
 
 
 def test_train_accuracy_reported():
     """M3a diagnostic: train accuracy is captured per arm alongside test accuracy."""
     cfg = _iter_cfg(grid=dict(params={"T": [3]}), couple_n_steps_to_param="T")
-    out, _, _ = run_point(cfg, {**cfg.task.params, "T": 3}, seed=0)
+    out, _, _, _ = run_point(cfg, {**cfg.task.params, "T": 3}, seed=0)
     for lbl in out:
         assert "train_accuracy" in out[lbl]
         assert 0.0 <= out[lbl]["train_accuracy"] <= 1.0
@@ -580,7 +580,7 @@ def test_run_point_curriculum_trains_all_arms():
     cfg.arms[0].deep_supervision_weight = 1.0
     cfg.arms[0].ds_mode = "step_aligned"
     cfg.arms[0].label = "trm_stepDS"
-    out, models, _ = run_point(cfg, cfg.task.params, seed=0)
+    out, models, _, _ = run_point(cfg, cfg.task.params, seed=0)
     assert set(out.keys()) == {"trm_stepDS", "ff_matched", "untied_matched", "untied_stack"}
     for lbl in out:
         assert "accuracy" in out[lbl] and "train_accuracy" in out[lbl]
@@ -597,8 +597,8 @@ def test_run_point_curriculum_deterministic():
     cfg.task.params = {"w": 8, "T": 4, "rule": 30, "distractors": 2}
     cfg.arms[0].ds_mode = "step_aligned"
     cfg.arms[0].deep_supervision = True
-    a, _, _ = run_point(cfg, cfg.task.params, seed=0)
-    b, _, _ = run_point(cfg, cfg.task.params, seed=0)
+    a, _, _, _ = run_point(cfg, cfg.task.params, seed=0)
+    b, _, _, _ = run_point(cfg, cfg.task.params, seed=0)
     for lbl in a:
         assert a[lbl]["accuracy"] == b[lbl]["accuracy"]
 
@@ -610,7 +610,7 @@ def test_extrapolation_harness_determinism():
     cfg.task.name = "iterated"
     cfg.task.params = {"w": 8, "T": 2, "rule": 90, "distractors": 2}
 
-    out_main, models, baseline_main = run_point(cfg, cfg.task.params, seed=0)
+    out_main, models, baseline_main, _ = run_point(cfg, cfg.task.params, seed=0)
 
     from looptab.run import run_extrapolation_point
 
