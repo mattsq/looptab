@@ -23,7 +23,13 @@ import yaml
 
 from .config import ExperimentConfig, ModelConfig
 from .data.dataset import make_loaders, make_splits, make_trajectory_dataset
-from .eval.metrics import accuracy, delta_report, evaluate, majority_baseline
+from .eval.metrics import (
+    accuracy,
+    delta_report,
+    evaluate,
+    majority_baseline,
+    subset_accuracy_baseline,
+)
 from .registry import get_model
 from .train.loop import train, train_curriculum, train_deep_supervision, train_progressive
 
@@ -64,7 +70,14 @@ def _build_model(
     return get_model(arm.name, **kwargs)
 
 
-def run_point(cfg: ExperimentConfig, task_params: dict, seed: int) -> tuple[dict, dict, float]:
+def _baselines(loader, *, want_exact_match: bool) -> dict[str, float]:
+    out = {"accuracy": majority_baseline(loader)}
+    if want_exact_match:
+        out["exact_match"] = subset_accuracy_baseline(loader)
+    return out
+
+
+def run_point(cfg: ExperimentConfig, task_params: dict, seed: int) -> tuple[dict, dict, dict]:
     """Train every arm for one (sweep-value, seed) point. Returns (results, models)."""
     task_cfg = cfg.task
 
@@ -80,6 +93,7 @@ def run_point(cfg: ExperimentConfig, task_params: dict, seed: int) -> tuple[dict
         test_sample_seed=task_cfg.test_sample_seed + seed * 100,
         n_train=task_cfg.n_train,
         n_test=task_cfg.n_test,
+        seed=seed,
     )
     train_loader, test_loader = make_loaders(train_ds, test_ds, cfg.train.batch_size)
 
@@ -200,8 +214,12 @@ def run_point(cfg: ExperimentConfig, task_params: dict, seed: int) -> tuple[dict
                 device=device,
             )
         # One forward pass over the test set yields both accuracy and (for multi-output
-        # Task B) exact-match; train accuracy is a separate pass.
-        test_metrics = evaluate(m, test_loader, device, want_exact_match=multi_output)
+        # Task B) exact-match; train accuracy is a separate pass. F1 is multilabel-only
+        # (M20) so synthetic-task evals stay byte-identical.
+        want_f1 = task_cfg.name == "multilabel"
+        test_metrics = evaluate(
+            m, test_loader, device, want_exact_match=multi_output, want_f1=want_f1
+        )
         metrics = {
             "accuracy": test_metrics["accuracy"],
             # Train accuracy is the M3a optimization-vs-capacity diagnostic: a loop that
@@ -215,10 +233,14 @@ def run_point(cfg: ExperimentConfig, task_params: dict, seed: int) -> tuple[dict
             # M9 coherence diagnostic (whole-row coherence vs raw token-acc); see eval.metrics.
             metrics["coherence_excess"] = test_metrics["coherence_excess"]
             metrics["mean_wrong_per_row"] = test_metrics["mean_wrong_per_row"]
+        if want_f1:
+            # M20: micro/macro-F1 — the honest co-headline to EM on imbalanced multi-label.
+            metrics["micro_f1"] = test_metrics["micro_f1"]
+            metrics["macro_f1"] = test_metrics["macro_f1"]
         results[arm.resolved_label()] = metrics
         models[arm.resolved_label()] = m
 
-    return results, models, majority_baseline(test_loader)
+    return results, models, _baselines(test_loader, want_exact_match=multi_output)
 
 
 def _std(xs: list[float]) -> float:
@@ -252,6 +274,11 @@ def _aggregate(per_seed: list[dict], labels: list[str]) -> dict:
             mwr = [s[lbl]["mean_wrong_per_row"] for s in per_seed]
             stats["mean_wrong_per_row_mean"] = float(np.mean(mwr))
             stats["mean_wrong_per_row_std"] = _std(mwr)
+        for f1k in ("micro_f1", "macro_f1"):  # M20 multilabel F1 (present only for that task)
+            if f1k in per_seed[0][lbl]:
+                vals = [s[lbl][f1k] for s in per_seed]
+                stats[f"{f1k}_mean"] = float(np.mean(vals))
+                stats[f"{f1k}_std"] = _std(vals)
         out[lbl] = stats
 
     if "baseline" in per_seed[0]:
@@ -261,6 +288,15 @@ def _aggregate(per_seed: list[dict], labels: list[str]) -> dict:
             "std": _std(baselines),
             "per_seed": baselines,
         }
+    if "baselines" in per_seed[0]:
+        out["baselines"] = {}
+        for metric in per_seed[0]["baselines"]:
+            vals = [s["baselines"][metric] for s in per_seed]
+            out["baselines"][metric] = {
+                "mean": float(np.mean(vals)),
+                "std": _std(vals),
+                "per_seed": vals,
+            }
     return out
 
 
@@ -272,7 +308,7 @@ def run_extrapolation_point(
     T_test: int,
     R_test_values: list[int],
     device: str,
-) -> tuple[dict, float]:
+) -> tuple[dict, dict]:
     """Evaluate trained models on a task with CA step length T_test, varying R_test."""
     task_cfg = cfg.task
     this_task_seed = task_cfg.task_seed + seed
@@ -289,6 +325,7 @@ def run_extrapolation_point(
         test_sample_seed=task_cfg.test_sample_seed + seed * 100,
         n_train=task_cfg.n_train,
         n_test=task_cfg.n_test,
+        seed=seed,
     )
     _, test_loader = make_loaders(test_ds, test_ds, cfg.train.batch_size)
     multi_output = test_ds.y.ndim > 1
@@ -311,7 +348,7 @@ def run_extrapolation_point(
             for R in R_test_values:
                 point_results[(lbl, R)] = metrics
 
-    return point_results, majority_baseline(test_loader)
+    return point_results, _baselines(test_loader, want_exact_match=multi_output)
 
 
 def _compute_seed(
@@ -323,8 +360,8 @@ def _compute_seed(
     ``(cfg, task_params, seed)``: ``run_point`` self-reseeds every arm, so parallel execution
     is bit-identical to serial (CLAUDE.md §5.3).
     """
-    r, models, baseline = run_point(cfg, task_params, seed)
-    r_rec = {"seed": seed, "baseline": baseline, **r}
+    r, models, baselines = run_point(cfg, task_params, seed)
+    r_rec = {"seed": seed, "baseline": baselines["accuracy"], "baselines": baselines, **r}
     seed_extrap = None
     if cfg.extrapolation is not None:
         seed_extrap = {}
@@ -366,7 +403,7 @@ def _compute_seeds(
 
 
 def _aggregate_extrapolation(
-    all_seed_extrap: list[tuple[dict, float]],
+    all_seed_extrap: list[tuple[dict, dict]],
     labels: list[str],
     T_values: list[int],
     R_values: list[int],
@@ -375,9 +412,17 @@ def _aggregate_extrapolation(
     agg = {}
     for T in T_values:
         agg[T] = {}
-        baselines = [seed_data[T][1] for seed_data in all_seed_extrap]
+        baseline_maps = [seed_data[T][1] for seed_data in all_seed_extrap]
+        baselines = [b["accuracy"] for b in baseline_maps]
         agg[T]["baseline_mean"] = float(np.mean(baselines))
         agg[T]["baseline_std"] = _std(baselines)
+        agg[T]["baselines"] = {
+            metric: {
+                "mean": float(np.mean([b[metric] for b in baseline_maps])),
+                "std": _std([b[metric] for b in baseline_maps]),
+            }
+            for metric in baseline_maps[0]
+        }
         for R in R_values:
             agg[T][R] = {}
             per_seed_acc = {}  # lbl -> per-seed accuracies, kept so cells can be paired-tested
@@ -473,6 +518,12 @@ def main():
 
     seeds = [args.seed] if args.seed is not None else cfg.seeds
     labels = [a.resolved_label() for a in cfg.arms]
+    # The paired sign test needs independent per-seed Δs. Synthetic tasks draw a fresh function +
+    # rows per seed, so they qualify. Real `multilabel` qualifies ONLY under K-fold CV (`n_folds`),
+    # where the per-seed test folds are DISJOINT; the legacy random-split mode's test sets overlap
+    # (~0.30), making the sign test anti-conservative (M20 review), so it is suppressed there.
+    multilabel_cv = cfg.task.name == "multilabel" and bool(cfg.task.params.get("n_folds"))
+    paired_sign_tests = cfg.task.name != "multilabel" or multilabel_cv
 
     # Outer axis: a single point, a 1-D `sweep` curve, or an N-D `grid` of configs.
     # Each entry is (human label, task-param overrides) — see ExperimentConfig.axis_points.
@@ -503,6 +554,16 @@ def main():
             f"  {'majority_baseline':>16}: "
             f"acc {agg['baseline']['mean']:.4f} ± {agg['baseline']['std']:.4f}"
         )
+        if "exact_match" in agg.get("baselines", {}):
+            b = agg["baselines"]["exact_match"]
+            print(f"  {'subset_baseline':>16}: EM  {b['mean']:.4f} ± {b['std']:.4f}")
+        if not paired_sign_tests:
+            print("  sign tests skipped: random real-data splits overlap and are not independent")
+        elif multilabel_cv:
+            print(
+                "  sign tests over DISJOINT K-fold test sets (train sets still overlap — "
+                "treat p as indicative, cf. Dietterich 1998)"
+            )
         for lbl in labels:
             a = agg[lbl]
             print(f"  {lbl:>16}: acc {a['accuracy_mean']:.4f} ± {a['accuracy_std']:.4f}")
@@ -517,6 +578,7 @@ def main():
                 [s[a]["accuracy"] for s in per_seed],
                 [s[b]["accuracy"] for s in per_seed],
                 label="accuracy",
+                paired_sign_test=paired_sign_tests,
             )
             deltas[f"{a}-{b}"] = {"accuracy": rep}
             line = f"  Δ({a} − {b}) = {rep['delta_mean']:+.4f} ± {rep['delta_std']:.4f}"
@@ -525,14 +587,28 @@ def main():
                     [s[a]["exact_match"] for s in per_seed],
                     [s[b]["exact_match"] for s in per_seed],
                     label="exact_match",
+                    paired_sign_test=paired_sign_tests,
                 )
                 deltas[f"{a}-{b}"]["exact_match"] = em_rep
                 line += f"  [EM {em_rep['delta_mean']:+.4f} ± {em_rep['delta_std']:.4f}]"
+                # M20: F1 is the honest co-headline on imbalanced multi-label (EM over-rewards
+                # modal label-combos). Δ on micro/macro-F1 reported with the same paired stats.
+                for f1k, tag in (("micro_f1", "miF1"), ("macro_f1", "maF1")):
+                    if f1k in per_seed[0][a]:
+                        f1_rep = delta_report(
+                            [s[a][f1k] for s in per_seed],
+                            [s[b][f1k] for s in per_seed],
+                            label=f1k,
+                            paired_sign_test=paired_sign_tests,
+                        )
+                        deltas[f"{a}-{b}"][f1k] = f1_rep
+                        line += f"  [{tag} {f1_rep['delta_mean']:+.4f} ± {f1_rep['delta_std']:.4f}]"
                 if "coherence_excess" in per_seed[0][a]:
                     ce_rep = delta_report(
                         [s[a]["coherence_excess"] for s in per_seed],
                         [s[b]["coherence_excess"] for s in per_seed],
                         label="coherence_excess",
+                        paired_sign_test=paired_sign_tests,
                     )
                     deltas[f"{a}-{b}"]["coherence_excess"] = ce_rep
                     line += f"  [coh {ce_rep['delta_mean']:+.4f} ± {ce_rep['delta_std']:.4f}]"
@@ -619,6 +695,9 @@ def main():
                     0,
                 ]
             )
+            if "exact_match" in p["agg"].get("baselines", {}):
+                b = p["agg"]["baselines"]["exact_match"]
+                w.writerow([p["label"], "baseline", "exact_match", b["mean"], b["std"], 0])
             for lbl in labels:
                 a = p["agg"][lbl]
                 w.writerow(
@@ -653,6 +732,18 @@ def main():
                             a["n_params"],
                         ]
                     )
+                for f1k in ("micro_f1", "macro_f1"):  # M20 multilabel F1 co-headline
+                    if f"{f1k}_mean" in a:
+                        w.writerow(
+                            [
+                                p["label"],
+                                lbl,
+                                f1k,
+                                a[f"{f1k}_mean"],
+                                a[f"{f1k}_std"],
+                                a["n_params"],
+                            ]
+                        )
                 if "coherence_excess_mean" in a:
                     w.writerow(
                         [
@@ -696,7 +787,7 @@ def main():
         for p in points:
             for pair, reps in p["deltas"].items():
                 for metric, rep in reps.items():
-                    st = rep.get("sign_test", {})
+                    st = rep.get("sign_test") or {}
                     w.writerow(
                         [
                             p["label"],
@@ -785,6 +876,9 @@ def main():
                         extrap_results[T]["baseline_std"],
                     ]
                 )
+                if "exact_match" in extrap_results[T].get("baselines", {}):
+                    b = extrap_results[T]["baselines"]["exact_match"]
+                    w.writerow([T, 0, "baseline", "exact_match", b["mean"], b["std"]])
                 for R in cfg.extrapolation.R_values:
                     for lbl in labels:
                         stats = extrap_results[T][R][lbl]
@@ -823,7 +917,7 @@ def main():
             for T in cfg.extrapolation.T_values:
                 for R in cfg.extrapolation.R_values:
                     for pair, rep in extrap_results[T][R].get("_deltas", {}).items():
-                        st = rep.get("sign_test", {})
+                        st = rep.get("sign_test") or {}
                         w.writerow(
                             [
                                 T,

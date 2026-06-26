@@ -37,12 +37,49 @@ def exact_match(model: nn.Module, loader: DataLoader, device: str = "cpu", **kwa
     return float((preds == targets).all(axis=-1).mean())
 
 
+def multilabel_f1(preds: np.ndarray, targets: np.ndarray) -> dict:
+    """Micro- and macro-averaged F1 over labels for a multi-label binary task (positive = 1).
+
+    The standard metrics for multi-label classification — added in M20 because subset accuracy
+    (EM) on imbalanced multi-label data rewards getting the *frequent* label-combinations exactly
+    right, so an arm can win EM while being *worse* per-label. F1 is the honest co-headline:
+      - **micro** pools all per-label decisions (frequency-weighted; dominated by common labels).
+      - **macro** averages the per-label F1 (every label counts equally; surfaces rare labels).
+    Zero-division is treated as F1=0 for that label (the sklearn ``zero_division=0`` convention) — a
+    label with no predicted-and-no-true positives in the slice contributes 0, not NaN.
+    ``preds``/``targets`` are ``(N, L)`` arrays of {0,1}; for single-output (1-D) F1 is undefined,
+    so this returns zeros (callers gate on multi-output).
+    """
+    if targets.ndim == 1:
+        return {"micro_f1": 0.0, "macro_f1": 0.0}
+    p = preds.astype(bool)
+    t = targets.astype(bool)
+    tp = (p & t).sum(axis=0).astype(np.float64)  # per-label
+    fp = (p & ~t).sum(axis=0).astype(np.float64)
+    fn = (~p & t).sum(axis=0).astype(np.float64)
+
+    def _f1(tp_, fp_, fn_):
+        # Safe divide: F1=0 where the denominator is 0 (zero_division=0), without evaluating the
+        # division there (np.where would, emitting a divide warning).
+        num = 2 * tp_
+        denom = 2 * tp_ + fp_ + fn_
+        denom = np.asarray(denom, dtype=np.float64)
+        out = np.zeros_like(denom)
+        np.divide(num, denom, out=out, where=denom > 0)
+        return out
+
+    macro = float(np.mean(_f1(tp, fp, fn)))
+    micro = float(_f1(np.atleast_1d(tp.sum()), np.atleast_1d(fp.sum()), np.atleast_1d(fn.sum()))[0])
+    return {"micro_f1": micro, "macro_f1": macro}
+
+
 def evaluate(
     model: nn.Module,
     loader: DataLoader,
     device: str = "cpu",
     *,
     want_exact_match: bool = False,
+    want_f1: bool = False,
     **kwargs,
 ) -> dict:
     """Accuracy (and optional exact-match) from a *single* forward pass over ``loader``.
@@ -82,6 +119,11 @@ def evaluate(
             token_acc = out["accuracy"]
             out["coherence_excess"] = out["exact_match"] - float(token_acc**w_out)
             out["mean_wrong_per_row"] = float((~correct).sum(axis=-1).mean())
+    # M20: micro/macro-F1 — the standard multi-label metrics, the honest co-headline to EM (which
+    # over-rewards modal label-combinations). Gated by `want_f1` (set only for the multilabel task)
+    # so every synthetic-task eval is byte-identical to before.
+    if want_f1 and targets.ndim > 1:
+        out.update(multilabel_f1(preds, targets))
     return out
 
 
@@ -97,6 +139,31 @@ def majority_baseline(loader: DataLoader) -> float:
     if len(counts) == 0:
         return 0.0
     return float(np.max(counts) / targets.size)
+
+
+def subset_accuracy_baseline(loader: DataLoader) -> float:
+    """Frequency of the single most common whole-row labelset (the EM a best *constant*-row
+    predictor scores). The exact-match analogue of ``majority_baseline``, and the honest degeneracy
+    tripwire for multi-label data (M20): per-token ``majority_baseline`` is inflated by label
+    sparsity — predicting all-zeros scores high token-accuracy — whereas subset accuracy (= EM) is
+    what the §9.2 coherence finding is about, so its constant-predictor floor is the right
+    reference.
+
+    For single-output (1-D) targets this reduces exactly to ``majority_baseline`` (the most-common
+    class).
+    """
+    targets = []
+    for _, y in loader:
+        targets.append(y.numpy())
+    if not targets:
+        return 0.0
+    targets = np.concatenate(targets)
+    if targets.ndim == 1:
+        _, counts = np.unique(targets, return_counts=True)
+        return float(np.max(counts) / len(targets)) if len(counts) else 0.0
+    # Most common whole row: hash each row to a tuple and count.
+    rows, counts = np.unique(targets, axis=0, return_counts=True)
+    return float(np.max(counts) / targets.shape[0]) if len(counts) else 0.0
 
 
 def _binom_two_sided_p(k: int, n: int) -> float:
@@ -138,10 +205,12 @@ def delta_report(
     recurrent_scores: list[float],
     control_scores: list[float],
     label: str = "accuracy",
+    *,
+    paired_sign_test: bool = True,
 ) -> dict:
     """
     Compute Δ = recurrent − control over multiple seeds.
-    Returns mean, sample std (ddof=1), per-seed values, and a paired sign test.
+    Returns mean, sample std (ddof=1), per-seed values, and optionally a paired sign test.
     """
     r = np.array(recurrent_scores)
     c = np.array(control_scores)
@@ -150,7 +219,7 @@ def delta_report(
     def _std(x):
         return float(np.std(x, ddof=1)) if len(x) > 1 else 0.0
 
-    return {
+    out = {
         "recurrent_mean": float(r.mean()),
         "recurrent_std": _std(r),
         "control_mean": float(c.mean()),
@@ -160,7 +229,12 @@ def delta_report(
         "recurrent_per_seed": r.tolist(),
         "control_per_seed": c.tolist(),
         "delta_per_seed": delta.tolist(),
-        "sign_test": sign_test(delta.tolist()),
         "label": label,
         "n_seeds": len(r),
     }
+    if paired_sign_test:
+        out["sign_test"] = sign_test(delta.tolist())
+    else:
+        out["sign_test"] = None
+        out["sign_test_note"] = "not_run_non_independent_splits"
+    return out

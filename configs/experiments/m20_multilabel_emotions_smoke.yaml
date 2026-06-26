@@ -1,0 +1,81 @@
+# M20 (smoke) — Real-tabular bridge, tiny-first tripwire on `emotions`.
+# The first real (downloaded, vendored) dataset in the project (§9.4). Multi-label music-emotion
+# classification: 593 rows, 72 continuous audio features, 6 correlated labels (label cardinality
+# 1.87). Purpose here is PIPELINE bring-up: confirm the vendored loader, the standardized-feature
+# path, and the existing arm/Δ/budget machinery all run and that every arm trains above the
+# subset-accuracy (EM) floor. The yeast config is the headline; this is the cheap tripwire.
+#
+# The §9.2 finding being ported: tied recurrence with a JOINT latent buys whole-row COHERENCE.
+# Here EM = subset accuracy (whole labelset correct) is that coherence metric, and `trm_decoupled`
+# (per-label latents) is literally binary-relevance — so Δ(trm − trm_decoupled) on EM tests whether
+# joint-state coherence survives off-synthetic. HONEST PRIOR (§8): leg-1 needed local+deep structure
+# (null on dense M13 / shallow M14), which generic tabular lacks, so a null is a legitimate result.
+
+task:
+  name: multilabel
+  params:
+    dataset: emotions
+    n_folds: 10          # 10-fold CV: seeds 0..9 = the 10 DISJOINT test folds (M20-review fix —
+    cv_seed: 0           # the old random 70/30 splits overlapped ~0.30, breaking the sign test)
+    standardize: true
+  n_train: 4000          # non-binding caps; each fold uses ~534 train / ~59 test of 593 rows
+  n_test: 1000
+  task_seed: 42          # un-offset; the K-fold partition is keyed on cv_seed, seed = fold index
+  train_sample_seed: 1   # unused by the multilabel split, kept for schema
+  test_sample_seed: 2
+
+arms:
+  - name: trm
+    label: trm                 # joint loop, final loss (budget reference) — the §9.2 leg-1 arm
+    hidden_dim: 64
+    latent_dim: 64
+    n_steps: 6
+    deep_supervision: false
+    ds_mode: final
+  - name: trm_decoupled
+    label: trm_decoupled       # per-LABEL refinement = binary-relevance — THE joint-state ablation
+    hidden_dim: 64
+    latent_dim: 64
+    n_steps: 6
+    deep_supervision: false
+    ds_mode: final
+  - name: ff_matched
+    label: ff_matched          # §4a param-matched shallow JOINT MLP
+    hidden_dim: 64
+    latent_dim: 64
+    n_steps: 6
+  - name: untied_matched
+    label: untied_matched      # §4b fair (width-shrunk) untied stack — the clean tying control
+    hidden_dim: 64
+    latent_dim: 64
+    n_steps: 6
+    deep_supervision: false
+    ds_mode: final
+  - name: untied_stack
+    label: untied_stack        # labelled non-param-matched ceiling (~n_steps× params), exempt
+    hidden_dim: 64
+    latent_dim: 64
+    n_steps: 6
+    deep_supervision: false
+    ds_mode: final
+
+deltas:
+  - [trm, trm_decoupled]       # THE headline: joint-state coherence vs binary-relevance (leg-1)
+  - [trm, ff_matched]          # loop vs shallow joint MLP (leg-2-style)
+  - [trm, untied_matched]      # P1 tying-positive
+  - [trm_decoupled, ff_matched]  # does the binary-relevance loop still beat the shallow MLP?
+
+budget_reference: trm
+budget_ceiling: [untied_stack]
+budget_tol: 0.02
+
+train:
+  epochs: 300
+  lr: 1e-3
+  weight_decay: 1e-4
+  batch_size: 128
+  device: cpu
+
+seeds: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
+parallel_workers: 4
+results_dir: results

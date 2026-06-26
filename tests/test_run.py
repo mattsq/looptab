@@ -7,7 +7,7 @@ import torch
 import yaml
 
 from looptab.config import ExperimentConfig
-from looptab.eval.metrics import evaluate
+from looptab.eval.metrics import delta_report, evaluate
 from looptab.run import budget_audit, run_point
 
 
@@ -52,12 +52,13 @@ def _cfg(**over):
 
 def test_run_point_returns_all_arms():
     cfg = _cfg()
-    out, models, baseline = run_point(cfg, cfg.task.params, seed=0)
+    out, models, baselines = run_point(cfg, cfg.task.params, seed=0)
     assert set(out.keys()) == {"trm_ds", "trm_nods", "ff_matched"}
     for v in out.values():
         assert "accuracy" in v and "n_params" in v
     assert set(models.keys()) == {"trm_ds", "trm_nods", "ff_matched"}
-    assert 0.0 <= baseline <= 1.0
+    assert set(baselines) == {"accuracy"}
+    assert 0.0 <= baselines["accuracy"] <= 1.0
 
 
 def test_exact_match_suppressed_for_single_output():
@@ -198,12 +199,24 @@ def test_run_point_multi_output():
     cfg = _cfg()
     cfg.task.name = "iterated"
     cfg.task.params = {"w": 8, "T": 2, "rule": 90, "distractors": 2}
-    out, models, baseline = run_point(cfg, cfg.task.params, seed=0)
+    out, models, baselines = run_point(cfg, cfg.task.params, seed=0)
     for lbl in out:
         assert "exact_match" in out[lbl]
         assert "accuracy" in out[lbl]
         assert out[lbl]["accuracy"] >= 0.0
-    assert 0.0 <= baseline <= 1.0
+    assert set(baselines) == {"accuracy", "exact_match"}
+    assert 0.0 <= baselines["accuracy"] <= 1.0
+    assert 0.0 <= baselines["exact_match"] <= 1.0
+
+
+def test_delta_report_can_skip_sign_test_for_non_independent_splits():
+    rep = delta_report(
+        [0.2, 0.3, 0.4],
+        [0.1, 0.2, 0.3],
+        paired_sign_test=False,
+    )
+    assert rep["sign_test"] is None
+    assert rep["sign_test_note"] == "not_run_non_independent_splits"
 
 
 def test_axis_points_single():
@@ -545,7 +558,7 @@ def test_run_point_curriculum_trains_all_arms():
     cfg.arms[0].deep_supervision_weight = 1.0
     cfg.arms[0].ds_mode = "step_aligned"
     cfg.arms[0].label = "trm_stepDS"
-    out, models, baseline = run_point(cfg, cfg.task.params, seed=0)
+    out, models, _ = run_point(cfg, cfg.task.params, seed=0)
     assert set(out.keys()) == {"trm_stepDS", "ff_matched", "untied_matched", "untied_stack"}
     for lbl in out:
         assert "accuracy" in out[lbl] and "train_accuracy" in out[lbl]
