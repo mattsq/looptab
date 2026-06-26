@@ -8,7 +8,29 @@ import yaml
 
 from looptab.config import ExperimentConfig
 from looptab.eval.metrics import delta_report, evaluate
-from looptab.run import budget_audit, run_point
+from looptab.run import budget_audit, cv_sign_test_status, run_point
+
+
+def test_cv_sign_test_status_gates_on_unique_folds():
+    # Synthetic tasks always qualify (fresh function + rows per seed).
+    ok, _ = cv_sign_test_status("converge", {}, [0, 1, 2, 3, 4])
+    assert ok
+    # multilabel random-split mode (no n_folds) — overlapping test sets, suppressed.
+    ok, why = cv_sign_test_status("multilabel", {"dataset": "yeast"}, list(range(10)))
+    assert not ok and "overlap" in why
+    # multilabel 10-fold CV with seeds 0..9 → each on a distinct disjoint fold → valid.
+    ok, why = cv_sign_test_status("multilabel", {"n_folds": 10}, list(range(10)))
+    assert ok and "DISJOINT" in why
+    # COLLISION 1: more seeds than folds (seed 0 and 10 both → fold 0) → suppressed.
+    ok, why = cv_sign_test_status("multilabel", {"n_folds": 10}, list(range(11)))
+    assert not ok and "collide" in why
+    # COLLISION 2: n_folds < #seeds → guaranteed collisions → suppressed.
+    ok, _ = cv_sign_test_status("multilabel", {"n_folds": 5}, list(range(10)))
+    assert not ok
+    # PER-POINT params win over any base config: a grid cell that overrode n_folds away is honoured
+    # here because the gate reads the passed task_params, not cfg.task.params.
+    ok, _ = cv_sign_test_status("multilabel", {"n_folds": 4}, [0, 1, 2, 3])
+    assert ok
 
 
 def _cfg(**over):

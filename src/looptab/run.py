@@ -500,6 +500,40 @@ def budget_audit(points: list[dict], labels: list[str], cfg: ExperimentConfig) -
     return {"rows": rows, "breaches": breaches, "tol": tol, "reference": ref}
 
 
+def cv_sign_test_status(task_name: str, task_params: dict, seeds: list[int]) -> tuple[bool, str]:
+    """Whether the paired sign test is valid for ONE axis point, plus a human-readable reason.
+
+    Synthetic tasks always qualify: each seed draws a fresh function + rows, so the per-seed Δs are
+    independent. Real ``multilabel`` qualifies ONLY under K-fold CV — i.e. ``n_folds`` is set AND the
+    selected seeds map to **distinct** folds (``fold = seed % n_folds``, the mapping `run_point` →
+    `make_multilabel_splits(fold=seed)` uses), so every per-seed Δ is on a DISJOINT, independent test
+    fold. It is suppressed when:
+      - there is no ``n_folds`` (legacy random-split mode — successive test sets overlap ~0.30), or
+      - two selected seeds share a fold (``seed % n_folds`` collides, e.g. ``n_folds < len(seeds)``) —
+        then those per-seed Δs are on the SAME/overlapping test data, so a binomial p-value would be
+        anti-conservative (the exact non-independence CV was meant to remove; M20 review).
+    Computed from the **per-point** ``task_params`` (not the base config) so a sweep/grid that
+    overrides ``n_folds`` is honoured.
+    """
+    if task_name != "multilabel":
+        return True, "independent (fresh function + rows per seed)"
+    n_folds = task_params.get("n_folds")
+    if not n_folds:
+        return False, "random real-data splits overlap and are not independent"
+    folds = [s % int(n_folds) for s in seeds]
+    if len(set(folds)) != len(folds):
+        return (
+            False,
+            f"selected seeds map to {len(set(folds))} distinct fold(s) of {len(folds)} seeds "
+            f"(seed % n_folds collides; need n_folds ≥ #seeds with distinct residues)",
+        )
+    return (
+        True,
+        "DISJOINT K-fold test sets (train sets still overlap — treat p as indicative, "
+        "cf. Dietterich 1998)",
+    )
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", required=True)
@@ -518,12 +552,6 @@ def main():
 
     seeds = [args.seed] if args.seed is not None else cfg.seeds
     labels = [a.resolved_label() for a in cfg.arms]
-    # The paired sign test needs independent per-seed Δs. Synthetic tasks draw a fresh function +
-    # rows per seed, so they qualify. Real `multilabel` qualifies ONLY under K-fold CV (`n_folds`),
-    # where the per-seed test folds are DISJOINT; the legacy random-split mode's test sets overlap
-    # (~0.30), making the sign test anti-conservative (M20 review), so it is suppressed there.
-    multilabel_cv = cfg.task.name == "multilabel" and bool(cfg.task.params.get("n_folds"))
-    paired_sign_tests = cfg.task.name != "multilabel" or multilabel_cv
 
     # Outer axis: a single point, a 1-D `sweep` curve, or an N-D `grid` of configs.
     # Each entry is (human label, task-param overrides) — see ExperimentConfig.axis_points.
@@ -535,6 +563,10 @@ def main():
     for point_label, overrides in axis_points:
         task_params = copy.deepcopy(cfg.task.params)
         task_params.update(overrides)
+        # Gate the paired sign test PER POINT, from the actual (possibly grid-overridden) params and
+        # the selected seeds: only emit binomial p-values when every seed lands on a distinct,
+        # disjoint test fold (see cv_sign_test_status). Otherwise report Δ ± std without a p-value.
+        paired_sign_tests, sign_reason = cv_sign_test_status(cfg.task.name, task_params, seeds)
         print(f"\n=== {point_label} ===")
 
         per_seed = []
@@ -557,13 +589,8 @@ def main():
         if "exact_match" in agg.get("baselines", {}):
             b = agg["baselines"]["exact_match"]
             print(f"  {'subset_baseline':>16}: EM  {b['mean']:.4f} ± {b['std']:.4f}")
-        if not paired_sign_tests:
-            print("  sign tests skipped: random real-data splits overlap and are not independent")
-        elif multilabel_cv:
-            print(
-                "  sign tests over DISJOINT K-fold test sets (train sets still overlap — "
-                "treat p as indicative, cf. Dietterich 1998)"
-            )
+        if cfg.task.name == "multilabel":
+            print(f"  sign tests {'over' if paired_sign_tests else 'skipped:'} {sign_reason}")
         for lbl in labels:
             a = agg[lbl]
             print(f"  {lbl:>16}: acc {a['accuracy_mean']:.4f} ± {a['accuracy_std']:.4f}")
