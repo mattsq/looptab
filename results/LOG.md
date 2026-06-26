@@ -2531,3 +2531,160 @@ real tabular — under proper eval, it does not.) Canonical tracked summaries (1
 (215858/221303) are superseded; their numbers are retained verbatim in the M20 body above for the audit trail.
 (NB: the `coherence_excess` rows in every deltas CSV are the M9-flagged **per-arm descriptor** — their
 cross-arm Δ is Jensen/dispersion-confounded and is **not** evidence; the verdict rests on EM and F1 only.)
+
+---
+
+## M21 — DONE. Latent / weight INTROSPECTION substrate, run on both anchor regimes. The trained loop does NOT settle a latent fixed point even where it WINS — "dressed-up depth" is now MEASURED, not inferred; the win-vs-fail contrast lives in path-independence, not contraction.
+
+Measurement-only milestone (CLAUDE.md §8): **no new model, no architectural change.** M0–M20
+characterized *what* the loop buys behaviourally; the signature pathology ("the loop does not
+settle a stable step operator; over-unrolling R'>R decays toward baseline", M1/M3b/M7/M8) had
+only ever been read off accuracy curves. M21 builds an introspection layer that instruments the
+*dynamics* directly, and runs the identical suite on the loop's WIN regime (`converge` rule 78,
+w24 — a genuine multi-output fixed-point target) and its FAIL regime (`iterated` rule 30, w9 — a
+non-convergent chaotic CA), so the **converge-vs-iterated contrast is the finding**.
+
+**Literature instruments (mapped to this repo's open questions; CLAUDE.md §12 additions):**
+Jacobian spectral radius ρ(∂z_{t+1}/∂z_t) at the over-unrolled state (DEQ Jacobian-regularization —
+Bai/Koltun/Kolter 2021 arXiv 2106.14342: ρ<1 ⇒ contractive/extrapolation-friendly, ρ≥1 ⇒ the
+over-unroll decay we see; an optional newer looped-LM template, "STARS" arXiv 2605.26733, found via
+web search, is supplementary — its 2026 ID is offline-unverifiable, so the argument rests on the
+2106.14342 / 2410.23451 / 2211.09961 refs), estimated by power iteration on autograd JVP/VJP; path independence /
+asymptotic alignment (Anil 2022 arXiv 2211.09961: same attractor regardless of init ⇒ correlates
+with upward generalization); fixed-point residual trajectory + orbits (Geiping 2025
+arXiv 2502.05171); effective rank / participation ratio (representational collapse); weight
+spectral norms / Lipschitz product (Rethinking Deep Thinking arXiv 2410.23451).
+
+**Substrate (additive, off-by-default → all M0–M20 results bit-identical; touches NO model code).**
+`src/looptab/eval/introspection.py`: six diagnostics + a `run_introspection` dispatcher
+(recurrent arms get Families A+B+C; controls get B+C). It rides the existing M7
+`init_state`/`return_state` resumable-rollout API (bit-identical stepwise composition) and forward
+hooks — so it reads the trained model without perturbing any metric. `DiagnosticsConfig`
+(`config.py`, off by default) gates a post-training pass in `run_point` that writes a side-car
+`*_diagnostics.csv`. Determinism + known-answer tests in `tests/test_introspection.py` (spectral
+radius of a diagonal/non-symmetric matrix ≈ |λ_max|; effective rank of an isotropic batch ≈ D, of
+a rank-1 batch ≈ 1; same seed → identical numbers). 213 tests, ruff clean. (Implementation note:
+the plan sketched adding a `return_trajectory` flag to `TRM.forward`; the existing
+`init_state`/`return_state` API already gives bit-identical resumable rollouts, so the layer was
+built with **zero model-file edits** — strictly lower-risk, and the off path is byte-identical by
+construction.) Configs `m21_introspection_{converge,iterated}.yaml`; tracked summaries
+`results/m21_introspection_converge_20260627T083814_*` and
+`results/m21_introspection_iterated_20260627T083602_*` (5 seeds each; arms trm / trm_decoupled /
+ff_matched / untied_matched, standard `train`, 100 epochs).
+
+**Accuracy anchors (5 seeds — INDICATIVE ONLY, not significance calls; the point of these runs is
+the diagnostics, not a new Δ).** At 5 seeds the exact binomial **cannot** reach p<0.05 (§5: 5/5 →
+p=0.0625), so these merely confirm the loop behaves on these regimes *as the already-established
+legs predict* (leg-1 = M10–M12, P1 = M8c/M9, leg-2 = M15c, all at ≥10 seeds). They are NOT a fresh
+demonstration of the legs. Per-seed sign tests below:
+
+| regime | Δ(trm−decoupled) EM (p) | Δ(trm−ff) EM (acc) | Δ(trm−untied) EM (p) |
+|---|---|---|---|
+| converge (win) | +0.333 (5/5, p=.0625) | +0.025 (acc −0.002, 4/1 ns) | +0.217 (5/5, p=.0625) |
+| iterated (fail) | +0.192 (5/5, p=.0625) | +0.030 (acc +0.001, ns) | +0.625 (5/5, p=.0625) |
+
+**The diagnostics — trm, mean over 5 seeds (horizon = 4× trained depth; ρ/σ at power_iter_steps=50).**
+NB the ρ *magnitude* is power-iteration on a non-normal Jacobian and is mildly upper-biased at finite
+k (one-directional, so **ρ>1 is conservative**); it is robust here — raising k 20→50 moved trm ρ only
+2.34→2.38 (converge) / 2.94→2.95 (iterated). Treat ρ magnitudes / cross-regime ordering as approximate;
+only the qualitative **ρ>1 / σ≫1 in both** is load-bearing.
+
+| diagnostic | converge (WIN) | iterated (FAIL) | reading |
+|---|---|---|---|
+| spectral_radius ρ (mean / max) | 2.38 / 2.52 | 2.95 / 4.24 | **ρ>1 in BOTH** — locally expanding map |
+| operator_norm σ_max (mean) | 2.66 | 5.68 | σ_max≫1 in both (not a 2-norm contraction) |
+| frac_expanding (ρ>1) | **1.00** | **1.00** | every example expanding, both regimes |
+| residual ‖Δz‖/‖z‖ @ trained / overunroll | 1.24 / 1.29 | 1.29 / **1.75** | latent NEVER settles (≫0); flat vs **growing** |
+| acc @ trained / overunroll | 0.967 / 0.636 | 0.971 / 0.511 | readout is depth-tuned; over-unroll decays |
+| EM @ trained / overunroll | 0.581 / 0.012 | 0.818 / 0.003 | whole-row answer **collapses** under over-unroll |
+| za_alignment (path independence) | **0.970** | **0.431** | the strongest WIN-vs-FAIL contrast (trm; see caveat) |
+| readout_agreement across inits | 0.316 | 0.001 | random inits rarely agree with EACH OTHER (not vs truth) |
+| effective_rank (n_dims) | 18.4 (64) | 28.6 (64) | joint latent compresses to a low-D code |
+| lipschitz_product | 6.50 | 27.2 | (untied: 98 426 / 49 187; ff: 79 / 233) |
+
+**Reading (per §8 — the honesty clause fires; the pre-registered hypothesis is FALSIFIED, and the
+falsification is the result).**
+
+1. **The trained loop does NOT settle a latent fixed point — in EITHER regime, INCLUDING the one
+   where it wins.** The pre-registered hypothesis was "contractive on converge (ρ≲1, residual→0),
+   non-contractive on iterated." Instead the latent residual ‖z_{t+1}−z_t‖/‖z_t‖ ≈ **1.2–1.3 on
+   both** (the latent moves by *more than its own norm* every step — the opposite of convergence),
+   ρ>1 with **frac_expanding=1.0 on both**, and over-unrolling collapses the readout everywhere
+   (EM 0.58→0.01 converge, 0.82→0.003 iterated). (ρ is measured at the over-unrolled state, which is
+   *not* a fixed point — so it is a **local-amplification descriptor consistent with non-settling**,
+   not a textbook fixed-point-stability certificate; the non-settling itself is shown directly by the
+   residual ~1.2.) So the loop uses its N steps as a **fixed-depth
+   feedforward circuit whose readout is tuned to exactly the trained depth**, not as iteration
+   toward an attractor. This is **§8's "the loop trivially degenerates into a deep net" turned
+   into a measurement** — and it now holds *even on the convergent fixed-point target where the
+   loop beats its controls*. The §3 "loops ≈ algorithm steps, extrapolate by unrolling more"
+   picture is contradicted at the latent level, not just at the accuracy level (a stronger, more
+   mechanistic version of the M1/M8 null).
+
+2. **The strongest WIN-vs-FAIL contrast is PATH INDEPENDENCE, not contraction — but scope it to
+   `trm` and to n=5.** `za_alignment` (cosine of the deep-unrolled latent across random z0 inits)
+   for the loop is **0.97 ± 0.02 on converge vs 0.43 ± 0.12 on iterated**: on the convergent target
+   the map funnels random inits into a **shared, init-independent limit set** (a Geiping-style
+   *orbit*, not a fixed point — residual stays ~1.2, so it keeps moving) while on the chaotic CA it
+   does not. **Caveat (adversarial-review fix): this is NOT a clean discriminator across arms.** The
+   *other* winning arm, `trm_decoupled` (which also beats its controls on leg-1 at converge), has za
+   only **0.55 ± 0.29 (converge) vs 0.32 ± 0.16 (iterated)** — bands overlapping, separation weak.
+   So path-independence tracks the convergent-vs-chaotic *target* for the joint loop, but it is a
+   single n=5 descriptor with no sign test, and it does not cleanly co-vary with *winning*. Two
+   weaker contrasts agree for `trm`: over-unroll residual **flat on converge (1.24→1.29) but grows
+   on iterated (1.29→1.75)**, and milder over-unroll readout decay on converge (acc drop 0.33 vs
+   0.46). So the convergent target leaves a dynamical fingerprint *for the loop*, nothing stronger.
+
+3. **That dynamical fingerprint does NOT rescue the loop — consistent with the win being STATIC
+   (joint-state coherence), though M21 does not by itself ESTABLISH that.** Despite za 0.97 on
+   converge, `readout_agreement` is only **0.316** (0.001 iterated) — but note what this metric
+   measures: whether the *random-init unrolls argmax-agree with EACH OTHER* (introspection.py
+   `path_independence`), **not** whether they match the trained-trajectory answer or ground truth.
+   So it cannot, on its own, prove "the loop can't decode its own attractor"; high cosine za (0.97)
+   with low strict whole-row agreement (0.32, all w cells × 5 inits identical) is also what
+   near-decision-boundary readouts give. What M21 *does* show is that the loop is non-settling
+   (reading 1) and that its representation is a compressed shared code: the joint loop's final
+   latent has **effective rank ~18 of 64 dims**, whereas the per-cell `trm_decoupled` latent has
+   eff-rank ~66 of **1848 dims** (converge; ~54 of 621 iterated) — i.e. the joint state is far more
+   collapsed relative to its dimensionality. That is *consistent with* the §9.2 "coherent low-D code
+   in one shared latent" reading, and with the win being static, **but the causal 'static not
+   dynamical' verdict rests on the leg-1/leg-2 Δs of M9–M15c, not on these descriptors** — M21
+   corroborates, it does not independently prove it. (The eff-rank cross-arm comparison is itself
+   confounded by the 64-vs-1848 dim mismatch, so it is suggestive only.)
+
+4. **Family C — tying yields a far smoother map.** The tied loop's Lipschitz product (~6.5
+   converge / 27 iterated) is **three to four orders of magnitude** below the fair untied stack's
+   (98 426 / 49 187) and well under the shallow MLP's (79 / 233). Weight tying buys a much more
+   Lipschitz-controlled map at fixed budget — a static, weight-level correlate of P1 (the loop
+   beats the untied stack on coherence) and an instrument-level reason the untied stack is the
+   worst-behaved arm.
+
+**Architectural-refinement implication (the point of the milestone — handed to the next agent,
+NOT acted on here).** The diagnostics say the loop is non-contractive (ρ>1, residual non-vanishing)
+*by construction of how it was trained* (fixed-depth, final-loss). IF the goal is to make the loop
+actually *use* its recurrence (extrapolation / adaptive test-time compute — the capability the repo
+has repeatedly found ABSENT), the evidence points to a concrete, measurable lever: train the map to
+be contractive — **Jacobian-spectral-radius / Lipschitz regularization** (DEQ Jacobian-reg 2106.14342;
+Rethinking Deep Thinking 2410.23451) to push ρ<1, **path-independence-promoting** training (Anil
+2211.09961) to raise za→1, and a
+**fixed-point / convergent loss** (decode the attractor, not the trained-depth transient) to lift
+readout_agreement→1. M21 gives both the trigger (ρ>1, residual~1.2, readout_agreement 0.32 even on
+the win regime) and the target metrics. **Crucial honesty caveat (§8):** the loop currently *wins*
+(on coherence) **while** non-contractive, so forcing contraction is a bet on a *different*
+capability and may **trade away** the static coherence win — exactly the kind of confound this repo
+guards. So M21 does **not** mandate a stabilized arm; it characterizes the pathology, supplies the
+falsifiable target, and flags the risk. Building a `trm_stable` (spectral/Lipschitz-regularized)
+arm and re-running the depth-extrapolation harness is the natural, evidence-gated follow-up — to be
+judged against BOTH the extrapolation metric AND the coherence Δ it might cost.
+
+**Caveats.** (i) Standard-train (final-loss, fixed depth) is exactly the regime that *produces* a
+non-settling latent; a step-aligned-DS or progressive-loss-trained loop (M3b/M7) could show
+different dynamics — untested here, an obvious next probe. (ii) Two regimes / one size / one rule
+each; the suite is built to run anywhere (reuse on real-tabular M20 is one line). (iii) The
+representation-rank comparison across joint vs decoupled is confounded by differing n_dims (64 vs
+1848 converge / 621 iterated), so it is corroborative, not a clean Δ. (v) The accuracy anchors are
+5-seed (p≥0.0625; cannot clear §5's significance floor) — they confirm the loop behaves as the
+≥10-seed legs (M9–M15c) predict, they are not a fresh demonstration of those legs. (iv) Diagnostics
+are per-arm descriptors, not Δs with
+sign tests — they generate hypotheses for refinement (§8 "measure before building"), they do not
+themselves clear any gate.

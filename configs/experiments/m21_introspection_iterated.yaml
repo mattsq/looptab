@@ -1,0 +1,79 @@
+# M21 — Introspection on the `iterated` CA task (the regime where the loop's OPERATOR FAILS).
+#
+# The paired half of m21_introspection_converge.yaml: identical diagnostic suite, opposite regime.
+# `iterated` maps s0 → s_T of a chaotic CA (rule 30) — a NON-convergent target (s_{T+1}≠s_T, no
+# attractor), and the milestone record (M1/M3b) shows over-unrolling R'>R decays to baseline and
+# OOD depth collapses. Hypothesis: here the loop is comparatively NON-contractive (ρ≳1 / residual
+# does not vanish / low path-independence), measurably explaining why its coherence value (converge)
+# does not become a transferable step operator. If the loop looks identical on both regimes, that
+# is itself the finding (the win is not dynamical) — reported plainly (CLAUDE.md §8).
+#
+# Task identical to m1_iterated_extrapolation.yaml (rule 30, w=9, T=4, distractors 4); arm set
+# matched to the converge config so the cross-regime contrast is one-knob (the task).
+
+task:
+  name: iterated
+  params:
+    w: 9
+    T: 4
+    rule: 30
+    distractors: 4
+  n_train: 4000
+  n_test: 1000
+  task_seed: 42
+  train_sample_seed: 1
+  test_sample_seed: 2
+
+arms:
+  - name: trm
+    label: trm
+    hidden_dim: 64
+    latent_dim: 64
+    n_steps: 4
+    deep_supervision: false
+    ds_mode: final
+  - name: trm_decoupled
+    label: trm_decoupled
+    hidden_dim: 64
+    latent_dim: 64
+    n_steps: 4
+    deep_supervision: false
+    ds_mode: final
+  - name: ff_matched
+    label: ff_matched
+    hidden_dim: 64
+    latent_dim: 64
+    n_steps: 4
+  - name: untied_matched
+    label: untied_matched
+    hidden_dim: 64
+    latent_dim: 64
+    n_steps: 4
+    deep_supervision: false
+    ds_mode: final
+
+deltas:
+  - [trm, trm_decoupled]
+  - [trm, ff_matched]
+  - [trm, untied_matched]
+
+budget_reference: trm
+budget_tol: 0.02
+
+diagnostics:
+  enabled: true
+  overunroll_factor: 4
+  n_random_inits: 5
+  power_iter_steps: 50   # ≥50 to curb the upward |λ_max| bias of power iteration on non-normal J
+  jac_n_examples: 8
+
+train:
+  epochs: 100
+  lr: 1e-3
+  weight_decay: 1e-4
+  batch_size: 256
+  device: cpu
+
+seeds: [0, 1, 2, 3, 4]
+parallel_workers: 4
+results_dir: results
