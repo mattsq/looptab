@@ -384,9 +384,17 @@ hierarchy mandate.)
 ### 9.4 Still out of scope (rationale updated now that the synthetic story is clear)
 
 - **Real / downloaded datasets** (ARC, Sudoku, OpenML, Grinsztajn). The synthetic story is clear,
-  so the real-tabular bridge is now the *other* legitimate frontier — but it is a deliberate,
-  separately scoped step (port the joint-state-coherence finding to a real multi-output tabular
-  target, §4 control contract intact), **not** a casual download started mid-stream.
+  so the real-tabular bridge is the *other* legitimate frontier — a deliberate, separately scoped
+  step (port the joint-state-coherence finding to a real multi-output tabular target, §4 control
+  contract intact), **not** a casual download started mid-stream. **STARTED (M20) — and, properly
+  evaluated, the loop does NOT transfer:** a `multilabel` task on real `emotions`/`yeast` (vendored
+  network-free, §5). Under micro/macro-F1 + 10-fold CV, joint modeling beats binary-relevance (leg-1) but a
+  plain joint MLP gets that too, and every loop-SPECIFIC edge is EM-only and ties under F1 — so the synthetic
+  coherence value does not cross to real tabular as a *loop* property (§11(b)/LOG.md "M20 — PROPER
+  EVALUATION"). Confirmed on TWO large datasets with opposite coupling (`yeast` co-occurrence, `scene`
+  mutual-exclusion). The bridge machinery (F1 metric, K-fold CV) is built + reusable.
+  Downloads are confined to a one-time out-of-band fetch script; the *task path* stays network-free +
+  content-hash-guarded, so this does not relax §5's "no network in the task path."
 - **No RL extension. No large models. No speculative architecture zoo.** Tiny-first, one variable
   at a time (§5) still governs everything, a re-imagined Task C included.
 
@@ -434,7 +442,18 @@ behaviour-changing conclusions, and the next pointer. Append detail to LOG.md, n
   `tests/test_generators.py`; `make_trajectory_dataset` dispatches iterated/converge/hopfield/
   mixed_converge/nested_converge. Task C **substrate is BUILT (M17), but its build-gate FAILS the
   equal-compute control test (M18g — a feedforward shares the single-loop ceiling), so the H/L MODEL
-  (M19) is NOT earned and Task C is re-DEFERRED** (§9.3).
+  (M19) is NOT earned and Task C is re-DEFERRED** (§9.3). **REAL-TABULAR (M20, §9.4 bridge):**
+  `multilabel` (a real downloaded multi-label classification task — binary-per-label outputs, so
+  EM = subset accuracy = leg-1's whole-row coherence metric, and `trm_decoupled` = binary-relevance).
+  Vendored as numpy `.npz` under `datasets/` (built once by `scratchpad/fetch_multilabel.py` from
+  OpenML; the *task path is network-free + content-sha256-guarded*, §5); loader
+  `src/looptab/data/real.py` (`make_multilabel_splits`: disjoint seed-keyed train/test from a finite
+  pool, features z-scored on TRAIN stats only), dispatched via a `task=="multilabel"` branch in
+  `make_splits`, determinism-tested in `tests/test_real.py`. Locked datasets: `emotions` (593×72, 6
+  labels), `yeast` (2417×103, 14 labels), `scene` (2407×294, 6 labels, near-mutually-exclusive).
+  **Eval (M20-review fix):** `multilabel_f1` (micro+macro, the honest co-headline to EM) and **K-fold CV**
+  (`n_folds`/`cv_seed` in `make_multilabel_splits` — disjoint test folds, so the paired sign test is valid;
+  the legacy random-split mode overlaps ~0.30 and suppresses the sign test). Configs use 10-fold CV.
 - **Models/arms:** `trm` (weight-tied refinement loop, optional per-step readouts),
   `ff_matched` (§4a param-matched shallow MLP), `untied_stack` (§4b untied, ~`n_steps`×
   params — a confounded ceiling, NOT param-matched), `untied_matched` (§4b untied,
@@ -844,6 +863,34 @@ behaviour-changing conclusions, and the next pointer. Append detail to LOG.md, n
   bundle as a "mechanism."** All M18 knobs are additive/off-by-default → every committed M0–M15c result is
   bit-identical and intact. (This bullet is a walk-back of the pre-review M18 headline; the adversarial
   PR review's B1 caught the compute confound — see LOG.md M18e/M18f.)
+- **The §9.2 loop finding does NOT transfer to real multi-label tabular under honest evaluation — M20 is a
+  NEGATIVE for the loop thesis, with one non-loop positive; CONFIRMED on TWO large datasets (M20, §9.4 bridge;
+  verdict after 2 review passes + a proper-eval redo + a replication).** Built a `multilabel` task (vendored,
+  network-free, sha-guarded) where EM = subset accuracy and `trm_decoupled` = binary-relevance; ran the M10
+  arm set on `emotions` (6 labels) + `yeast` (14) + `scene` (6, near-mutually-exclusive). Implementation
+  verified clean (disjoint splits, train-only standardize, bit-identical re-run, budget ±2%). The first runs
+  (overlapping random splits, EM-only) *looked* positive, but two adversarial reviews + a **proper evaluation
+  (micro/macro-F1 + 10-fold CV, DISJOINT test folds)** dismantled the loop-specific reading, and `scene`
+  replicated the corrected verdict. **Verdict (yeast / scene 10-fold CV):** **(1) leg-1 (joint >
+  binary-relevance) is the ONLY robust finding** — Δ(trm−decoupled) EM **+0.060 / +0.104**, micro-F1
+  **+0.043 / +0.049**, macro-F1 **+0.051 / +0.048**, all **10/0, p=.002**; decoupled worst on every metric —
+  **but NOT loop-specific** (the non-recurrent `ff_matched` joint MLP also beats decoupled everywhere; it is
+  "joint output modeling > per-label," not recurrence). **(2) Every loop-SPECIFIC edge is EM-ONLY and TIES
+  under F1, on both datasets:** Δ(trm−ff) EM +0.019/+0.037 (8-9/1) but **micro-F1 +0.000/+0.001, both 5/5,
+  p=1.0**; Δ(trm−untied) likewise EM-only. The loop's EM "win" was a subset-accuracy / **modal-label-combo
+  artifact** (probe: 94% of its extra-correct rows were frequent label-sets); under the metric multi-label
+  work uses, the loop **ties** a shallow joint MLP. **(3) emotions' CV null was SAMPLE SIZE, not label count**
+  — `scene` (6 labels like emotions but large n) fires leg-1 at 10/0 (emotions' old "9/0, p=.004" was pure
+  overlapping-split inflation). **(4) The hidden=128 capacity probe (both datasets) FALSIFIES the synthetic
+  M11 "grows-with-size" lever:** at 2× width Δ(trm−ff) on F1 stays a tie/slightly favours ff (yeast micro
+  −0.009 3/7; scene micro −0.008 3/7; ff ahead per-arm) — NO loop-specific edge emerges with capacity; and
+  leg-1 itself does NOT grow (on yeast it *weakens* at h128, decoupled catching up — opposite of synthetic
+  M11). **Net: joint multi-label modeling beats binary-relevance (real, robust on 2 large datasets with
+  opposite coupling, but a plain MLP gets it — no loop needed); the iterative loop buys NOTHING robust over a
+  shallow joint MLP on real tabular, at any capacity tested.** So the synthetic "tied-recurrence coherence"
+  value does not cross to real multi-label data as a *loop* property. Substrate additive (F1 gated by
+  `want_f1`; K-fold opt-in) → all M0–M18 results bit-identical. Canonical summaries:
+  `m20_multilabel_{emotions_smoke_20260626T120659,yeast_20260626T123047,scene_20260626T133446}_*`.
 
 ### (c) Next milestone
 
@@ -903,9 +950,36 @@ depth histogram, mean 3.40): at fixed depth, uniform rule 13 → loop beats ff +
 partly depth (drops to +0.032 ns, becomes ff-easy). Leg 1 + P1 hold at matched depth. **Leg 2 stands
 depth-controlled (rule 13); only the definitional uniformity↔rule-cardinality entanglement remains.**
 
-**No milestone is currently in flight. M19 (the H/L build) is NOT earned — the Task C gate FAILED its
-equal-compute control test (M18g), so Task C is re-DEFERRED.** The remaining genuine frontier is the §9.4
-real-tabular bridge. Open threads, in rough priority:
+**M20 (the §9.4 real-tabular bridge, step 1) is DONE — and, properly evaluated, a NEGATIVE for the loop:**
+under micro/macro-F1 + 10-fold CV (disjoint folds), joint multi-label modeling beats binary-relevance (leg-1,
+yeast, 10/0 on EM AND F1) **but a plain joint MLP gets that too** (decoupled is worst on every metric, ff also
+beats it), and **every loop-SPECIFIC edge is EM-only and ties under F1** (Δ(trm−ff) F1 = 5/5). So the loop
+buys nothing robust over a shallow joint MLP on real tabular; the apparent EM win was a modal-label-combo
+artifact (§11(b) M20 bullet; LOG.md "M20 — PROPER EVALUATION"). **M19 (the H/L build) is still NOT earned —
+the Task C gate FAILED its equal-compute control test (M18g), Task C re-DEFERRED.** Open threads, in rough
+priority:
+- **The real-tabular bridge gave the loop a fair shot and it did not transfer (M20) — now CONFIRMED on a
+  3rd dataset.** `scene` (6 labels, mutual-exclusion) replicated the corrected verdict exactly: leg-1 robust
+  10/0 on EM+F1 but ff also beats decoupled (not loop-specific); Δ(trm−ff) EM-only, a 5/5 F1 tie; and it
+  resolved emotions' null as sample-size (scene = 6 labels + large n fires leg-1). So the bridge is a **clean
+  negative on TWO large datasets with opposite coupling** — the loop's synthetic coherence value does not
+  cross to real multi-label tabular. **The `hidden=128` capacity probe is DONE and NEGATIVE on both datasets**
+  (Δ(trm−ff) on F1 stays a tie; the M11 grows-with-size lever fails on real data), so the multi-label-
+  classification verdict is now FINAL across data, coupling regime, AND capacity. The only untested real-
+  tabular FORM is **multi-target REGRESSION with coupled targets** — the other natural shape for the joint-
+  state mechanism (the `trm_decoupled` ablation maps to independent-per-target heads); this is the one
+  remaining way the loop's value could conceivably cross to real tabular, and it needs a regression head +
+  loss + metrics (MSE/R², per-target vs joint), not yet built. If that too comes back null, the
+  loop-on-tabular question is closed as a clean negative. The classification eval machinery (`multilabel_f1`,
+  K-fold CV) is built/reusable; report EM **and** F1, use K-fold (never the legacy random-split mode) for
+  significance.
+- **DO NOT build M19 (H/L) yet — the gate is unmet (M18g).** The §9.3 build-gate required the single-timescale
+  loop to be insufficient on the nested target *in a timescale-specific way*. At equal compute (M18g, 400
+  epochs, all train_acc≈1.0) the single loop is the best arm but stays far below target at every capacity
+  (EM 0.75 @ h64 → 0.79 @ h128), with a feedforward just behind — a generic capacity/generalization wall,
+  not a timescale deficit. And **M18j settles it: at 64k data the single loop SOLVES the target (0.99 EM)**
+  — a pure sample wall, triggering §9.3's null clause. Building H/L now would repeat the HRM mistake.
+  **Re-gate first:** find a nested instance (vary inner/outer rule, nesting depth, block size, n_train,
 - **DO NOT build M19 (H/L) yet — the gate is unmet (M18g).** The §9.3 build-gate required the single-timescale
   loop to be insufficient on the nested target *in a timescale-specific way*. At equal compute (M18g, 400
   epochs, all train_acc≈1.0) the single loop is the best arm but stays far below target at every capacity

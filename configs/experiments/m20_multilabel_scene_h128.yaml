@@ -1,0 +1,83 @@
+# M20 (capacity probe, hidden=latent=128) — scene at 2× width (M11 grows-with-size test; companion
+# to m20_multilabel_yeast_h128). Does Δ(trm−ff) on F1 (a 5/5 tie at hidden=64) emerge with capacity?
+#
+# --- original h64 header ---
+# Tests whether the yeast PROPER-EVAL picture replicates: leg-1 (joint > binary-relevance) robust on
+# EM AND F1 but NOT loop-specific (ff also beats decoupled), and every loop-SPECIFIC edge (over ff /
+# over untied) EM-only and tied under F1.
+#
+# Why scene is the informative complement: 6 labels (like emotions) but 2407 rows (like yeast), so it
+# disambiguates whether emotions' CV null was label-count or sample-size. Its coupling is
+# MUTUAL-EXCLUSION (cardinality 1.07; near-multiclass, 177/2407 rows genuinely multi-label) rather than
+# yeast's co-occurrence — a different regime where a JOINT model should still beat per-label heads (it
+# can enforce "pick ~1"), so leg-1 is testable. Evaluated with micro/macro-F1 + 10-fold CV (the fixed,
+# honest eval); EM and F1 are co-headlines.
+
+task:
+  name: multilabel
+  params:
+    dataset: scene
+    n_folds: 10          # 10-fold CV: seeds 0..9 = the 10 DISJOINT test folds (honest eval)
+    cv_seed: 0
+    standardize: true
+  n_train: 4000          # non-binding caps; each fold uses ~2166 train / ~241 test of 2407 rows
+  n_test: 1000
+  task_seed: 42
+  train_sample_seed: 1
+  test_sample_seed: 2
+
+arms:
+  - name: trm
+    label: trm                 # joint loop, final loss (budget reference) — the §9.2 leg-1 arm
+    hidden_dim: 128
+    latent_dim: 128
+    n_steps: 6
+    deep_supervision: false
+    ds_mode: final
+  - name: trm_decoupled
+    label: trm_decoupled       # per-LABEL refinement = binary-relevance — THE joint-state ablation
+    hidden_dim: 128
+    latent_dim: 128
+    n_steps: 6
+    deep_supervision: false
+    ds_mode: final
+  - name: ff_matched
+    label: ff_matched          # §4a param-matched joint MLP
+    hidden_dim: 128
+    latent_dim: 128
+    n_steps: 6
+  - name: untied_matched
+    label: untied_matched      # §4b fair (width-shrunk) untied stack — the clean tying control
+    hidden_dim: 128
+    latent_dim: 128
+    n_steps: 6
+    deep_supervision: false
+    ds_mode: final
+  - name: untied_stack
+    label: untied_stack        # labelled non-param-matched ceiling (~n_steps× params), exempt
+    hidden_dim: 128
+    latent_dim: 128
+    n_steps: 6
+    deep_supervision: false
+    ds_mode: final
+
+deltas:
+  - [trm, trm_decoupled]       # leg-1: joint vs binary-relevance (EM + F1)
+  - [trm, ff_matched]          # loop vs joint MLP (the loop-SPECIFIC test)
+  - [trm, untied_matched]      # P1 tying
+  - [trm_decoupled, ff_matched]  # decoupled vs joint MLP (M10 signature)
+
+budget_reference: trm
+budget_ceiling: [untied_stack]
+budget_tol: 0.02
+
+train:
+  epochs: 300
+  lr: 1e-3
+  weight_decay: 1e-4
+  batch_size: 128
+  device: cpu
+
+seeds: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
+parallel_workers: 4
+results_dir: results

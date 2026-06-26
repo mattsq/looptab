@@ -72,8 +72,26 @@ def make_splits(
     test_sample_seed: int,
     n_train: int,
     n_test: int,
+    seed: int | None = None,
 ) -> tuple["TabularDataset", "TabularDataset"]:
-    """Return (train_ds, test_ds) sharing task_seed but using different sample_seeds."""
+    """Return (train_ds, test_ds) sharing task_seed but using different sample_seeds.
+
+    ``seed`` is the runner's raw per-run seed (un-offset). It is only used by the real-data
+    `multilabel` task as the **K-fold index** (so seed s selects test fold s of a fixed partition);
+    synthetic generators ignore it (they key everything off ``task_seed`` / the sample seeds).
+    """
+
+    # Real multi-label datasets (M20) have a FINITE pool, so train/test must be a single disjoint
+    # partition — not two independent draws like the synthetic generators. In K-fold mode (the
+    # review-fix default) the per-run `seed` selects the disjoint test fold; in legacy random-split
+    # mode the partition is keyed on `task_seed`. (Imported lazily to avoid a circular import:
+    # real.py imports TabularDataset from this module.)
+    if task == "multilabel":
+        from .real import make_multilabel_splits
+
+        return make_multilabel_splits(
+            task_cfg=task_cfg, split_seed=task_seed, n_train=n_train, n_test=n_test, fold=seed
+        )
 
     def _build(sample_seed, n):
         if task == "linear":

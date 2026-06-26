@@ -1,0 +1,6 @@
+config,arm,n_params,ref_params,ratio,role,within_tol
+single,trm,14540,14540,1.0000,reference,True
+single,trm_decoupled,14608,14540,1.0047,matched,True
+single,ff_matched,14547,14540,1.0005,matched,True
+single,untied_matched,14562,14540,1.0015,matched,True
+single,untied_stack,86920,14540,5.9780,ceiling,True
