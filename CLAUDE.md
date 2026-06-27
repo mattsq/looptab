@@ -440,7 +440,19 @@ behaviour-changing conclusions, and the next pointer. Append detail to LOG.md, n
   n_blocks∈{3,4} ⇒ w∈{24,32}; built for the §9.3 single-loop-insufficiency gate).
   Generators in `src/looptab/data/generators.py`, determinism-tested in
   `tests/test_generators.py`; `make_trajectory_dataset` dispatches iterated/converge/hopfield/
-  mixed_converge/nested_converge. Task C **substrate is BUILT (M17), but its build-gate FAILS the
+  mixed_converge/nested_converge/disruption. **DISRUPTION (M22, user-requested synthetic from an
+  airline ops spec):** `disruption` (one row = one disruption COMPONENT of `w` coupled flights;
+  X = per-flight features known at t0 [severe_0 + fixed structural cols], y = the settled
+  severe-outcome vector — a JOINT multi-output fixed point. A structured integer THRESHOLD net
+  [`_build_disruption_weights`: symmetric `W = w_rot·rotation-chain adjacency [LOCAL] + w_bank·bank
+  cliques [NON-LOCAL]`] iterated by `_threshold_step` with PSD self-coupling `gamma` ⇒ convergent,
+  bit-exact; the graph is fixed by `task_seed`, only `severe_0` varies per row. Locked instance
+  w=24/n_banks=4/w_rot=6/w_bank=3/γ=14 [the MINIMAL-PSD γ for task_seed=42] — screened genuinely
+  ff-HARD: LINEAR-baseline EM ~0.23 ≪ ff EM ~0.34, copy-severe_0 frac 0.82. TWO design lessons
+  [the 2nd from the M22 adversarial review]: a faithful MONOTONE cascade is ff-EASY/vacuous
+  [OR-reachability is linearly separable], AND an over-damped γ [margin>0] drives the threshold net
+  toward IDENTITY [near-affine; a linear model solves it] — so pin the MINIMAL-PSD γ and screen
+  against a LINEAR baseline, not just cell-mean balance). Task C **substrate is BUILT (M17), but its build-gate FAILS the
   equal-compute control test (M18g — a feedforward shares the single-loop ceiling), so the H/L MODEL
   (M19) is NOT earned and Task C is re-DEFERRED** (§9.3). **REAL-TABULAR (M20, §9.4 bridge):**
   `multilabel` (a real downloaded multi-label classification task — binary-per-label outputs, so
@@ -503,7 +515,8 @@ behaviour-changing conclusions, and the next pointer. Append detail to LOG.md, n
   m15b_depth_matched, m17_nested_converge_{smoke,gate}, m17b_nested_capacity,
   m18{a,b,c}_faithful_{depthwall,converge,ablation}, m18d_faithful_nested,
   m18e_compute_matched, m18f_epochs_matched, m18g_nested_equalcompute, m18h_nested_data16k,
-  m18i_nested_equalcompute_h128, m18j_nested_data64k, m21_introspection_{converge,iterated}).
+  m18i_nested_equalcompute_h128, m18j_nested_data64k, m21_introspection_{converge,iterated},
+  m22_disruption_base, m22_size_{small,base,large}).
 - **`hopfield` `bandwidth` regime (M14) — locked setting:** the local ladder needs **w=48** (w≤32 has
   no clean local regime — convergence-vs-triviality tension); b∈{2,4,8} at `γ=10` all 10/10
   convergent, balanced, non-trivial (triv ≤5%), settle ≤6 steps; the dense end (b=24) needs `γ=16`
@@ -945,6 +958,43 @@ behaviour-changing conclusions, and the next pointer. Append detail to LOG.md, n
   contraction may trade away the coherence win — judge any `trm_stable` arm against BOTH the
   extrapolation metric AND the coherence Δ it costs. Tracked:
   `m21_introspection_{converge_20260627T083814,iterated_20260627T083602}_*`.
+- **On a domain-motivated airline DISRUPTION operator (M22, user-requested synthetic from an ops
+  spec), the §9.2 WITHIN-LOOP structure transfers (joint-state coherence + tying) but the loop has
+  NO coherence edge over a shallow feedforward MLP — the spec's "more coherent than feedforward?"
+  criterion is answered NO (the M20 real-data pattern: joint modeling helps, but it is not a *loop*
+  property).** Built `make_disruption` (one row = one disruption component of `w=24` coupled flights;
+  X = per-flight features at t0; y = the settled severe-outcome vector — a JOINT fixed point), an
+  integer THRESHOLD net on `W = w_rot·rotation-chain adjacency [LOCAL] + w_bank·bank cliques
+  [NON-LOCAL]`, PSD-convergent. **Two design lessons (the 2nd from an ADVERSARIAL REVIEW that caught
+  a BLOCKER):** (a) a faithful MONOTONE cascade is ff-EASY/VACUOUS (OR-reachability is linearly
+  separable); (b) an over-damped γ drives the threshold net to near-IDENTITY (a linear model solves
+  it). The FIRST locked instance was near-affine (linear EM 0.55 > loop) and its dramatic "−0.263
+  clean negative" was an ARTIFACT; **the committed instance is re-pinned ff-HARD** (w_rot=6/w_bank=3,
+  MINIMAL-PSD γ=14: linear EM 0.23 ≪ ff EM 0.34, copy-frac 0.82). **Corrected run (w=24, 8 seeds, full
+  m12 arm set, exact sign test, ✓ all arms within ±2% budget):** per-arm EM **ff 0.429 > trm_stepDS
+  0.371 > trm_nods 0.300 > trm_dec_stepDS 0.245 ≫ trm_dec_nods 0.078 ≈ untied 0.056.** (1) **leg-1
+  (joint>per-cell) REPRODUCES, trainability-clean:** nods Δ +0.223 (8/0) is partly the decoupled arm
+  underfitting (train 0.771), but the trainability-clean step-aligned Δ(trm_stepDS−trm_dec_stepDS) is
+  **EM +0.127 (8/0, p=.008)** with both arms training fine — a genuine joint-state edge (transfers to
+  this deep+local family, like M15). (2) **leg-2 (loop>ff) = the headline NULL/NEG:** Δ(trm_nods−ff)
+  **acc −0.025 (0/8, p=.008, sig)** and **EM −0.128 (1/7, p=.070, NS)** — ff is sig more accurate and
+  ≥ as coherent; the loop produces NO more coherent whole-component states than the MLP → spec
+  criterion **NO**. (3) **P1 (tying) +0.244 EM (8/0), NOW BUDGET-CLEAN** (untied within ±2%; still
+  underfits train 0.801, so partly a width-split optimization gap). **Net: the loop beats its INTERNAL
+  ablations (per-cell, untied) but not the external param-matched MLP — joint-state + tying transfer,
+  a loop-vs-MLP coherence advantage does not (the M20 verdict on a synthetic ops coupling).**
+  Caveats: this sparse-PSD family is ~92% per-cell LINEAR (its hardness is EM-coherence only, NOT the
+  §9.2 per-cell-hard regime, so NOT the M13/M14 negative where leg-1 also failed); additive code, all
+  M0–M21 bit-identical (226 tests, 11 new). **ROBUST across a hidden∈{32,64,128} × w∈{24,32} sweep
+  (m22_size_{small,base,large}):** leg-2 (loop−ff) is NEGATIVE in ALL 6 cells — ff beats the loop on
+  token-acc 0/8 everywhere, on EM sig at w24 — and the deficit does NOT close with capacity (plateaus
+  ~−0.02 acc / −0.16 EM at w24), the EXACT OPPOSITE of the ECA M11 lever (where 2× hidden flipped leg-2
+  positive) and a repeat of the M20 real-data capacity null. leg-1 (joint, 8/0 nods all cells) + P1
+  (tying, budget-clean all sizes) reproduce across the grid. So the loop beats its INTERNAL ablations
+  but never the external MLP, robustly across scale+width — the M20 verdict on a synthetic ops coupling.
+  Canonical: `m22_disruption_base_20260627T160259_*`, `m22_size_{small_20260627T193419,
+  base_20260627T203248,large_20260627T222418}_*`. (Minor non-blocking determinism note: grid-vs-standalone
+  base agree in sign but differ ~0.02 per-arm — curriculum-RNG / trm_decoupled-matmul; audit pending.)
 
 ### (c) Next milestone
 

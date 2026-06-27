@@ -2688,3 +2688,81 @@ representation-rank comparison across joint vs decoupled is confounded by differ
 are per-arm descriptors, not Δs with
 sign tests — they generate hypotheses for refinement (§8 "measure before building"), they do not
 themselves clear any gate.
+
+---
+
+
+## M22 — DONE. Airline DISRUPTION-RECOVERY as a synthetic joint multi-output FIXED-POINT task (user-requested, from an ops spec). On a genuinely ff-hard, domain-motivated small-world coupling (aircraft-rotation chains + station-bank cliques), the JOINT-STATE coherence mechanism (leg-1) and TYING (P1) reproduce — but the LOOP HAS NO COHERENCE EDGE OVER A SHALLOW FEEDFORWARD MLP (leg-2 null-to-negative). The spec's success criterion ("does the joint recurrent model produce MORE coherent whole-component recovery states than feedforward?") is answered NO — mirroring the M20 real-data verdict (joint modeling helps, but it is not a *loop* property). NOTE: an adversarial review caught a BLOCKER in the first locked instance (it was near-affine / ff-trivial); this entry is the CORRECTED result on a re-pinned ff-hard instance — see the "M22 adversarial-review correction" block at the end.
+
+**What & why.** A user handed an airline disruption-recovery ops spec and asked to implement it as a SYNTHETIC task and evaluate the TRM arms. The spec's shape IS the §9.2 regime: one row = one *disruption component* (a set of `w` coupled flights at decision time t0); X = per-flight features known at t0; y = the settled binary "severe-outcome" vector over all flights — a JOINT multi-output fixed point where a shallow per-flight model can get *local* predictions right but (the spec's hypothesis) fail *coherent* whole-component exact-match. A new operator FAMILY (small-world coupling: rotation chains [LOCAL, adjacent] + station-bank cliques [NON-LOCAL, scattered]) in the spirit of M13/M14/M15 — NOT the forbidden M19 H/L build (no new model arm) and NOT the §9.4 real-tabular bridge (purely synthetic, integer, network-free). User-confirmed v1: FIXED topology (graph fixed by `task_seed`, like every `converge`-family task; only per-row `severe_0` varies).
+
+**Substrate (`make_disruption`, generators.py; determinism/golden/fixed-point/balance+triviality/trajectory tested).** Two design lessons, the second from the adversarial review: **(1) a faithful MONOTONE cascade is ff-EASY/VACUOUS** — with a fixed graph the fixed point is OR-reachability of `severe_0`, which is **linearly separable**, so an MLP nails it (ff EM 0.77–0.85) and there is no coherence gap. So the operator is a NON-MONOTONE attractor: an integer **THRESHOLD net** (`_threshold_step`) on symmetric `W = w_rot·(rotation-chain adjacency) + w_bank·(bank cliques)` with self-coupling `gamma ≥ -λ_min(W)` ⇒ PSD ⇒ synchronous convergence (no rejection filter, all-integer ⇒ bit-exact). **(2) gamma must be the MINIMAL-PSD value** — the review showed an over-damped gamma (margin 1) pushes the dynamics toward IDENTITY (near-affine; a linear baseline solves it). **Locked (corrected) instance:** w=24, n_banks=4, w_rot=6, w_bank=3, gamma=14 (the MINIMAL-PSD value for task_seed=42, margin 0). Screened genuinely ff-HARD: balanced (cell means 0.47–0.52), copy-severe_0 frac 0.82 / ~4.4 flips per row, **LINEAR-baseline EM ~0.23, ff EM ~0.34** (the §9.2 hard band), shallow relaxation depth (max ~9). **Structural caveat (review-surfaced):** this sparse PSD coupling family is ~92% per-cell LINEAR in every instance — it cannot reach the §9.2 *per-cell-hard* regime (M13 had much lower ff token-acc); its hardness is purely in the EM-COHERENCE dimension (getting ~4 correlated flips all right), which is exactly where the loop's joint-coherence mechanism should help. So this is a clean test of leg-2 in the coherence dimension.
+
+**Run (m22_disruption_base.yaml; w=24, 8 seeds, full arm set mirroring m12; exact sign test; ✓ all arms within ±2% budget).** Per-arm test EM (mean): **ff_matched 0.429 > trm_stepDS 0.371 > trm_nods 0.300 > trm_decoupled_stepDS 0.245 ≫ trm_decoupled_nods 0.078 ≈ untied_matched 0.056.**
+
+- **leg-1 — joint-state (trm vs trm_decoupled) — REPRODUCES, trainability-clean.** Final-loss Δ(trm_nods−trm_decoupled_nods) EM **+0.223 (8/0, p=.008)** is partly inflated by `trm_decoupled_nods` underfitting train (train_acc 0.771, below the ~0.92 copy-severe_0 token baseline — an optimization collapse, the M10 caveat). But the **trainability-clean** Δ(trm_stepDS−trm_decoupled_stepDS), where the decoupled arm trains fine (train_acc 0.916), is **EM +0.127 (8/0, p=.008)** AND acc +0.032 (8/0) — a genuine joint-state coherence edge that SURVIVES the trainability control. So leg-1 transfers to this deep+local family (consistent with M15, where leg-1 transferred to a non-uniform deep+local map). This is the milestone's real positive.
+
+- **leg-2 — loop-beats-the-MLP (trm vs ff_matched) — DOES NOT HOLD (the headline answer).** The loop does NOT beat the shallow feedforward MLP: Δ(trm_nods−ff_matched) **acc −0.025 (0/8, p=.008, significant)** and **EM −0.128 (1/7, p=.070, NS)** — ff is significantly more accurate per-cell and directionally more coherent. So on a genuinely ff-hard, coherence-headroom instance, the iterative loop produces **no more coherent** whole-component recovery states than a param-matched MLP — it produces fewer (ff EM 0.429 vs loop 0.300). The spec's success criterion is answered **NO**. (This is the honest, corrected leg-2: NOT the dramatic −0.263/0/8 the flawed near-affine instance reported.)
+
+- **P1 — tying (trm vs untied_matched) — REPRODUCES, NOW BUDGET-CLEAN.** Δ(trm_nods−untied_matched) EM **+0.244 (8/0, p=.008)**, acc +0.131 (8/0); the stronger coupling widened all arms so `untied_matched` now lands WITHIN ±2% (ratio 1.012, within_tol=True — the breach on the first instance is gone). Caveat: `untied_matched` still underfits train (0.801), so part of the gap is the width-split arm's optimization difficulty, but it is now a budget-clean comparison. (M10 sanity check reproduces: Δ(trm_decoupled_nods−ff_matched) EM −0.351, 0/8 — the per-cell head is far below the MLP.)
+
+**Net verdict.** On a genuinely ff-hard disruption (structured threshold-net) instance, the §9.2 WITHIN-LOOP structure transfers — **joint-state coherence (leg-1, trainability-clean +0.127 EM, 8/0) and tying (P1, +0.244 EM, 8/0, budget-clean)** both reproduce — but the loop has **NO coherence edge over a shallow feedforward MLP (leg-2)**: ff is significantly more accurate and at least as coherent. So the loop's value here is the same as everywhere off the local-uniform-CA regime: it beats its *internal* ablations (per-cell, untied) but not the external param-matched MLP. This is exactly the M20 real-multilabel pattern (joint modeling beats per-label, but a plain joint MLP gets it too — not a *loop* property). The spec's hypothesis — the joint recurrent model produces MORE coherent recovery states than feedforward — is NOT supported on this synthetic instance.
+
+**Caveats / scope.** (i) ONE width (w=24), one locked operator, one size; a w=32 / size sweep is the obvious extension (gamma is w-specific). (ii) This coupling family is ~92% per-cell LINEAR (a structural limit of sparse PSD threshold nets) — its hardness is EM-coherence only, NOT the §9.2 per-cell-hard regime, so it is NOT the same negative as M13/M14 (there leg-1 also failed; here leg-1 transfers). (iii) leg-2 EM is directionally negative but NS at 8 seeds (1/7); the significant leg-2 statement is the token-accuracy one (ff > loop, 0/8). (iv) `trm_decoupled`'s 3-D matmul is the M11 determinism caveat (bit-exact only at num_threads=1, the committed default). (v) Per-row varying topology (the fully faithful spec form) is a gated v2 (expected to hit the flat-MLP unlearnability wall). (vi) All M22 code is additive; every M0–M21 result is bit-identical (226 tests pass, 11 new).
+
+### M22 adversarial-review correction (why this entry was re-run)
+
+The user requested an adversarial review of M22. It found a **[BLOCKER]**: the FIRST locked instance (w_rot=2, w_bank=1, gamma=6) was **near-affine / ff-trivial** — y equalled severe_0 in ~92% of cells, a LINEAR model scored EM 0.55 (beating the loop's 0.39), and the screen's "ff EM ~0.65 = room to win" check mistook "ff is the ceiling" for "the task is hard." Root cause: a sparse non-PSD W forces gamma ≥ -λ_min, and an over-damped gamma (margin 1) drove the dynamics to identity. The first run's dramatic "clean negative" (leg-2 −0.263, 0/8) was therefore an artifact of a degenerate instance. **Fix applied:** re-pinned to a genuinely ff-hard instance (stronger coupling w_rot=6/w_bank=3, MINIMAL-margin gamma=14; verified LINEAR EM 0.23 ≪ ff EM 0.34 with real flips/row), added a LINEAR baseline + copy-frac to the triviality test (`test_disruption_balance_and_nontrivial` now asserts copy_frac<0.88, moved>0.9), and re-ran. The corrected result (above) is materially different and MORE informative: leg-1 now survives the trainability control (the first instance's +0.063 ns becomes +0.127, 8/0), P1 is now budget-clean, and leg-2 is an honest null-to-negative (loop ties/loses ff on coherence) rather than the inflated −0.263. The review's other findings (determinism, seed contract, fairness, statistics all OK; leg-1/P1 trainability framing — sharpened above) are incorporated.
+
+Canonical summary: `m22_disruption_base_20260627T160259_*`.
+
+### M22 size×width robustness sweep (the user-requested "fill out the study") — DONE
+
+To check the single-cell verdict against scale and output width — and specifically to run the **M11
+lever** (on the ECA hard-convergence regime, leg-2 [loop-beats-ff] was NEGATIVE at small size and
+flipped POSITIVE + grew at large; does the disruption family do the same, or stay null/negative at
+every size like M13/M20?) — ran a hidden∈{32,64,128} × w∈{24,32} grid (3 configs
+`m22_size_{small,base,large}.yaml`, auto-derived MINIMAL-PSD γ per width = 14 @ w24 / 15 @ w32, both
+screened ff-hard, 8 seeds, full arm set, ✓ budget-clean every cell).
+
+**leg-2 (trm_nods − ff_matched) — the decisive axis — STAYS NEGATIVE AT EVERY SIZE AND WIDTH; it does
+NOT flip positive with scale:**
+
+| size | w24 acc | w24 EM | w32 acc | w32 EM |
+|------|---------|--------|---------|--------|
+| h32  | −0.043 (0/8) | −0.200 (1/7) | −0.043 (0/8) | −0.026 (4/4) |
+| h64  | −0.023 (0/8) | −0.170 (0/8) | −0.030 (0/8) | −0.053 (3/5) |
+| h128 | −0.030 (0/8) | −0.163 (0/8) | −0.019 (0/8) | −0.036 (4/4) |
+
+ff beats the loop on **token-accuracy in all 6 cells (0/8, p=.008)** and on EM at w24 (sig at h64/h128),
+tie at w32. Crucially the deficit **does NOT close with capacity** — it plateaus (~−0.02 acc / −0.16 EM
+at w24 across h64→h128). This is the **exact OPPOSITE of the ECAs (M11)**, where 2× hidden flipped leg-2
+positive and grew it; here more capacity buys the loop nothing over the MLP — **the M11 "grows-with-size"
+lever FAILS on the disruption family, reproducing the M20 real-data capacity-probe null.** So the
+loop-vs-MLP coherence negative is robust across scale AND width, not a single-cell artifact.
+
+**leg-1 (joint-state) and P1 (tying) REPRODUCE across the grid (the §9.2 within-loop structure transfers):**
+- leg-1 nods Δ(trm−decoupled) EM is **8/0 in all 6 cells** (+0.06…+0.23); the trainability-clean
+  step-aligned Δ is positive in all 6 (significant 8/0 at h32/h64-w24, h64/h128-w32; marginal 7/1 at
+  h128-w24 and 6/2 at h32-w32) — joint refinement beats per-cell refinement throughout, though the
+  clean magnitude is modest (~0.05–0.17 EM) and does not systematically grow with size.
+- P1 Δ(trm−untied) EM is positive in all 6 cells (8/0 at h32/h64; 7/1, 6/2 at h128), **budget-clean
+  at every size** (the width-quantization breach of the first w24 instance is gone). Caveat unchanged:
+  untied underfits train, so part of P1 is the width-split arm's optimization difficulty.
+
+**Sweep verdict.** The corrected single-cell result is fully robust across hidden∈{32,64,128} × w∈{24,32}:
+**joint-state coherence (leg-1) and tying (P1) transfer to the disruption family, but the loop has NO
+coherence edge over a shallow feedforward MLP (leg-2) at any scale or width — and the deficit does not
+shrink to zero with capacity (the M11 size lever fails).** The spec's success criterion is answered NO
+robustly. The loop beats its INTERNAL ablations (per-cell, untied) but never the external param-matched
+MLP — the M20 verdict (joint modeling helps, it is not a *loop* property), now confirmed across the
+synthetic size/width grid. Canonical summaries: `m22_size_{small_20260627T193419,base_20260627T203248,
+large_20260627T222418}_*`.
+
+**Minor determinism note (to investigate, non-blocking):** the grid w24/h64 cell and the standalone
+`m22_disruption_base` run agree qualitatively (leg-2 negative, leg-1/P1 positive) but differ ~0.02 on a
+couple of per-arm EMs (e.g. trm_nods EM 0.280 grid vs 0.300 standalone) despite identical instance/seeds
+(γ=14 both, pinned vs auto-margin-0). The 2-D arms should be bit-identical; the likely culprit is the
+curriculum trajectory-RNG path interacting with the grid-vs-single axis or the `trm_decoupled` 3-D-matmul
+thread-sensitivity bleeding into shared state — worth a determinism audit, but it does not affect any
+sign-test call (every cell is the same sign with comfortable margins).

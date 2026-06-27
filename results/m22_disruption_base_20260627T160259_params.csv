@@ -1,0 +1,7 @@
+config,arm,n_params,ref_params,ratio,role,within_tol
+single,trm_nods,24304,24304,1.0000,reference,True
+single,trm_decoupled_nods,24422,24304,1.0049,matched,True
+single,trm_stepDS,24304,24304,1.0000,matched,True
+single,trm_decoupled_stepDS,24422,24304,1.0049,matched,True
+single,ff_matched,24443,24304,1.0057,matched,True
+single,untied_matched,24609,24304,1.0125,matched,True

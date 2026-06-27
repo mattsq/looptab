@@ -1,0 +1,110 @@
+# M22 — Airline disruption-recovery as a JOINT multi-output FIXED-POINT task. Does the §9.2
+# joint-state coherence mechanism extend to a domain-motivated small-world coupling (aircraft
+# rotation chains [LOCAL] + station-bank cliques [NON-LOCAL])?
+#
+# One row = one disruption component (w=24 coupled flights at decision time t0); X = per-flight
+# features known at t0 (severe_0 + fixed structural columns); y = the settled severe-outcome vector.
+# The operator is a structured integer THRESHOLD net (rotation adjacency w_rot=6 + bank cliques
+# w_bank=3) with self-coupling gamma=14 (the MINIMAL-PSD value for task_seed=42, margin 0) -> a
+# genuine non-monotone attractor. Two design corrections drive the locked instance (M22 adversarial
+# review): (a) a monotone OR-cascade is linearly-separable reachability => ff-EASY/vacuous, so the
+# operator is a non-monotone threshold net; (b) an over-damped gamma (margin 1) pushes the dynamics
+# toward IDENTITY (near-affine, a linear baseline solves it). This instance is screened genuinely
+# ff-HARD: copy-severe_0 frac 0.82 / ~4.4 flips per row, LINEAR-baseline EM ~0.23, ff EM ~0.34 (the
+# §9.2 hard band) -> real EM-coherence headroom for the loop to win on, balanced (cell means ~0.5).
+#
+# PRE-REGISTERED (M13/M14 prior = the loop's coherence edge is CA/local-update specific and does
+# NOT survive on a non-CA threshold net; only leg-1 joint-state + P1 tying might):
+#   leg-1  trm_nods vs trm_decoupled_nods   -> joint > per-cell (report TRAINABILITY-CLEAN stepDS too)
+#   leg-2  trm_nods vs ff_matched           -> EXPECT NULL/NEG (non-CA threshold net, M13/M14)
+#   P1     trm_nods vs untied_matched       -> tying (untied may breach budget => non-conservative)
+# Report EM AND token-accuracy. Budget-audited ±2%. Arm set + deltas mirror m12_hardconv_orbit.yaml.
+
+task:
+  name: disruption
+  params:
+    w: 24
+    n_banks: 4
+    w_rot: 6
+    w_bank: 3
+    min_tail: 2
+    max_tail: 8
+    gamma: 14         # MINIMAL-PSD value for task_seed=42 (bit-exact; margin 0 — larger over-damps to identity)
+    distractors: 8
+    T: 10             # trajectory length / curriculum cap (relaxation depth max ~9)
+  n_train: 4000
+  n_test: 1000
+  task_seed: 42
+  train_sample_seed: 1
+  test_sample_seed: 2
+
+curriculum:
+  param: T
+  T_min: 1
+  T_max: 10
+
+couple_n_steps_to_param: T
+
+arms:
+  - name: trm
+    label: trm_nods
+    hidden_dim: 64
+    latent_dim: 64
+    n_steps: 10
+    deep_supervision: false
+    ds_mode: final
+  - name: trm_decoupled
+    label: trm_decoupled_nods
+    hidden_dim: 64
+    latent_dim: 64
+    n_steps: 10
+    deep_supervision: false
+    ds_mode: final
+  - name: trm
+    label: trm_stepDS
+    hidden_dim: 64
+    latent_dim: 64
+    n_steps: 10
+    deep_supervision: true
+    ds_mode: step_aligned
+  - name: trm_decoupled
+    label: trm_decoupled_stepDS
+    hidden_dim: 64
+    latent_dim: 64
+    n_steps: 10
+    deep_supervision: true
+    ds_mode: step_aligned
+  - name: ff_matched
+    label: ff_matched
+    hidden_dim: 64
+    latent_dim: 64
+    n_steps: 10
+  - name: untied_matched
+    label: untied_matched
+    hidden_dim: 64
+    latent_dim: 64
+    n_steps: 10
+    deep_supervision: false
+    ds_mode: final
+
+deltas:
+  - [trm_nods, trm_decoupled_nods]
+  - [trm_stepDS, trm_decoupled_stepDS]
+  - [trm_nods, ff_matched]
+  - [trm_nods, untied_matched]
+  - [trm_decoupled_nods, ff_matched]
+  - [trm_decoupled_nods, untied_matched]
+
+budget_reference: trm_nods
+budget_tol: 0.02
+
+train:
+  epochs: 100
+  lr: 1e-3
+  weight_decay: 1e-4
+  batch_size: 256
+  device: cpu
+
+seeds: [0, 1, 2, 3, 4, 5, 6, 7]
+parallel_workers: 4
+results_dir: results

@@ -1,0 +1,66 @@
+# M22 size/width robustness sweep (base, hidden=latent=64). Grids w in {24,32} on the disruption
+# threshold net. The DECISIVE question (M11 lever): on the ECA hard-convergence regime leg-2
+# (loop-beats-ff) was NEGATIVE at small size and turned POSITIVE + grew at large; does the disruption
+# family do the same, or stay null/negative at every size (the M13/M20 pattern)? gamma is auto-derived
+# per width (None + gamma_margin 0 => the MINIMAL-PSD value: 14 @ w24, 15 @ w32 — pinning the minimal
+# margin is the M22-review fix against the near-identity regime). Both widths screened ff-HARD
+# (LINEAR EM 0.23/0.16 << ff EM 0.36/0.29), balanced, relaxation depth max ~9 (T=10 covers it).
+# Arm set + deltas mirror m22_disruption_base / m12_hardconv_orbit.
+
+task:
+  name: disruption
+  params:
+    n_banks: 4
+    w_rot: 6
+    w_bank: 3
+    min_tail: 2
+    max_tail: 8
+    gamma: null         # auto-derive the MINIMAL-PSD gamma per width (margin 0)
+    gamma_margin: 0
+    distractors: 8
+    T: 10
+  n_train: 4000
+  n_test: 1000
+  task_seed: 42
+  train_sample_seed: 1
+  test_sample_seed: 2
+
+grid:
+  params:
+    w: [24, 32]
+
+curriculum:
+  param: T
+  T_min: 1
+  T_max: 10
+
+couple_n_steps_to_param: T
+
+arms:
+  - {name: trm,            label: trm_nods,             hidden_dim: 64, latent_dim: 64, n_steps: 10, deep_supervision: false, ds_mode: final}
+  - {name: trm_decoupled,  label: trm_decoupled_nods,   hidden_dim: 64, latent_dim: 64, n_steps: 10, deep_supervision: false, ds_mode: final}
+  - {name: trm,            label: trm_stepDS,           hidden_dim: 64, latent_dim: 64, n_steps: 10, deep_supervision: true,  ds_mode: step_aligned}
+  - {name: trm_decoupled,  label: trm_decoupled_stepDS, hidden_dim: 64, latent_dim: 64, n_steps: 10, deep_supervision: true,  ds_mode: step_aligned}
+  - {name: ff_matched,     label: ff_matched,           hidden_dim: 64, latent_dim: 64, n_steps: 10}
+  - {name: untied_matched, label: untied_matched,       hidden_dim: 64, latent_dim: 64, n_steps: 10, deep_supervision: false, ds_mode: final}
+
+deltas:
+  - [trm_nods, trm_decoupled_nods]
+  - [trm_stepDS, trm_decoupled_stepDS]
+  - [trm_nods, ff_matched]
+  - [trm_nods, untied_matched]
+  - [trm_decoupled_nods, ff_matched]
+
+budget_reference: trm_nods
+budget_tol: 0.02
+
+train:
+  epochs: 100
+  lr: 1e-3
+  weight_decay: 1e-4
+  batch_size: 256
+  device: cpu
+
+seeds: [0, 1, 2, 3, 4, 5, 6, 7]
+parallel_workers: 4
+results_dir: results

@@ -4,12 +4,14 @@ import numpy as np
 import pytest
 
 from looptab.data.generators import (
+    _build_disruption_weights,
     _build_hopfield_weights,
     _inner_relax,
     _ring_band_mask,
     _threshold_step,
     ca_step,
     make_converge,
+    make_disruption,
     make_hopfield,
     make_iterated,
     make_linear,
@@ -693,6 +695,132 @@ def test_nested_converge_golden_hash():
                                 **NESTED_KW)
     assert hashlib.sha256(X.tobytes()).hexdigest()[:16] == "23c4775c987efd78"
     assert hashlib.sha256(y.tobytes()).hexdigest()[:16] == "2c5cfc7048adafec"
+
+
+# --- M22: make_disruption, airline disruption-recovery as a joint fixed-point target ----------
+# Locked instance: structured threshold net (rotation-chain adjacency w_rot=6 + bank cliques
+# w_bank=3), w=24, n_banks=4, gamma pinned to the task_seed=42 MINIMAL-PSD value (14, margin 0 —
+# a larger margin over-damps the dynamics toward identity, the M22-review fix). Screened balanced
+# (cell means ~0.5), genuinely ff-HARD (ff EM ~0.34, linear-baseline EM ~0.23, copy-severe_0 frac
+# 0.82 / ~4.4 flips per row — a real non-monotone attractor with EM-coherence headroom, NOT the
+# near-affine instance the first screen mistakenly locked).
+DISRUPTION_KW = dict(w=24, n_banks=4, w_rot=6, w_bank=3, min_tail=2, max_tail=8, gamma=14)
+
+
+def test_disruption_determinism():
+    """Same seeds => identical bytes (all-integer threshold net with pinned gamma)."""
+    a = make_disruption(n=200, task_seed=42, sample_seed=1, distractors=8, **DISRUPTION_KW)
+    b = make_disruption(n=200, task_seed=42, sample_seed=1, distractors=8, **DISRUPTION_KW)
+    np.testing.assert_array_equal(a[0], b[0])
+    np.testing.assert_array_equal(a[1], b[1])
+
+
+def test_disruption_golden_hash():
+    """Pin the committed M22 output bytes so any future change cannot silently alter the data."""
+    import hashlib
+
+    X, y = make_disruption(n=200, task_seed=42, sample_seed=1, distractors=8, **DISRUPTION_KW)
+    assert hashlib.sha256(X.tobytes()).hexdigest()[:16] == "adcd365dd2fc38ce"
+    assert hashlib.sha256(y.tobytes()).hexdigest()[:16] == "d050500fe7436d61"
+
+
+def test_disruption_target_is_a_fixed_point():
+    """Every target row is a genuine attractor: one threshold step leaves it unchanged."""
+    W, _, _, _ = _build_disruption_weights(24, 4, 6, 3, 2, 8, 42)
+    X, y = make_disruption(n=400, task_seed=42, sample_seed=2, **DISRUPTION_KW)
+    yp = y * 2 - 1  # {0,1} -> {-1,+1}
+    np.testing.assert_array_equal((_threshold_step(yp, W, 14) + 1) // 2, y)
+
+
+def test_disruption_auto_gamma_matches_pinned():
+    """gamma=None (auto eigen-solve, MINIMAL margin) reproduces the pinned γ=14 bit-for-bit. The
+    locked instance pins the MINIMAL-PSD γ (margin 0) on purpose — a larger margin over-damps the
+    dynamics toward identity (the M22-review fix), so the auto path is checked at gamma_margin=0."""
+    kw = {k: v for k, v in DISRUPTION_KW.items() if k != "gamma"}
+    Xa, ya = make_disruption(n=200, task_seed=42, sample_seed=1, gamma=None, gamma_margin=0,
+                             distractors=8, **kw)
+    Xe, ye = make_disruption(n=200, task_seed=42, sample_seed=1, gamma=14, distractors=8, **kw)
+    np.testing.assert_array_equal(Xa, Xe)
+    np.testing.assert_array_equal(ya, ye)
+
+
+def test_disruption_balance_and_nontrivial():
+    """Balanced (per-cell mean ~0.5) and non-trivial — guards against the near-IDENTITY regime an
+    over-damped gamma produces (M22-review BLOCKER): if y is mostly a copy of severe_0 there is no
+    coherence target for any arm to win on. Require a real attractor: most rows move AND the target
+    differs from severe_0 in enough cells that 'copy the input' is far from solving it."""
+    X, y = make_disruption(n=4000, task_seed=42, sample_seed=1, **DISRUPTION_KW)
+    cell_means = y.mean(axis=0)
+    assert np.all((cell_means > 0.25) & (cell_means < 0.75))
+    F = 2 + DISRUPTION_KW["n_banks"]
+    sev0 = X[:, : 24 * F].reshape(4000, 24, F)[:, :, 0].astype(np.int64)  # severe_0 = feature 0
+    moved = ~(y == sev0).all(axis=1)
+    assert moved.mean() > 0.9  # the vast majority of components settle away from the seed state
+    copy_frac = float((y == sev0).mean())  # fraction of cells where y just copies severe_0
+    assert copy_frac < 0.88  # NOT near-identity: 'copy the input' must leave real EM headroom
+
+
+def test_disruption_W_is_symmetric_local_plus_bank():
+    """W = rotation-chain adjacency (LOCAL, adjacent slots) + bank cliques (NON-LOCAL); symmetric,
+    zero diagonal — a ring-like local part + bank stars (small-world)."""
+    W, bank, bank_onehot, is_head = _build_disruption_weights(24, 4, 6, 3, 2, 8, 42)
+    np.testing.assert_array_equal(W, W.T)  # symmetric
+    assert np.all(np.diag(W) == 0)
+    # Rotation edges connect only adjacent in-tail slots (|i-j|==1); other edges are bank-mates.
+    i, j = np.where(np.triu(W, 1) > 0)
+    bank_pairs = bank[i] == bank[j]
+    adj_pairs = np.abs(i - j) == 1
+    assert np.all(bank_pairs | adj_pairs)  # every edge is a bank-mate or a rotation neighbour
+    # One-hot bank membership is consistent with the bank ids.
+    assert np.array_equal(bank_onehot.argmax(1), bank)
+    assert is_head[0] == 1  # the first slot always starts a rotation
+
+
+def test_disruption_shapes_and_distractors():
+    X, y = make_disruption(n=50, task_seed=0, sample_seed=0, distractors=8, **DISRUPTION_KW)
+    assert X.shape == (50, 24 * (2 + 4) + 8)  # w*(2+n_banks) features + distractors
+    assert y.shape == (50, 24)
+    assert set(np.unique(y)).issubset({0, 1})
+
+
+def test_disruption_trajectory_chains_to_fixed_point_tail():
+    """Trajectory frames are the severity (width w, NOT the feature vector) after each step; with
+    a long horizon the last frame is the attractor s_inf (curriculum / step-aligned-DS contract)."""
+    W, _, _, _ = _build_disruption_weights(24, 4, 6, 3, 2, 8, 42)  # same task_seed as the call
+    X, s_inf, traj = make_disruption(
+        n=80, task_seed=42, sample_seed=4, T=8 * 24, distractors=8, return_trajectory=True,
+        **DISRUPTION_KW,
+    )
+    assert X.shape == (80, 24 * 6 + 8)         # input carries distractors
+    assert traj.shape == (80, 8 * 24, 24)      # frames are the {0,1} severity state only
+    for i in range(1, min(traj.shape[1], 6)):
+        prev = traj[:, i - 1, :] * 2 - 1
+        np.testing.assert_array_equal(traj[:, i, :], (_threshold_step(prev, W, 14) + 1) // 2)
+    np.testing.assert_array_equal(traj[:, -1, :], s_inf)
+
+
+def test_disruption_trajectory_path_matches_splits_path():
+    """The non-trajectory target equals the trajectory build's target (same X, same s_inf)."""
+    X1, y1 = make_disruption(n=300, task_seed=42, sample_seed=1, distractors=8, **DISRUPTION_KW)
+    X2, y2, traj = make_disruption(n=300, task_seed=42, sample_seed=1, distractors=8, T=12,
+                                   return_trajectory=True, **DISRUPTION_KW)
+    np.testing.assert_array_equal(X1, X2)
+    np.testing.assert_array_equal(y1, y2)
+
+
+def test_disruption_raises_when_not_converging():
+    """A gamma too small to make W+gamma*I PSD admits 2-cycles => the loud guard must fire."""
+    with pytest.raises(ValueError):
+        make_disruption(n=200, w=24, task_seed=42, sample_seed=1, n_banks=4, w_rot=6, w_bank=3,
+                        min_tail=2, max_tail=8, gamma=0, max_steps=50)
+
+
+def test_disruption_shared_operator_across_splits():
+    """Train and test share task_seed => identical coupling W / bank / is_head (same function)."""
+    a = _build_disruption_weights(24, 4, 6, 3, 2, 8, 42)
+    b = _build_disruption_weights(24, 4, 6, 3, 2, 8, 42)
+    for x, y in zip(a, b):
+        np.testing.assert_array_equal(x, y)
 
 
 def test_ca_step_rule90():
