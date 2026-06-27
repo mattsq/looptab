@@ -8,6 +8,7 @@ from torch.utils.data import Dataset
 
 from .generators import (
     make_converge,
+    make_disruption,
     make_hopfield,
     make_iterated,
     make_linear,
@@ -124,6 +125,9 @@ def make_splits(
                 n=n, task_seed=task_seed, sample_seed=sample_seed, **task_cfg
             )
             return TabularDataset(X, y)
+        elif task == "disruption":
+            X, y = make_disruption(n=n, task_seed=task_seed, sample_seed=sample_seed, **task_cfg)
+            return TabularDataset(X, y)
         else:
             raise ValueError(f"Unknown task: {task}")
 
@@ -154,6 +158,7 @@ def make_trajectory_dataset(
         "hopfield": make_hopfield,
         "mixed_converge": make_mixed_converge,
         "nested_converge": make_nested_converge,
+        "disruption": make_disruption,
     }.get(task, make_iterated)
     X, _, traj = gen(
         n=n, T=T_max, task_seed=task_seed, sample_seed=sample_seed, return_trajectory=True, **cfg

@@ -1,0 +1,13 @@
+config,arm,n_params,ref_params,ratio,role,within_tol
+w=24,trm_nods,10128,10128,1.0000,reference,True
+w=24,trm_decoupled_nods,10142,10128,1.0014,matched,True
+w=24,trm_stepDS,10128,10128,1.0000,matched,True
+w=24,trm_decoupled_stepDS,10142,10128,1.0014,matched,True
+w=24,ff_matched,10011,10128,0.9884,matched,True
+w=24,untied_matched,10804,10128,1.0667,matched,False
+w=32,trm_nods,12704,12704,1.0000,reference,True
+w=32,trm_decoupled_nods,12722,12704,1.0014,matched,True
+w=32,trm_stepDS,12704,12704,1.0000,matched,True
+w=32,trm_decoupled_stepDS,12722,12704,1.0014,matched,True
+w=32,ff_matched,12651,12704,0.9958,matched,True
+w=32,untied_matched,14164,12704,1.1149,matched,False

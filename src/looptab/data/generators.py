@@ -504,6 +504,170 @@ def make_nested_converge(
     return X.astype(np.float32), s_inf.astype(np.int64)
 
 
+def _build_disruption_weights(
+    w: int,
+    n_banks: int,
+    w_rot: int,
+    w_bank: int,
+    min_tail: int,
+    max_tail: int,
+    task_seed: int,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    """The fixed disruption "operator": a STRUCTURED symmetric integer coupling ``W`` + metadata.
+
+    Fixed by ``task_seed`` (the function, shared train/test — exactly as ``make_converge`` fixes
+    the ring and ``make_hopfield`` fixes ``W``); only the per-row initial disruption varies
+    (``sample_seed``). ``W`` is built from two coupling families (all-integer ⇒ bit-exact):
+
+      - **Rotation chains (LOCAL):** flights are laid out in canonical order (sorted by tail, then
+        scheduled departure), so a flight's rotation neighbour is the **adjacent** slot. Tails
+        (aircraft rotations) are contiguous segments of random length in ``[min_tail, max_tail]``;
+        adjacent in-tail flights get a symmetric coupling ``w_rot`` — the CA-like local stencil.
+      - **Bank cliques (NON-LOCAL):** each flight is assigned a station bank in ``[0, n_banks)`` at
+        random, and all flights sharing a bank are mutually coupled by ``w_bank`` — a long-range,
+        scattered "congestion star" (the bank/window edges of the spec), the genuinely joint term
+        that distinguishes this from a ring CA.
+
+    Returns ``W`` (w, w; symmetric, zero diagonal), ``bank`` (w,), ``bank_onehot`` (w, n_banks),
+    and ``is_head`` (w,; 1 at the start of each rotation, no inbound aircraft). The threshold
+    dynamics on ``W`` are a genuine non-monotone attractor (severity spreads AND recovers), so the
+    fixed point is ff-HARD (a real coherence target), unlike a monotone OR-cascade whose fixed
+    point is linearly-separable reachability.
+    """
+    fn_rng = np.random.default_rng(task_seed)
+    is_head = np.zeros(w, dtype=bool)
+    j = 0
+    while j < w:
+        is_head[j] = True
+        j += int(fn_rng.integers(min_tail, max_tail + 1))
+    bank = fn_rng.integers(0, n_banks, size=w).astype(np.int64)
+    W = np.zeros((w, w), dtype=np.int64)
+    nonhead = np.where(~is_head)[0]  # flights with a rotation predecessor (adjacent slot)
+    W[nonhead, nonhead - 1] += w_rot
+    W[nonhead - 1, nonhead] += w_rot
+    same_bank = (bank[:, None] == bank[None, :]).astype(np.int64)  # bank cliques (non-local)
+    W = W + w_bank * same_bank
+    np.fill_diagonal(W, 0)
+    bank_onehot = np.zeros((w, n_banks), dtype=np.int64)
+    bank_onehot[np.arange(w), bank] = 1
+    return W.astype(np.int64), bank, bank_onehot, is_head.astype(np.int64)
+
+
+def make_disruption(
+    n: int,
+    w: int,
+    task_seed: int,
+    sample_seed: int,
+    n_banks: int = 3,
+    w_rot: int = 2,
+    w_bank: int = 1,
+    min_tail: int = 2,
+    max_tail: int = 8,
+    gamma: int | None = None,
+    gamma_margin: int = 1,
+    distractors: int = 0,
+    T: int | None = None,
+    return_trajectory: bool = False,
+    max_steps: int | None = None,
+):
+    """Airline disruption-recovery as a JOINT multi-output FIXED-POINT task (M22).
+
+    One row = one *disruption component* (a set of ``w`` coupled flights at a decision time t0);
+    the target ``y`` = the settled "severe-outcome" binary vector over all ``w`` flights after
+    operations recover. Disruption propagates and recovers through aircraft-rotation chains
+    (LOCAL, adjacent coupling) + shared-station-bank congestion (NON-LOCAL, scattered coupling) to
+    a fixed-point attractor. This is the §9.2 question — does the JOINT-state coherence mechanism
+    (tied recurrence beats per-cell refinement on whole-row coherence) extend to a domain-motivated
+    small-world coupling — re-skinned, in the same family as M13 (dense Hopfield) / M14 (banded) /
+    M15 (mixed-CA). The §9.2 prior is sharp: the loop's coherence edge is **CA/local-update
+    specific** and does NOT survive on a dense/banded threshold net (M13/M14), only the joint-state
+    leg-1 (vs a per-cell decoupled head) and the P1 tying leg do.
+
+    Mechanism (the reason this is ff-HARD, unlike a monotone OR-cascade whose fixed point is
+    linearly-separable reachability): a **synchronous integer THRESHOLD dynamic** on the structured
+    symmetric coupling ``W`` (``_build_disruption_weights``) with self-coupling ``gamma`` — the
+    ``make_hopfield`` ``_threshold_step``. ``field = s·W + gamma·s``; ``gamma ≥ -λ_min(W)`` makes
+    ``W+gamma·I`` PSD ⇒ the parallel dynamics has a Lyapunov function and converges to a fixed
+    point (no 2-cycles), so NO rejection filtering is needed. Severity both spreads and clears
+    (non-monotone), so the attractor is a genuine whole-component coherence target.
+
+    Function fixed by ``task_seed`` (``W``, bank, is_head, and ``gamma``); rows fixed by
+    ``sample_seed`` (``severe_0 ∈ {-1,+1}^(n,w)``, iterated to its attractor). Outputs mapped to
+    {0,1} for the binary readout heads + ``coherence_excess`` metric, exactly as ``make_hopfield``.
+
+    ``gamma``: pass an explicit int for committed runs (keeps the generator purely integer ⇒
+    bit-exact). ``None`` auto-derives ``ceil(-λ_min(W)) + gamma_margin`` via a float eigen-solve
+    (screening only); the loud guard verifies a pinned int gamma converges.
+
+    Features ``X`` (flat, one contiguous block of ``2 + n_banks`` per flight, canonical order):
+    ``[severe_0[j] (per-row, in {0,1}), is_head[j], bank_onehot[j] (n_banks)]`` then ``distractors``
+    static ``task_seed`` columns. Only ``severe_0`` varies per row; the structural columns are
+    constant (they describe the fixed operator, given to EVERY arm so the comparison is fair).
+    ``y`` is ``(n, w)`` in {0,1}.
+
+    Returns ``(X, s_inf[, traj])`` mirroring ``make_converge``/``make_hopfield`` exactly (so it
+    slots into the dataset/trajectory/curriculum machinery unchanged). With
+    ``return_trajectory=True`` the frames are the severity AFTER EACH threshold step (loops ≈ relax
+    steps), width ``w`` (the {0,1} severity state only — NOT the feature vector), last frame =
+    ``s_inf`` when ``T`` ≥ the relaxation depth.
+    """
+    W, bank, bank_onehot, is_head = _build_disruption_weights(
+        w, n_banks, w_rot, w_bank, min_tail, max_tail, task_seed
+    )
+    if gamma is None:
+        lam_min = float(np.linalg.eigvalsh(W.astype(np.float64)).min())
+        gamma = max(int(np.ceil(-lam_min - 1e-9)) + gamma_margin, 0)
+    if max_steps is None:
+        max_steps = 8 * w  # generous cap; PSD self-coupling converges, depth is shallow (M13-like)
+
+    row_rng = np.random.default_rng(sample_seed)
+    severe_0 = row_rng.integers(0, 2, size=(n, w)).astype(np.int64) * 2 - 1  # {-1,+1}
+
+    s = severe_0.copy()
+    for _ in range(max_steps):
+        nxt = _threshold_step(s, W, gamma)
+        if np.array_equal(nxt, s):  # every row stationary => global fixed point
+            break
+        s = nxt
+    s_inf = s
+    if not np.array_equal(_threshold_step(s_inf, W, gamma), s_inf):
+        raise ValueError(
+            f"make_disruption: did not reach a fixed point within {max_steps} steps (w={w}, "
+            f"gamma={gamma}); raise gamma/gamma_margin or max_steps, or reduce w_rot/w_bank."
+        )
+
+    def _to01(arr):
+        return (arr + 1) // 2  # {-1,+1} -> {0,1}
+
+    # Per-flight feature blocks: [severe_0 (per-row, {0,1}), is_head, bank_onehot] -> (n, w, F).
+    structural = np.concatenate(
+        [is_head[:, None], bank_onehot], axis=1
+    )  # (w, 1 + n_banks), constant across rows
+    feats = np.concatenate(
+        [_to01(severe_0)[:, :, None], np.broadcast_to(structural, (n, w, structural.shape[1]))],
+        axis=2,
+    )  # (n, w, 2 + n_banks)
+    X = feats.reshape(n, w * (2 + n_banks))
+    if distractors > 0:
+        fn_rng = np.random.default_rng(task_seed)
+        noise = fn_rng.integers(0, 2, size=(n, distractors))  # static, uninformative
+        X = np.concatenate([X, noise], axis=-1)
+
+    if return_trajectory:
+        traj_len = T if T is not None else max_steps
+        cur = severe_0.copy()
+        frames = []
+        for _ in range(traj_len):
+            cur = _threshold_step(cur, W, gamma)
+            frames.append(_to01(cur).copy())
+        if traj_len > 0:
+            traj = np.stack(frames, axis=1).astype(np.int64)
+        else:
+            traj = np.zeros((n, 0, w), dtype=np.int64)
+        return X.astype(np.float32), _to01(s_inf).astype(np.int64), traj
+    return X.astype(np.float32), _to01(s_inf).astype(np.int64)
+
+
 def _ring_band_mask(w: int, bandwidth: int) -> np.ndarray:
     """Boolean (w, w) mask: True where the ring distance min(|i-j|, w-|i-j|) ≤ bandwidth.
 
