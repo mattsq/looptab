@@ -1,0 +1,80 @@
+# M23 base — full control contract at the screened 6x6 difficulty. The positive-control TRIPWIRE:
+# does the PAPER-FAITHFUL loop reproduce TRM's qualitative win (loop ≫ param-matched feedforward) on
+# its home task? HEADLINE Δ = (trm − ff_matched) EM, over 5 seeds with the paired sign test.
+#   - trm: the actual TRM recipe — RMSNorm, n_latent=6, EMA 0.999, detached deep-supervision (n_sup=4).
+#   - ff_matched     (§4a): param-matched MLP — the paper's comparison; the headline control.
+#   - untied_matched (§4b): clean tying control — does recurrence beat matched depth+width?
+#   - trm_decoupled        : leg-1 joint-state ablation — does whole-grid coherence need the joint state?
+# COMPUTE CAVEAT (non-blocking, §8/§11(b)-M18): the paper knobs give the loop n_sup×n_steps forward
+# passes vs ff's one — NOT compute-matched. For replicating a KNOWN result the param-matched Δ is the
+# right headline (it matches the paper); if loop > ff, confirm with a longer-trained ff (secondary).
+# The screen (n_sup=1 loop) floored EM at ~0 for ALL arms at n_givens ∈ {12,16,20} and put ff AHEAD
+# of the loop per-cell — the all-arms-fail-on-EM wall. So the base gives the loop its FAIR shot (the
+# full paper recipe: n_sup=4 detached DS + EMA) and sweeps two EASIER difficulties to let EM lift off
+# the floor and expose any loop>ff cell. n_givens=28 (8 blanks) is easy; 20 is the screen's most
+# learnable. If the full-recipe loop reaches high EM and beats ff here, the tripwire PASSES; if it
+# still ties/loses with EM floored, the minimal scale is insufficient (scale up — bigger model/9x9).
+task:
+  name: sudoku
+  params:
+    size: 6
+  n_train: 2500
+  n_test: 800
+  task_seed: 42
+  train_sample_seed: 1
+  test_sample_seed: 2
+
+sweep:
+  param: n_givens
+  values: [20, 28]
+
+arms:
+  - name: trm
+    label: trm
+    hidden_dim: 64
+    latent_dim: 64
+    n_steps: 8
+    deep_supervision: false
+    use_rmsnorm: true
+    n_latent: 4
+    n_sup: 2
+    ema_decay: 0.999
+  - name: ff_matched
+    label: ff_matched
+    hidden_dim: 64
+    latent_dim: 64
+    n_steps: 8
+  - name: untied_matched
+    label: untied_matched
+    hidden_dim: 64
+    latent_dim: 64
+    n_steps: 8
+    deep_supervision: false
+  - name: trm_decoupled
+    label: trm_decoupled
+    hidden_dim: 64
+    latent_dim: 64
+    n_steps: 8
+    deep_supervision: false
+    n_sup: 2
+    ema_decay: 0.999
+
+deltas:
+  - [trm, ff_matched]      # headline: loop vs param-matched MLP (the canonical TRM win)
+  - [trm, untied_matched]  # P1: tying vs matched depth+width
+  - [trm, trm_decoupled]   # leg-1: joint state vs per-cell refinement
+
+train:
+  epochs: 50
+  lr: 1e-3
+  weight_decay: 1e-4
+  batch_size: 256
+  device: cpu
+
+# Budget-parity audit (§4): controls must land within tol of the loop's param count.
+budget_reference: trm
+budget_tol: 0.05
+
+seeds: [0, 1, 2, 3, 4]
+parallel_workers: 5
+results_dir: results

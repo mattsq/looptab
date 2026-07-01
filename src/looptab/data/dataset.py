@@ -16,6 +16,7 @@ from .generators import (
     make_multi_parity,
     make_nested_converge,
     make_parity,
+    make_sudoku,
 )
 
 
@@ -127,6 +128,9 @@ def make_splits(
             return TabularDataset(X, y)
         elif task == "disruption":
             X, y = make_disruption(n=n, task_seed=task_seed, sample_seed=sample_seed, **task_cfg)
+            return TabularDataset(X, y)
+        elif task == "sudoku":
+            X, y = make_sudoku(n=n, task_seed=task_seed, sample_seed=sample_seed, **task_cfg)
             return TabularDataset(X, y)
         else:
             raise ValueError(f"Unknown task: {task}")

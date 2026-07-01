@@ -6,6 +6,7 @@ import pytest
 from looptab.data.generators import (
     _build_disruption_weights,
     _build_hopfield_weights,
+    _count_sudoku_solutions,
     _inner_relax,
     _ring_band_mask,
     _threshold_step,
@@ -19,6 +20,7 @@ from looptab.data.generators import (
     make_multi_parity,
     make_nested_converge,
     make_parity,
+    make_sudoku,
     mixed_ca_step,
 )
 
@@ -885,3 +887,112 @@ def test_iterated_trajectory_first_frame_is_one_step():
     )
     s0 = X[:, :9].astype(np.int64)
     np.testing.assert_array_equal(traj[:, 0, :], ca_step(s0, 90))
+
+
+# --- Sudoku (M23) ---------------------------------------------------------------------------------
+# Small, cheap config for the test suite (6x6, n_givens=18).
+SUDOKU_KW = dict(size=6, n_givens=18)
+
+
+def _decode_sudoku_puzzle(X, size):
+    """Recover the (n, size, size) puzzle grids (0=blank, 1..size) from the one-hot X."""
+    onehot = X.reshape(X.shape[0], size * size, size + 1)
+    return onehot.argmax(-1).reshape(X.shape[0], size, size)
+
+
+def test_sudoku_determinism():
+    """Same seeds (incl. the rejection-dig RNG stream) => identical bytes."""
+    a = make_sudoku(n=120, task_seed=42, sample_seed=1, **SUDOKU_KW)
+    b = make_sudoku(n=120, task_seed=42, sample_seed=1, **SUDOKU_KW)
+    np.testing.assert_array_equal(a[0], b[0])
+    np.testing.assert_array_equal(a[1], b[1])
+
+
+def test_sudoku_golden_hash():
+    """Pin the committed M23 output bytes so any future change cannot silently alter the data."""
+    import hashlib
+
+    X, y = make_sudoku(n=100, task_seed=42, sample_seed=1, **SUDOKU_KW)
+    assert hashlib.sha256(X.tobytes()).hexdigest()[:16] == "c19954a034ffdd14"
+    assert hashlib.sha256(y.tobytes()).hexdigest()[:16] == "eff4b5f1fda80aa7"
+
+
+def test_sudoku_shapes_and_classes():
+    """X = one-hot per cell (size*size*(size+1)); y = (n, size*size) classes 0..size-1."""
+    size = 6
+    X, y = make_sudoku(n=80, task_seed=42, sample_seed=1, **SUDOKU_KW)
+    assert X.shape == (80, size * size * (size + 1)) and X.dtype == np.float32
+    assert y.shape == (80, size * size) and y.dtype == np.int64
+    assert y.min() == 0 and y.max() == size - 1
+
+
+def test_sudoku_solution_rows_are_valid():
+    """Every target is a valid completed grid: each row, column and box is a permutation."""
+    size, box_h, box_w = 6, 2, 3
+    _, y = make_sudoku(n=200, task_seed=7, sample_seed=3, **SUDOKU_KW)
+    g = y.reshape(-1, size, size) + 1  # back to 1..size
+    full = set(range(1, size + 1))
+    for grid in g:
+        for i in range(size):
+            assert set(grid[i, :].tolist()) == full  # row
+            assert set(grid[:, i].tolist()) == full  # col
+        for br in range(0, size, box_h):
+            for bc in range(0, size, box_w):
+                assert set(grid[br : br + box_h, bc : bc + box_w].reshape(-1).tolist()) == full
+
+
+def test_sudoku_puzzle_is_subset_of_solution_with_exact_givens():
+    """Each given cell matches the solution; blanks elsewhere; exactly n_givens clues per row."""
+    size, n_givens = 6, 18
+    X, y = make_sudoku(n=200, task_seed=42, sample_seed=2, **SUDOKU_KW)
+    puz = _decode_sudoku_puzzle(X, size).reshape(len(X), -1)  # 0=blank, 1..size
+    given = puz != 0
+    assert np.all(given.sum(axis=1) == n_givens)  # exact difficulty dial
+    assert np.array_equal(puz[given], (y[given] + 1))  # givens agree with the solution
+
+
+def test_sudoku_puzzles_have_a_unique_solution():
+    """Each generated puzzle has exactly one solution (the defining contract)."""
+    size, box_h, box_w = 6, 2, 3
+    X, _ = make_sudoku(n=60, task_seed=42, sample_seed=1, **SUDOKU_KW)
+    puz = _decode_sudoku_puzzle(X, size)
+    for grid in puz:
+        assert _count_sudoku_solutions(grid, size, box_h, box_w, limit=2) == 1
+
+
+def test_sudoku_solver_is_correct_on_known_cases():
+    """The MRV solver counts solutions correctly: a full grid has 1, an all-blank 6x6 has >1."""
+    size, box_h, box_w = 6, 2, 3
+    _, y = make_sudoku(n=1, task_seed=1, sample_seed=1, **SUDOKU_KW)
+    full = (y[0] + 1).reshape(size, size)
+    assert _count_sudoku_solutions(full, size, box_h, box_w, limit=2) == 1
+    blank = np.zeros((size, size), dtype=np.int64)
+    assert _count_sudoku_solutions(blank, size, box_h, box_w, limit=2) == 2  # early-exit at 2
+
+
+def test_sudoku_splits_disjoint_and_task_seed_inert():
+    """Different sample_seed => different puzzles; task_seed is inert without distractors (§3)."""
+    _, ytr = make_sudoku(n=60, task_seed=42, sample_seed=1, **SUDOKU_KW)
+    _, yte = make_sudoku(n=60, task_seed=42, sample_seed=2, **SUDOKU_KW)
+    assert not np.array_equal(ytr, yte)  # disjoint rows across splits
+    Xa, _ = make_sudoku(n=30, task_seed=42, sample_seed=1, **SUDOKU_KW)
+    Xb, _ = make_sudoku(n=30, task_seed=123, sample_seed=1, **SUDOKU_KW)
+    np.testing.assert_array_equal(Xa, Xb)  # function = solve-sudoku, independent of task_seed
+
+
+def test_sudoku_distractors_append_static_task_seed_columns():
+    """`distractors` adds task_seed-keyed columns, leaving the one-hot puzzle block unchanged."""
+    size = 6
+    base = size * size * (size + 1)
+    X0, _ = make_sudoku(n=40, task_seed=42, sample_seed=1, **SUDOKU_KW)
+    Xd, _ = make_sudoku(n=40, task_seed=42, sample_seed=1, distractors=8, **SUDOKU_KW)
+    assert Xd.shape[1] == base + 8
+    np.testing.assert_array_equal(Xd[:, :base], X0)  # puzzle block intact
+
+
+def test_sudoku_rejects_unreachable_givens():
+    """n_givens outside [size, size*size) raises immediately (loud guard)."""
+    with pytest.raises(ValueError):
+        make_sudoku(n=5, size=6, n_givens=36, task_seed=0, sample_seed=0)  # == size*size
+    with pytest.raises(ValueError):
+        make_sudoku(n=5, size=6, n_givens=5, task_seed=0, sample_seed=0)  # < size

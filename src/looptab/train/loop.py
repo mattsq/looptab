@@ -183,6 +183,88 @@ def train_deep_supervision(
     return losses
 
 
+def train_act(
+    model: nn.Module,
+    train_loader: DataLoader,
+    *,
+    max_segments: int,
+    n_steps: int | None = None,
+    epochs: int = 100,
+    lr: float = 1e-3,
+    weight_decay: float = 1e-4,
+    deep_supervision_weight: float = 1.0,
+    halt_weight: float = 0.5,
+    ema_decay: float | None = None,
+    device: str = "cpu",
+    verbose: bool = False,
+) -> list[float]:
+    """ACT / adaptive-computation deep supervision (M23 — the §4/§12 unbuilt TRM ingredient).
+
+    Extends ``train_deep_supervision`` (detached-carry segmented deep supervision — the autopsy's
+    active ingredient) with a learned **halting head**. Each batch runs ``max_segments`` supervised
+    passes carrying ``(z, a)`` detached between them (effective depth = ``max_segments × n_steps``
+    without long BPTT). Per segment, alongside the task loss, the model's ``halt_head`` reads the
+    latent ``z`` and is trained (BCE) to predict whether the segment's answer is EXACTLY correct
+    (per-example exact-match). It is the simplification of HRM's Q-halt to direct correctness
+    prediction: the head learns "have I solved this row yet?", which at inference (``act_predict``)
+    lets each example halt as soon as it is confidently solved and spend the remaining segments only
+    on the rows that still need refinement — adaptive test-time compute, the TRM/HRM mechanism.
+
+    Training always runs the full ``max_segments`` (every segment supervised); the adaptivity is a
+    property of the learned head, exercised at eval. Requires a model with ``halt_head`` (TRM with
+    ``use_act=True``) and the ``init_state``/``return_state`` API. Deterministic given seed.
+    """
+    if max_segments < 1:
+        raise ValueError(f"max_segments must be >= 1, got {max_segments}")
+    if getattr(model, "halt_head", None) is None:
+        raise ValueError("train_act requires a model built with use_act=True (a halt_head).")
+    model = model.to(device)
+    opt = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=weight_decay)
+    ema = EMA(model, ema_decay) if ema_decay is not None else None
+    losses = []
+    bce = nn.functional.binary_cross_entropy_with_logits
+
+    for epoch in range(epochs):
+        model.train()
+        epoch_loss = 0.0
+        n_passes = 0
+        for X, y in train_loader:
+            X, y = X.to(device), y.to(device)
+            state = None  # fresh (learned z0 / zero answer) at the start of each batch
+            for _ in range(max_segments):
+                opt.zero_grad()
+                logits, all_logits, state = model(
+                    X, n_steps=n_steps, init_state=state, return_state=True
+                )
+                z, a = state
+                loss = _loss_fn(logits, y)
+                if all_logits is not None and deep_supervision_weight > 0:
+                    ds_loss = sum(_loss_fn(sl, y) for sl in all_logits) / len(all_logits)
+                    loss = loss + deep_supervision_weight * ds_loss
+                # Halt target = is the current answer exactly correct (per example)? Detached: the
+                # halt head learns to *predict* correctness, it does not shape the answer logits.
+                with torch.no_grad():
+                    correct = logits.argmax(dim=-1) == y
+                    is_solved = correct.all(dim=-1).float() if y.ndim > 1 else correct.float()
+                halt_logit = model.halt_head(z).squeeze(-1)
+                loss = loss + halt_weight * bce(halt_logit, is_solved)
+                loss.backward()
+                opt.step()
+                if ema is not None:
+                    ema.update(model)
+                state = (z.detach(), a.detach())  # bounded gradient horizon (carry, detached)
+                epoch_loss += loss.item()
+                n_passes += 1
+        avg = epoch_loss / max(n_passes, 1)
+        losses.append(avg)
+        if verbose and (epoch % 10 == 0 or epoch == epochs - 1):
+            print(f"  epoch {epoch:3d}  loss={avg:.4f}")
+
+    if ema is not None:
+        ema.copy_to(model)
+    return losses
+
+
 def _forward_steps(model: nn.Module, X: torch.Tensor, n_steps: int):
     """Call a model with an explicit unroll depth, uniformly across arms.
 

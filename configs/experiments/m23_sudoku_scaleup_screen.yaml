@@ -1,0 +1,50 @@
+# M23 scale-up screen — push the levers that lift whole-grid EM off the floor (the minimal smoke had
+# EM≈0 for ALL arms because per-cell acc capped ~0.86 ≪ the ~0.99 needed over 36 cells). Three levers
+# at once vs the smoke: 6.4× data (16k), 2× capacity (hidden/latent 128), 2× refinement (n_steps 16)
+# + per-step deep supervision toward the solution. EMA OFF (it collapsed arms before warmup, M23/M18).
+# trm vs ff_matched only, 3 seeds, sweeping difficulty easy→medium to see (a) where EM becomes nonzero
+# and (b) whether the loop's iterative-propagation edge appears as the task hardens. If EM lifts and
+# the loop separates, a focused base run (full §4 arm set) follows at that difficulty.
+task:
+  name: sudoku
+  params:
+    size: 6
+  n_train: 16000
+  n_test: 2000
+  task_seed: 42
+  train_sample_seed: 1
+  test_sample_seed: 2
+
+# 6x6 = 36 cells: 30 = very easy (6 blanks), 24 = easy (12), 18 = medium (18 blanks).
+sweep:
+  param: n_givens
+  values: [30, 24, 18]
+
+arms:
+  - name: trm
+    label: trm
+    hidden_dim: 128
+    latent_dim: 128
+    n_steps: 16
+    n_latent: 3          # n:1 latent cadence (the TRM ingredient), kept modest for CPU cost
+    use_rmsnorm: true
+    deep_supervision: true  # per-step readouts → the solution (final-DS; the natural convergent signal)
+  - name: ff_matched
+    label: ff_matched
+    hidden_dim: 128
+    latent_dim: 128
+    n_steps: 16
+
+deltas:
+  - [trm, ff_matched]
+
+train:
+  epochs: 80
+  lr: 1e-3
+  weight_decay: 1e-4
+  batch_size: 256
+  device: cpu
+
+seeds: [0, 1, 2]
+parallel_workers: 3
+results_dir: results

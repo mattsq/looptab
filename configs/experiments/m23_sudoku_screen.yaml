@@ -1,0 +1,50 @@
+# M23 screen — locate a 6x6 Sudoku difficulty (n_givens) that is ff-HARD but loop-solvable, the
+# regime where the loop's iterative-propagation edge can show (method: the M8/M12 hardness screen).
+# trm vs ff_matched only, 2 seeds, to read off ff EM (should be low) vs loop EM (should be high) per
+# difficulty. 6x6 keeps EM reachable at tiny scale (0.99^36 ≈ 0.70 vs 0.99^81 ≈ 0.44 at 9x9) and
+# generation cheap; if 6x6 is ff-easy everywhere, scale to 9x9 (size: 9, ease n_givens upward).
+task:
+  name: sudoku
+  params:
+    size: 6
+  n_train: 2000
+  n_test: 500
+  task_seed: 42
+  train_sample_seed: 1
+  test_sample_seed: 2
+
+# Difficulty dial: fewer clues ⇒ harder. 12 = hard, 16 = medium, 20 = easy (for 6x6's 36 cells).
+sweep:
+  param: n_givens
+  values: [12, 16, 20]
+
+arms:
+  # Representative loop (RMSNorm + n_latent=6, the TRM depth recipe) but n_sup=1 to keep the screen
+  # cheap; the base run adds detached deep-supervision. deep_supervision (per-step readouts) off.
+  - name: trm
+    label: trm
+    hidden_dim: 64
+    latent_dim: 64
+    n_steps: 8
+    deep_supervision: false
+    use_rmsnorm: true
+    n_latent: 6
+  - name: ff_matched
+    label: ff_matched
+    hidden_dim: 64
+    latent_dim: 64
+    n_steps: 8
+
+deltas:
+  - [trm, ff_matched]
+
+train:
+  epochs: 80
+  lr: 1e-3
+  weight_decay: 1e-4
+  batch_size: 256
+  device: cpu
+
+seeds: [0, 1]
+parallel_workers: 2
+results_dir: results
