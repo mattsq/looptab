@@ -86,6 +86,9 @@ class ModelConfig(BaseModel):
     # ``halt_weight`` scales the halting-head loss relative to the task loss.
     use_act: bool = False
     halt_weight: float = 0.5
+    # M23 re-test — `trm_mixer` only: width of the token-mixing MLP over the cell axis (the
+    # cross-cell propagation operator). None ⇒ = n_cells. Ignored by every other arm.
+    token_hidden: Optional[int] = None
     # `n_sup_carry` (review fix B1): with n_sup>1, whether the detached (z,a) is carried across
     # passes (True = the real deep-supervision mechanism) or each pass restarts fresh (False = the
     # COMPUTE-MATCHED control: same optimizer-step count, no carry). Δ(carry − no-carry) isolates

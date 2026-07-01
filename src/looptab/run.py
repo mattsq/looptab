@@ -68,7 +68,7 @@ def _build_model(
     )
     # The TRM loop and both untied-stack controls (§4b) emit per-step readouts, so deep
     # supervision can be ablated on the same axis for each.
-    if arm.name in ("trm", "trm_decoupled", "untied_stack", "untied_matched"):
+    if arm.name in ("trm", "trm_decoupled", "trm_mixer", "untied_stack", "untied_matched"):
         kwargs["deep_supervision"] = arm.deep_supervision
     # M18 ingredients 3 & 4 live in the recurrent core (TRM); pass them only to arms that
     # accept them so controls keep their byte-identical construction. Off by default.
@@ -76,6 +76,10 @@ def _build_model(
         kwargs["use_rmsnorm"] = arm.use_rmsnorm
         kwargs["n_latent"] = arm.n_latent
         kwargs["use_act"] = arm.use_act  # M23: build the halt head when ACT is enabled (TRM only)
+    if arm.name == "trm_mixer":  # M23 re-test: cell-mixing loop shares the rmsnorm/n_latent knobs
+        kwargs["use_rmsnorm"] = arm.use_rmsnorm
+        kwargs["n_latent"] = arm.n_latent
+        kwargs["token_hidden"] = arm.token_hidden
     return get_model(arm.name, **kwargs)
 
 
