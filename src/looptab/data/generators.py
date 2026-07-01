@@ -826,3 +826,213 @@ def make_hopfield(
         traj = np.stack(frames, axis=1).astype(np.int64) if traj_len > 0 else _to01(s0)[:, :0, :]
         return X.astype(np.float32), _to01(s_inf).astype(np.int64), traj
     return X.astype(np.float32), _to01(s_inf).astype(np.int64)
+
+
+# --- Sudoku (M23): canonical TRM home-regime positive control ------------------------------------
+# TRM's HEADLINE result is Sudoku-Extreme, yet every task in this repo's suite is tabular/CA — the
+# loop has never been run on the constraint-propagation grid reasoning TRM was built for. This is
+# positive-control TRIPWIRE: a synthetic, network-free, deterministic Sudoku where the loop is
+# EXPECTED to beat a param-matched feedforward (the paper's qualitative win). A clean win validates
+# the implementation, so the program's tabular negatives can be trusted; a null even here flags that
+# they are confounded by a too-weak loop / too-small scale. One row = one puzzle: X = one-hot per
+# cell over {blank, 1..size}; y = the UNIQUE solution as (size*size,) classes 0..size-1 — a genuine
+# multi-output FIXED POINT (the solved grid), shape-compatible with converge/disruption, so the
+# joint-state / EM / trm_decoupled machinery applies unchanged.
+
+# box geometry (box_h rows × box_w cols per box; box_h*box_w == size). 9→3×3, 6→2×3, 4→2×2.
+_SUDOKU_BOXES = {4: (2, 2), 6: (2, 3), 9: (3, 3)}
+
+
+def _sudoku_box_dims(size: int) -> tuple[int, int]:
+    if size not in _SUDOKU_BOXES:
+        raise ValueError(
+            f"make_sudoku: size must be one of {sorted(_SUDOKU_BOXES)}; got {size}."
+        )
+    return _SUDOKU_BOXES[size]
+
+
+def _sudoku_full_grid(size: int, box_h: int, box_w: int, rng: np.random.Generator) -> np.ndarray:
+    """A shuffled valid completed grid (digits 1..size), deterministic from ``rng``.
+
+    Start from the canonical valid pattern ``(box_w*(r%box_h) + r//box_h + c) % size`` (each row,
+    column and box a permutation), then apply the symmetry shuffles that preserve validity: permute
+    rows within each band and the bands among themselves (likewise columns within/among stacks),
+    and relabel the digits. Plenty diverse across rows — not uniform over all grids, which is fine.
+    """
+    n_band = size // box_h  # groups of box_h rows
+    n_stack = size // box_w  # groups of box_w cols
+
+    def pattern(r: int, c: int) -> int:
+        return (box_w * (r % box_h) + r // box_h + c) % size
+
+    rows = [band * box_h + r for band in rng.permutation(n_band) for r in rng.permutation(box_h)]
+    cols = [stack * box_w + c for stack in rng.permutation(n_stack) for c in rng.permutation(box_w)]
+    digits = rng.permutation(size) + 1  # labels 1..size
+
+    grid = np.empty((size, size), dtype=np.int64)
+    for i, r in enumerate(rows):
+        for j, c in enumerate(cols):
+            grid[i, j] = digits[pattern(r, c)]
+    return grid
+
+
+def _count_sudoku_solutions(
+    grid0: np.ndarray, size: int, box_h: int, box_w: int, limit: int = 2
+) -> int:
+    """Count solutions of ``grid0`` (0=blank, 1..size) up to ``limit`` via MRV backtracking.
+
+    Deterministic (fixed minimum-remaining-values cell choice + ascending digit order), so it
+    doubles as the uniqueness oracle for digging and the task's ground-truth solver. Bitmask
+    candidates over digits make it fast enough for thousands of puzzles in the smoke regime.
+    """
+    n_stack = size // box_w
+    full = (1 << size) - 1
+    grid = grid0.copy()
+    rows = [0] * size
+    cols = [0] * size
+    boxes = [0] * size
+
+    def bidx(r: int, c: int) -> int:
+        return (r // box_h) * n_stack + c // box_w
+
+    for r in range(size):
+        for c in range(size):
+            v = int(grid[r, c])
+            if v:
+                bit = 1 << (v - 1)
+                rows[r] |= bit
+                cols[c] |= bit
+                boxes[bidx(r, c)] |= bit
+
+    count = 0
+
+    def solve() -> None:
+        nonlocal count
+        # Minimum-remaining-values: the empty cell with the fewest candidates (prunes hardest).
+        rbest = cbest = -1
+        avail_best = 0
+        fewest = size + 1
+        for r in range(size):
+            for c in range(size):
+                if grid[r, c] == 0:
+                    avail = full & ~(rows[r] | cols[c] | boxes[bidx(r, c)])
+                    nc = bin(avail).count("1")
+                    if nc == 0:
+                        return  # dead end: this branch has no solution
+                    if nc < fewest:
+                        fewest, rbest, cbest, avail_best = nc, r, c, avail
+                        if nc == 1:
+                            break
+            if fewest == 1:
+                break
+        if rbest == -1:
+            count += 1  # no empty cell ⇒ a complete valid grid
+            return
+        b = bidx(rbest, cbest)
+        m = avail_best
+        while m:
+            bit = m & (-m)
+            m ^= bit
+            d = bit.bit_length()  # bit == 1<<(d-1) ⇒ digit value d (1..size)
+            grid[rbest, cbest] = d
+            rows[rbest] |= bit
+            cols[cbest] |= bit
+            boxes[b] |= bit
+            solve()
+            grid[rbest, cbest] = 0
+            rows[rbest] &= ~bit
+            cols[cbest] &= ~bit
+            boxes[b] &= ~bit
+            if count >= limit:
+                return
+
+    solve()
+    return count
+
+
+def _dig_sudoku(
+    solution: np.ndarray, size: int, box_h: int, box_w: int, n_givens: int, rng: np.random.Generator
+) -> np.ndarray | None:
+    """Dig ``solution`` (1..size) down to a puzzle with EXACTLY ``n_givens`` clues and a UNIQUE
+    solution, or ``None`` if this grid can't be dug that far while staying unique.
+
+    Remove cells in a seeded order; a removal is committed only if the puzzle still has exactly one
+    solution (adding clues never creates ambiguity, so any reached state is unique). Stop as soon as
+    the clue count hits ``n_givens``. Mirrors the rejection-to-the-basin pattern of
+    ``make_mixed_converge`` — the caller redraws grids that return ``None``.
+    """
+    grid = solution.copy()
+    total = size * size
+    givens = total
+    for idx in rng.permutation(total):
+        if givens == n_givens:
+            break
+        r, c = divmod(int(idx), size)
+        saved = int(grid[r, c])
+        grid[r, c] = 0
+        if _count_sudoku_solutions(grid, size, box_h, box_w, limit=2) == 1:
+            givens -= 1
+        else:
+            grid[r, c] = saved  # removal broke uniqueness ⇒ keep the clue
+    return grid if givens == n_givens else None
+
+
+def make_sudoku(
+    n: int,
+    size: int,
+    n_givens: int,
+    task_seed: int,
+    sample_seed: int,
+    distractors: int = 0,
+):
+    """Sudoku as a multi-output fixed-point task (M23): solve a unique-solution puzzle.
+
+    Each row is an independent puzzle drawn from ``sample_seed``: a shuffled valid solution dug down
+    to exactly ``n_givens`` clues while keeping a unique solution (``n_givens`` is the difficulty
+    dial — fewer clues ⇒ harder). ``X`` is the puzzle one-hot per cell over ``{blank, 1..size}``
+    (``size*size*(size+1)`` float features, blanks explicit); ``y`` is the solution as
+    ``(n, size*size)`` int64 with classes ``0..size-1``.
+
+    Seed discipline (§3): the "function" — solve Sudoku — is identical for every instance, so
+    train/test trivially share it; the rows (puzzles) come from ``sample_seed`` (disjoint sets
+    train vs test). ``task_seed`` is therefore inert except for the optional static ``distractors``
+    columns (the same situation as ``iterated``, where the rule is the function).
+    """
+    box_h, box_w = _sudoku_box_dims(size)
+    total = size * size
+    if not (size <= n_givens < total):
+        raise ValueError(
+            f"make_sudoku: n_givens must be in [size, size*size) = [{size}, {total}); "
+            f"got {n_givens}."
+        )
+
+    row_rng = np.random.default_rng(sample_seed)
+    puzzles = np.empty((n, total), dtype=np.int64)
+    solutions = np.empty((n, total), dtype=np.int64)
+    kept = 0
+    attempts = 0
+    max_attempts = max(2000, 200 * n)  # rejection cap; raise loudly if n_givens is unreachable
+    while kept < n:
+        attempts += 1
+        if attempts > max_attempts:
+            raise ValueError(
+                f"make_sudoku: could not dig enough unique puzzles to {n_givens} clues "
+                f"(size={size}) after {max_attempts} attempts — n_givens is likely below the "
+                f"minimal-clue count for this size; raise n_givens."
+            )
+        sol = _sudoku_full_grid(size, box_h, box_w, row_rng)
+        puz = _dig_sudoku(sol, size, box_h, box_w, n_givens, row_rng)
+        if puz is None:
+            continue
+        puzzles[kept] = puz.reshape(-1)
+        solutions[kept] = sol.reshape(-1)
+        kept += 1
+
+    onehot = np.eye(size + 1, dtype=np.float32)  # category 0 = blank, 1..size = the digit
+    X = onehot[puzzles].reshape(n, total * (size + 1))
+    y = (solutions - 1).astype(np.int64)  # 1..size → classes 0..size-1
+    if distractors > 0:
+        fn_rng = np.random.default_rng(task_seed)
+        noise = fn_rng.integers(0, 2, size=(n, distractors)).astype(np.float32)
+        X = np.concatenate([X, noise], axis=1)
+    return X.astype(np.float32), y

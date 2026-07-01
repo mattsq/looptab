@@ -28,11 +28,18 @@ from .eval.metrics import (
     accuracy,
     delta_report,
     evaluate,
+    evaluate_act,
     majority_baseline,
     subset_accuracy_baseline,
 )
 from .registry import get_model
-from .train.loop import train, train_curriculum, train_deep_supervision, train_progressive
+from .train.loop import (
+    train,
+    train_act,
+    train_curriculum,
+    train_deep_supervision,
+    train_progressive,
+)
 
 
 def _git_sha() -> str:
@@ -68,6 +75,7 @@ def _build_model(
     if arm.name == "trm":
         kwargs["use_rmsnorm"] = arm.use_rmsnorm
         kwargs["n_latent"] = arm.n_latent
+        kwargs["use_act"] = arm.use_act  # M23: build the halt head when ACT is enabled (TRM only)
     return get_model(arm.name, **kwargs)
 
 
@@ -100,7 +108,11 @@ def run_point(cfg: ExperimentConfig, task_params: dict, seed: int) -> tuple[dict
 
     X_sample, _ = train_ds[0]
     in_features = int(X_sample.shape[0])
-    num_classes = 2  # binary per-bit; multi-output (Task B) head is M1
+    # The binary suite (M0–M22) is 2-class per cell; Sudoku (M23) is `size`-class. Infer the class
+    # count from the training targets (max label + 1), clamped to ≥2. Every binary task has both
+    # classes present in every column, so this is exactly 2 there → model construction and all
+    # committed results stay bit-identical; multi-class tasks (sudoku) get their true `size`.
+    num_classes = max(2, int(train_ds.y.max()) + 1)
 
     # Exact-match is only a distinct metric for multi-output targets (§3). For
     # single-output tasks it equals accuracy, so we don't report it (avoids a
@@ -178,6 +190,27 @@ def run_point(cfg: ExperimentConfig, task_params: dict, seed: int) -> tuple[dict
                 device=device,
                 seed=seed,
             )
+        elif arm.use_act:
+            # M23: ACT adaptive-computation deep supervision (the §4 unbuilt TRM ingredient).
+            # n_sup is the max segment count; the halt head enables adaptive test-time compute.
+            if arm.name != "trm":
+                raise ValueError(
+                    f"arm '{arm.resolved_label()}' sets use_act=True, but only 'trm' has a "
+                    "halt head."
+                )
+            train_act(
+                m,
+                train_loader,
+                max_segments=arm.n_sup,
+                n_steps=coupled_steps,
+                epochs=cfg.train.epochs,
+                lr=cfg.train.lr,
+                weight_decay=cfg.train.weight_decay,
+                deep_supervision_weight=arm.deep_supervision_weight,
+                halt_weight=arm.halt_weight,
+                ema_decay=arm.ema_decay,
+                device=device,
+            )
         elif arm.n_sup > 1:
             # M18 ingredient 1: canonical TRM deep supervision (N_sup detached-carry passes).
             # Coupled depth (if any) flows in as n_steps so each pass unrolls to the task T.
@@ -217,18 +250,34 @@ def run_point(cfg: ExperimentConfig, task_params: dict, seed: int) -> tuple[dict
         # One forward pass over the test set yields both accuracy and (for multi-output
         # Task B) exact-match; train accuracy is a separate pass. F1 is multilabel-only
         # (M20) so synthetic-task evals stay byte-identical.
-        want_f1 = task_cfg.name == "multilabel"
-        test_metrics = evaluate(
-            m, test_loader, device, want_exact_match=multi_output, want_f1=want_f1
-        )
+        if arm.use_act:
+            # M23: ACT arms are evaluated ADAPTIVELY (each example halts when the head says it is
+            # solved). Train acc uses the same adaptive prediction for an honest like-for-like.
+            want_f1 = False
+            test_metrics = evaluate_act(
+                m, test_loader, max_segments=arm.n_sup, device=device,
+                want_exact_match=multi_output, n_steps=coupled_steps,
+            )
+            train_acc = evaluate_act(
+                m, train_loader, max_segments=arm.n_sup, device=device,
+                want_exact_match=False, n_steps=coupled_steps,
+            )["accuracy"]
+        else:
+            want_f1 = task_cfg.name == "multilabel"
+            test_metrics = evaluate(
+                m, test_loader, device, want_exact_match=multi_output, want_f1=want_f1
+            )
+            train_acc = accuracy(m, train_loader, device)
         metrics = {
             "accuracy": test_metrics["accuracy"],
             # Train accuracy is the M3a optimization-vs-capacity diagnostic: a loop that
             # fails at high T with *low train acc too* is an optimization failure (Phase 2's
             # step-aligned DS may help), not a capacity verdict against the loop.
-            "train_accuracy": accuracy(m, train_loader, device),
+            "train_accuracy": train_acc,
             "n_params": m.count_params(),
         }
+        if arm.use_act and "avg_segments" in test_metrics:
+            metrics["avg_segments"] = test_metrics["avg_segments"]  # adaptive-compute diagnostic
         if multi_output:
             metrics["exact_match"] = test_metrics["exact_match"]
             # M9 coherence diagnostic (whole-row coherence vs raw token-acc); see eval.metrics.
@@ -299,6 +348,10 @@ def _aggregate(per_seed: list[dict], labels: list[str]) -> dict:
                 vals = [s[lbl][f1k] for s in per_seed]
                 stats[f"{f1k}_mean"] = float(np.mean(vals))
                 stats[f"{f1k}_std"] = _std(vals)
+        if "avg_segments" in per_seed[0][lbl]:  # M23 ACT adaptive-compute diagnostic
+            segs = [s[lbl]["avg_segments"] for s in per_seed]
+            stats["avg_segments_mean"] = float(np.mean(segs))
+            stats["avg_segments_std"] = _std(segs)
         out[lbl] = stats
 
     if "baseline" in per_seed[0]:
@@ -838,6 +891,17 @@ def main():
                                 a["n_params"],
                             ]
                         )
+                if "avg_segments_mean" in a:  # M23 ACT adaptive-compute diagnostic
+                    w.writerow(
+                        [
+                            p["label"],
+                            lbl,
+                            "avg_segments",
+                            a["avg_segments_mean"],
+                            a["avg_segments_std"],
+                            a["n_params"],
+                        ]
+                    )
                 if "coherence_excess_mean" in a:
                     w.writerow(
                         [

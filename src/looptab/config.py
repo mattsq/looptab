@@ -19,7 +19,7 @@ from pydantic import BaseModel, Field, model_validator
 class TaskConfig(BaseModel):
     name: Literal[
         "linear", "parity", "multi_parity", "iterated", "converge", "hopfield", "mixed_converge",
-        "nested_converge", "disruption", "multilabel",
+        "nested_converge", "disruption", "multilabel", "sudoku",
     ]
     params: dict = Field(default_factory=dict)
     n_train: int = 4000
@@ -79,6 +79,13 @@ class ModelConfig(BaseModel):
     n_latent: int = 1
     n_sup: int = 1
     ema_decay: Optional[float] = None
+    # M23 — ACT adaptive-computation halting (the §4/§12 unbuilt TRM ingredient; OFF by default ⇒
+    # bit-identical). When ``use_act`` (TRM only), the arm trains via ``train_act`` with ``n_sup``
+    # the max segment count and a learned halt head (BCE to per-example correctness), evaluated
+    # adaptively (``evaluate_act``: each example halts when solved, the rest get more segments).
+    # ``halt_weight`` scales the halting-head loss relative to the task loss.
+    use_act: bool = False
+    halt_weight: float = 0.5
     # `n_sup_carry` (review fix B1): with n_sup>1, whether the detached (z,a) is carried across
     # passes (True = the real deep-supervision mechanism) or each pass restarts fresh (False = the
     # COMPUTE-MATCHED control: same optimizer-step count, no carry). Δ(carry − no-carry) isolates
