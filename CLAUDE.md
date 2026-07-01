@@ -1011,7 +1011,10 @@ behaviour-changing conclusions, and the next pointer. Append detail to LOG.md, n
   Canonical: `m22_disruption_base_20260627T160259_*`, `m22_size_{small_20260627T193419,
   base_20260627T203248,large_20260627T222418}_*`. (Minor non-blocking determinism note: grid-vs-standalone
   base agree in sign but differ ~0.02 per-arm — curriculum-RNG / trm_decoupled-matmul; audit pending.)
-- **The canonical-TRM positive-control TRIPWIRE (Sudoku) is MET in a SCOPED sense: scaled up, the loop
+- **[⚠ CONFOUNDED — read the M23 ADVERSARIAL REVIEW CORRECTION bullet below/in LOG.md before trusting this:
+  our TRM flattens the grid into one vector (no cross-cell mixing operator), so the "positive control" is NOT
+  a fair test and "implementation validated / negative confirmed" is WITHDRAWN. What survives: the coherence
+  edge + the ACT build.]** **The canonical-TRM positive-control TRIPWIRE (Sudoku) is MET in a SCOPED sense: scaled up, the loop
   SIGNIFICANTLY beats a param-matched MLP on whole-grid EM (+0.092, 15/16 seeds, p=0.0005) — but it is the
   repo's COHERENCE edge in the EASY regime, NOT TRM's hard-puzzle-solving win (M23).** Built `sudoku`
   (synthetic, network-free, deterministic unique-solution puzzles; multi-output fixed point) to test whether
@@ -1039,8 +1042,10 @@ behaviour-changing conclusions, and the next pointer. Append detail to LOG.md, n
   Canonical: `m23_sudoku_{screen,base}_20260628T*` (smoke), `m23_sudoku_scaleup_{screen,base,sig}_20260628T*`
   (scale-up); full narrative LOG.md M23.
 - **ACT (the §4/§12 unbuilt TRM ingredient) is now BUILT, faithful, and demonstrably ADAPTIVE — but it
-  does NOT unlock the canonical hard-solving win, so the prior negatives are NOT an artifact of missing
-  ACT (M23-ACT).** Added a halt head + `train_act` (segmented detached-carry deep supervision + BCE halt
+  does NOT unlock the canonical hard-solving win (M23-ACT).** [⚠ The stronger reading — "so the negatives are
+  NOT an artifact of missing ACT" — is UNDERCUT by the M23 correction: ACT was tested on the flat-MLP TRM that
+  lacks the cross-cell mixing operator, so its null on hard puzzles may reflect that architecture gap, not a
+  ceiling of adaptive computation. ACT works; whether it helps a *cell-mixing* loop is untested.] Added a halt head + `train_act` (segmented detached-carry deep supervision + BCE halt
   target = per-example exact-match) + adaptive `evaluate_act` (OFF by default ⇒ bit-identical; 241 tests).
   Decisive sweep (6×6, 16k, hidden 128; `trm_act` [ACT, max 8 seg] vs `trm_seg` [fixed 8 seg] vs `ff`; 6
   seeds): **(1) ACT WORKS** — `avg_segments` scales monotonically with difficulty **1.00 → 7.15 → 8.00**
@@ -1124,19 +1129,23 @@ buys nothing robust over a shallow joint MLP on real tabular; the apparent EM wi
 artifact (§11(b) M20 bullet; LOG.md "M20 — PROPER EVALUATION"). **M19 (the H/L build) is still NOT earned —
 the Task C gate FAILED its equal-compute control test (M18g), Task C re-DEFERRED.** Open threads, in rough
 priority:
-- **The canonical-TRM Sudoku TRIPWIRE is DONE, including ACT — the positive control is MET (scoped) and the
-  implementation is validated end-to-end.** Scaled up, the loop significantly beats a param-matched MLP on
-  whole-grid EM (+0.092, 15/16, p=0.0005) — the COHERENCE edge in the easy regime; and ACT (now built,
-  faithful, demonstrably adaptive — segments scale 1→8 with difficulty) does NOT unlock the hard-solving win
-  (§11(b) M23 + M23-ACT bullets; LOG.md M23). The loop's edge REVERSES with difficulty (opposite of TRM's
-  signature), and depth / segments / adaptive-compute all come back null on the hard regime — so the prior
-  negatives are NOT an implementation/ACT artifact; they corroborate the §9.2 thesis (loop value = coherence,
-  not algorithmic depth). **The canonical Sudoku-Extreme result is now understood to be gated on raw SCALE
-  (far beyond a 4-core CPU) — NOT a missing ingredient.** Any future attempt: needs GPU-scale compute (bigger
-  model, 9×9, ≥16 segments); the ACT machinery + generator are reusable. Lower-priority leftover: a CHEAPER
-  `trm_decoupled` config (~12× slower / collapses at hidden=128/n_steps=16) to attribute the easy-regime EM
-  edge to the joint state (leg-1). Reusable lessons: leave EMA OFF at short training (it collapses arms
-  before warmup); judge on whole-grid EM, not per-cell accuracy.
+- **The canonical-TRM Sudoku TRIPWIRE is BUILT but CONFOUNDED — an adversarial review downgraded it from
+  "positive control passed / implementation validated" to "not a fair test" (M23 correction).** What holds:
+  scaled up, the loop significantly beats a param-matched MLP on whole-grid EM (+0.092, 15/16, p=0.0005 — the
+  COHERENCE edge, easy regime), and ACT (now built, faithful, demonstrably adaptive — segments scale 1→8 with
+  difficulty) does NOT unlock hard-solving; the loop's edge REVERSES with difficulty. **BUT the review found
+  our TRM lacks the cross-cell MIXING operator the TRM paper's own Sudoku ablation credits (MLP-mixer/attention
+  over cells, 74.7%→87.4%): `make_sudoku` flattens the grid into ONE vector and `TRM.forward` refines it with a
+  structureless 2-layer MLP** — a categorically different model from TRM's Sudoku net, which cannot express
+  constraint propagation regardless of scale. Also missing: TRM's 1-step/no-grad-recursion gradient (we do full
+  BPTT — plausibly why M21 sees fixed-depth pattern-matching) and ~6× less recursion depth. **So M23 does NOT
+  confirm the negatives are implementation-clean; the "gap is raw scale" claim is withdrawn (scale is confounded
+  with architecture).** No bugs found (mechanics clean). Scope: the broad M0–M22 tabular/CA negatives are less
+  affected (no grid structure for mixing to exploit) and stand. **Decisive re-test (open):** add a per-cell-token
+  + cross-cell-mixing `trm` arm (self-attention or MLP-mixer over the size² cells) + ideally the 1-step gradient,
+  budget/tying-matched, re-run the easy→hard sweep — overturns M23 if the loop's edge GROWS with difficulty,
+  strengthens the negative if it still reverses. Reusable: generator + ACT machinery; lessons — EMA OFF at short
+  training, judge on whole-grid EM. Full narrative + sources: LOG.md "M23 — ADVERSARIAL REVIEW CORRECTION".
 - **M21 (latent/weight introspection) is DONE — and reframes the whole question: the trained loop does NOT
   settle a latent fixed point even where it WINS** (residual ~1.2, ρ>1, frac_expanding=1.0 on BOTH the
   `converge` win regime and the `iterated` fail regime; over-unroll readout collapses everywhere). This
