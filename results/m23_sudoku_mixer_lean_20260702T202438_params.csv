@@ -1,0 +1,10 @@
+config,arm,n_params,ref_params,ratio,role,within_tol
+n_givens=24,trm_mixer,121418,121048,1.0031,matched,True
+n_givens=24,trm_flat,121048,121048,1.0000,reference,True
+n_givens=24,ff_matched,120552,121048,0.9959,matched,True
+n_givens=18,trm_mixer,121418,121048,1.0031,matched,True
+n_givens=18,trm_flat,121048,121048,1.0000,reference,True
+n_givens=18,ff_matched,120552,121048,0.9959,matched,True
+n_givens=14,trm_mixer,121418,121048,1.0031,matched,True
+n_givens=14,trm_flat,121048,121048,1.0000,reference,True
+n_givens=14,ff_matched,120552,121048,0.9959,matched,True

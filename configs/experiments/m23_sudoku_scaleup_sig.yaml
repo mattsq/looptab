@@ -1,0 +1,47 @@
+# M23 scale-up SIGNIFICANCE — resolve the one positive signal. At n_givens=30 (the EM-alive easy cell)
+# the loop beat the param-matched MLP on whole-grid EM in 7/8 seeds (+0.078) — directionally clear but
+# p=0.07 at 8 seeds. This run takes ONLY the headline pair (trm vs ff_matched) to 16 seeds so the paired
+# sign test can clear p<0.05 if the ~7/8 win-rate is real. untied_matched dropped (it collapsed to a
+# non-learning baseline at this width); decoupled dropped (impractically slow). EMA stays OFF.
+task:
+  name: sudoku
+  params:
+    size: 6
+    n_givens: 30
+  n_train: 16000
+  n_test: 2000
+  task_seed: 42
+  train_sample_seed: 1
+  test_sample_seed: 2
+
+arms:
+  - name: trm
+    label: trm
+    hidden_dim: 128
+    latent_dim: 128
+    n_steps: 16
+    n_latent: 3
+    use_rmsnorm: true
+    deep_supervision: true
+  - name: ff_matched
+    label: ff_matched
+    hidden_dim: 128
+    latent_dim: 128
+    n_steps: 16
+
+deltas:
+  - [trm, ff_matched]
+
+train:
+  epochs: 80
+  lr: 1e-3
+  weight_decay: 1e-4
+  batch_size: 256
+  device: cpu
+
+budget_reference: trm
+budget_tol: 0.05
+
+seeds: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]
+parallel_workers: 4
+results_dir: results

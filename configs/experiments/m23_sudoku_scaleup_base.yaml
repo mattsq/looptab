@@ -1,0 +1,63 @@
+# M23 scale-up BASE — nail the one positive signal the scale-up screen surfaced, with significance.
+# At the EM-alive easy regime (per-cell ~0.98) the loop showed the repo's COHERENCE signature on Sudoku:
+# Δacc ≈ +0.002 (a tie) but ΔEM +0.062 — more whole grids exactly right at MATCHED per-cell accuracy
+# (the M9 leg-2 mechanism), only at the easy end (ff is equal-or-better at medium/hard). This run pins
+# it down: 8 seeds (paired sign test needs ≥6 non-tied) over two easy difficulties, the canonical
+# comparison trm vs ff_matched + untied_matched (P1). HEADLINE Δ = (trm − ff_matched) EM.
+#   trm_decoupled DROPPED: at hidden=128/n_steps=16 its 3-D matmul is ~12× slower (951s/8 epochs ⇒
+#   ~2.5h/seed) AND it collapsed to baseline 0.167 even without EMA — impractical and uninformative
+#   here; the leg-1 joint-state attribution needs a separate, cheaper config. EMA stays OFF (M23: it
+#   collapses arms before warmup at this training length).
+task:
+  name: sudoku
+  params:
+    size: 6
+  n_train: 16000
+  n_test: 2000
+  task_seed: 42
+  train_sample_seed: 1
+  test_sample_seed: 2
+
+# Both cells are in the EM-alive easy regime (6×6 = 36 cells): 30 = 6 blanks, 28 = 8 blanks.
+sweep:
+  param: n_givens
+  values: [30, 28]
+
+arms:
+  - name: trm
+    label: trm
+    hidden_dim: 128
+    latent_dim: 128
+    n_steps: 16
+    n_latent: 3
+    use_rmsnorm: true
+    deep_supervision: true
+  - name: ff_matched
+    label: ff_matched
+    hidden_dim: 128
+    latent_dim: 128
+    n_steps: 16
+  - name: untied_matched
+    label: untied_matched
+    hidden_dim: 128
+    latent_dim: 128
+    n_steps: 16
+    deep_supervision: true
+
+deltas:
+  - [trm, ff_matched]      # headline: loop vs param-matched MLP, on whole-grid EM
+  - [trm, untied_matched]  # P1: tying vs matched depth+width
+
+train:
+  epochs: 80
+  lr: 1e-3
+  weight_decay: 1e-4
+  batch_size: 256
+  device: cpu
+
+budget_reference: trm
+budget_tol: 0.05
+
+seeds: [0, 1, 2, 3, 4, 5, 6, 7]
+parallel_workers: 4
+results_dir: results

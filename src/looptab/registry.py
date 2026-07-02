@@ -2,11 +2,13 @@
 
 from .models.controls import FFMatched, UntiedStack, UntiedStackMatched
 from .models.decoupled import TRMDecoupled
+from .models.mixer import TRMMixer
 from .models.trm import TRM
 
 MODEL_REGISTRY = {
     "trm": TRM,
     "trm_decoupled": TRMDecoupled,
+    "trm_mixer": TRMMixer,
     "ff_matched": FFMatched,
     "untied_stack": UntiedStack,
     "untied_matched": UntiedStackMatched,

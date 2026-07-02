@@ -1,0 +1,53 @@
+# M23 segments pre-test — BEFORE building ACT, test the depth hypothesis: does SEGMENTED detached-carry
+# deep supervision (n_sup=8, the train_deep_supervision path TRM actually uses — the scale-up loop only
+# used n_sup=1 per-step readouts) lift the loop above ff_matched at HARD 6x6 where ff fails (EM≈0)?
+# Total effective depth = n_sup(8) × n_steps(8) × n_latent(2) = 128 applications vs the scale-up's 48.
+# If the loop's EM pulls above ff here, adaptive segments (ACT) are worth building to push further; if
+# not, the bottleneck isn't depth/compute and ACT won't save it (an informative null either way).
+task:
+  name: sudoku
+  params:
+    size: 6
+  n_train: 12000
+  n_test: 1500
+  task_seed: 42
+  train_sample_seed: 1
+  test_sample_seed: 2
+
+# Hard regime where the scale-up showed ff EM ≈ 0 (18) and ≈ 0.1 (22).
+sweep:
+  param: n_givens
+  values: [18, 22]
+
+arms:
+  - name: trm
+    label: trm
+    hidden_dim: 128
+    latent_dim: 128
+    n_steps: 8
+    n_latent: 2
+    use_rmsnorm: true
+    deep_supervision: true
+    n_sup: 8            # segmented detached-carry deep supervision (the TRM mechanism)
+  - name: ff_matched
+    label: ff_matched
+    hidden_dim: 128
+    latent_dim: 128
+    n_steps: 8
+
+deltas:
+  - [trm, ff_matched]
+
+train:
+  epochs: 50
+  lr: 1e-3
+  weight_decay: 1e-4
+  batch_size: 256
+  device: cpu
+
+budget_reference: trm
+budget_tol: 0.05
+
+seeds: [0, 1, 2, 3]
+parallel_workers: 4
+results_dir: results

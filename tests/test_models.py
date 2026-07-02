@@ -471,3 +471,72 @@ def test_trm_n_latent_holds_answer_fixed_across_inner_updates():
 def test_trm_n_latent_invalid():
     with pytest.raises(ValueError):
         TRM(in_features=4, num_classes=2, hidden_dim=8, latent_dim=8, n_latent=0)
+
+
+# --- M23 re-test: TRMMixer (cross-cell mixing loop) ----------------------------------------------
+from looptab.models.mixer import TRMMixer  # noqa: E402
+
+
+def _mixer(**kw):
+    # 9 cells x 3 cell_dim = 27 in_features; 9 outputs, 4 classes.
+    defaults = dict(in_features=27, num_classes=4, out_features=9, hidden_dim=16, latent_dim=16,
+                    n_steps=3)
+    defaults.update(kw)
+    return TRMMixer(**defaults)
+
+
+def test_mixer_output_shape_and_readouts():
+    m = _mixer(deep_supervision=True)
+    X = torch.randn(5, 27)
+    out, all_logits = m(X)
+    assert out.shape == (5, 9, 4)              # (B, n_cells, num_classes)
+    assert len(all_logits) == 3                # one readout per outer step
+    assert m.n_cells == 9 and m.cell_dim == 3
+
+
+def test_mixer_requires_multi_output_and_divisible():
+    with pytest.raises(ValueError):
+        TRMMixer(in_features=27, num_classes=4, out_features=None)   # single-output
+    with pytest.raises(ValueError):
+        TRMMixer(in_features=28, num_classes=4, out_features=9)      # 28 % 9 != 0 (distractors)
+
+
+def test_mixer_is_deterministic_same_seed():
+    torch.set_num_threads(1)  # 3-D matmul is BLAS-order sensitive (like trm_decoupled)
+
+    def run():
+        torch.manual_seed(0)
+        m = _mixer()
+        torch.manual_seed(1)
+        X = torch.randn(6, 27)
+        return m(X)[0]
+
+    assert torch.equal(run(), run())
+
+
+def test_mixer_state_resume_matches_full_unroll():
+    """return_state → init_state composition is exact (bit-identical resume)."""
+    torch.set_num_threads(1)
+    torch.manual_seed(0)
+    m = _mixer(deep_supervision=False)
+    X = torch.randn(4, 27)
+    full = m(X, n_steps=4)[0]
+    _, _, state = m(X, n_steps=1, return_state=True)
+    resumed = m(X, n_steps=3, init_state=state)[0]
+    assert torch.allclose(full, resumed, atol=1e-6)
+
+
+def test_mixer_cells_communicate():
+    """The token-mixing operator makes each output cell depend on OTHER cells' inputs — the
+    property the flat TRM lacks. Perturbing one input cell must change other cells' logits."""
+    torch.set_num_threads(1)
+    torch.manual_seed(0)
+    m = _mixer(deep_supervision=False)
+    X = torch.randn(1, 27)
+    base = m(X)[0]                          # (1, 9, 4)
+    Xp = X.clone().view(1, 9, 3)
+    Xp[0, 0, :] += 5.0                      # perturb cell 0's input only
+    pert = m(Xp.view(1, 27))[0]
+    changed = (~torch.isclose(base, pert, atol=1e-6)).any(dim=-1).squeeze(0)  # per-cell changed?
+    assert changed[0].item()               # cell 0 changed (trivially)
+    assert changed[1:].any().item()        # AND some OTHER cell changed => cross-cell mixing

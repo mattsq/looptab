@@ -43,6 +43,7 @@ class TRM(nn.Module):
         out_features: Optional[int] = None,
         use_rmsnorm: bool = False,
         n_latent: int = 1,
+        use_act: bool = False,
     ):
         super().__init__()
         self.n_steps = n_steps
@@ -69,6 +70,15 @@ class TRM(nn.Module):
         # M18 ingredient 3 — RMSNorm on z each update. ``Identity`` when off keeps the forward
         # path (and parameter set) byte-identical to the pre-M18 model.
         self.norm = RMSNorm(latent_dim) if use_rmsnorm else nn.Identity()
+
+        # M23 — ACT halting head (HRM/TRM adaptive computation; §4's one unbuilt TRM ingredient).
+        # A scalar halt logit read off the latent z. It lives OUTSIDE forward — the ACT
+        # train/eval routines apply it to the (z, a) returned via ``return_state`` — so the forward
+        # path stays byte-identical and ``halt_head=None`` (off) adds zero params. The head learns
+        # to predict "is the current answer exactly correct"; inference halts a per-example segment
+        # when that probability crosses a threshold, giving more refinement segments to harder rows.
+        self.use_act = use_act
+        self.halt_head = nn.Linear(latent_dim, 1) if use_act else None
 
         # Initial latent
         self.z0 = nn.Parameter(torch.zeros(latent_dim))

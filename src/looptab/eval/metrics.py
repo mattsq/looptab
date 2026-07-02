@@ -37,6 +37,92 @@ def exact_match(model: nn.Module, loader: DataLoader, device: str = "cpu", **kwa
     return float((preds == targets).all(axis=-1).mean())
 
 
+@torch.inference_mode()
+def act_predict(
+    model: nn.Module,
+    loader: DataLoader,
+    max_segments: int,
+    device: str = "cpu",
+    n_steps: int | None = None,
+    halt_threshold: float = 0.5,
+) -> tuple[np.ndarray, np.ndarray, float]:
+    """Adaptive-segment prediction for an ACT model (M23). Returns (preds, targets, avg_segments).
+
+    Runs the loop segment-by-segment (carrying ``(z, a)`` across segments, like training). After
+    each segment the ``halt_head`` gives a per-example halt probability; an example's prediction is
+    frozen at the FIRST segment where that probability crosses ``halt_threshold`` (and it stops
+    consuming compute). Examples that never halt use the final segment's answer. ``avg_segments`` is
+    the mean segments actually used — the adaptive-compute diagnostic (should be lower on easy data,
+    higher on hard), the behavioural signature of TRM/HRM halting.
+    """
+    model.eval()
+    preds, targets, seg_counts = [], [], []
+    for X, y in loader:
+        X = X.to(device)
+        B = X.shape[0]
+        state = None
+        chosen = None
+        halted = torch.zeros(B, dtype=torch.bool, device=X.device)
+        used = torch.full((B,), max_segments, dtype=torch.long, device=X.device)
+        for seg in range(max_segments):
+            logits, _, state = model(X, n_steps=n_steps, init_state=state, return_state=True)
+            z, _ = state
+            if chosen is None:
+                chosen = logits.clone()
+            halt_p = torch.sigmoid(model.halt_head(z).squeeze(-1))
+            fires = (halt_p > halt_threshold) & (~halted)
+            chosen[fires] = logits[fires]
+            used[fires] = seg + 1
+            halted = halted | fires
+            if bool(halted.all()):
+                break
+        chosen[~halted] = logits[~halted]  # never-halted: last segment's answer
+        preds.append(chosen.argmax(dim=-1).cpu().numpy())
+        targets.append(y.numpy())
+        seg_counts.append(used.cpu().numpy())
+    return (
+        np.concatenate(preds),
+        np.concatenate(targets),
+        float(np.concatenate(seg_counts).mean()),
+    )
+
+
+def metrics_from_preds(preds: np.ndarray, targets: np.ndarray, *, want_exact_match: bool) -> dict:
+    """Accuracy (+ optional exact-match / coherence) from precomputed preds — shared by the
+    single-pass ``evaluate`` and the ACT ``evaluate_act`` so both report identical statistics."""
+    out = {"accuracy": float((preds == targets).mean())}
+    if want_exact_match:
+        if targets.ndim == 1:
+            out["exact_match"] = out["accuracy"]
+        else:
+            correct = preds == targets
+            out["exact_match"] = float(correct.all(axis=-1).mean())
+            w_out = targets.shape[-1]
+            out["coherence_excess"] = out["exact_match"] - float(out["accuracy"] ** w_out)
+            out["mean_wrong_per_row"] = float((~correct).sum(axis=-1).mean())
+    return out
+
+
+def evaluate_act(
+    model: nn.Module,
+    loader: DataLoader,
+    max_segments: int,
+    device: str = "cpu",
+    *,
+    want_exact_match: bool = False,
+    n_steps: int | None = None,
+    halt_threshold: float = 0.5,
+) -> dict:
+    """ACT counterpart of ``evaluate``: metrics from the adaptively-halted predictions, plus the
+    mean number of segments used (``avg_segments``) as the adaptive-compute diagnostic."""
+    preds, targets, avg_segments = act_predict(
+        model, loader, max_segments, device, n_steps=n_steps, halt_threshold=halt_threshold
+    )
+    out = metrics_from_preds(preds, targets, want_exact_match=want_exact_match)
+    out["avg_segments"] = avg_segments
+    return out
+
+
 def multilabel_f1(preds: np.ndarray, targets: np.ndarray) -> dict:
     """Micro- and macro-averaged F1 over labels for a multi-label binary task (positive = 1).
 

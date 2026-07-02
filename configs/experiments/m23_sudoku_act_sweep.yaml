@@ -1,0 +1,69 @@
+# M23 ACT sweep — the decisive test of TRM's adaptive-computation ingredient. Does ACT halting let
+# the loop's advantage GROW with puzzle difficulty (TRM's canonical signature), where fixed-depth
+# segments do not? Three arms across an easy→hard difficulty sweep:
+#   trm_act — ACT: max 8 segments + learned halt head (adaptive test-time compute).
+#   trm_seg — the DEPTH control: the SAME 8 detached-carry segments, NO halt (fixed compute).
+#   ff_matched — the param-matched feedforward baseline.
+# Reads: (1) Δ(trm_act − ff) vs difficulty — does the loop's edge WIDEN as puzzles harden? (2)
+# Δ(trm_act − trm_seg) — is ADAPTIVITY worth anything over fixed segments? (3) avg_segments vs
+# difficulty — does the halt head actually spend MORE compute on harder puzzles (the ACT behaviour)?
+# Pre-test finding this tests against: fixed 8-segment depth already TIES ff at hard 6x6 (n_givens=18).
+task:
+  name: sudoku
+  params:
+    size: 6
+  n_train: 16000
+  n_test: 2000
+  task_seed: 42
+  train_sample_seed: 1
+  test_sample_seed: 2
+
+sweep:
+  param: n_givens
+  values: [30, 24, 18]   # easy (loop wins via coherence) → medium → hard (EM floored for both)
+
+arms:
+  - name: trm
+    label: trm_act
+    hidden_dim: 128
+    latent_dim: 128
+    n_steps: 8
+    n_latent: 2
+    use_rmsnorm: true
+    deep_supervision: true
+    use_act: true
+    n_sup: 8            # max segments
+    halt_weight: 0.5
+  - name: trm
+    label: trm_seg
+    hidden_dim: 128
+    latent_dim: 128
+    n_steps: 8
+    n_latent: 2
+    use_rmsnorm: true
+    deep_supervision: true
+    n_sup: 8            # fixed 8 detached-carry segments, no halt (the depth control)
+  - name: ff_matched
+    label: ff_matched
+    hidden_dim: 128
+    latent_dim: 128
+    n_steps: 8
+
+deltas:
+  - [trm_act, ff_matched]   # does the loop's edge grow with difficulty?
+  - [trm_act, trm_seg]      # is adaptive halting worth anything over fixed segments?
+  - [trm_seg, ff_matched]   # depth-alone vs ff
+
+train:
+  epochs: 60
+  lr: 1e-3
+  weight_decay: 1e-4
+  batch_size: 256
+  device: cpu
+
+budget_reference: trm_seg
+budget_tol: 0.05
+
+seeds: [0, 1, 2, 3, 4, 5]
+parallel_workers: 4
+results_dir: results
