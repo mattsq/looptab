@@ -1,0 +1,64 @@
+# M23 MIXER re-test (LEAN, tractable) — multi-seed confirmation at the HARD difficulties where the
+# flat trm/ff both FAIL (EM≈0 at any epoch count, per M23). Single-seed probes already showed the
+# cross-cell mixing loop crushes it (EM 0.988 @ n_givens=24 in 5 epochs; 0.82 @ n_givens=18 in 10).
+# This confirms the difficulty-scaling with seeds + a sign test. Lean vs the heavy sweep: n_steps 8 /
+# n_latent 1 (the mixer converges in ~10 epochs, so 15 is ample and 4× cheaper/less memory than 16×2),
+# 8k data, 3 workers (memory-safe on the shared box). One knob vs M23: the architecture (cell mixing).
+#   OVERTURNS M23 if Δ(trm_mixer − ff) EM is large and stays large as puzzles harden (24→18→14),
+#   where the flat trm's edge REVERSED to ~0.
+task:
+  name: sudoku
+  params:
+    size: 6
+  n_train: 8000
+  n_test: 1000
+  task_seed: 42
+  train_sample_seed: 1
+  test_sample_seed: 2
+
+sweep:
+  param: n_givens
+  values: [24, 18, 14]   # medium → hard → very hard (ff floors at EM≈0 across all three)
+
+arms:
+  - name: trm_mixer
+    label: trm_mixer
+    hidden_dim: 272
+    latent_dim: 192
+    token_hidden: 64
+    n_steps: 8
+    n_latent: 1
+    use_rmsnorm: true
+    deep_supervision: true
+  - name: trm
+    label: trm_flat
+    hidden_dim: 128
+    latent_dim: 128
+    n_steps: 8
+    n_latent: 1
+    use_rmsnorm: true
+    deep_supervision: true
+  - name: ff_matched
+    label: ff_matched
+    hidden_dim: 128
+    latent_dim: 128
+    n_steps: 8
+
+deltas:
+  - [trm_mixer, ff_matched]   # the headline: cell-mixing loop vs feedforward, vs difficulty
+  - [trm_mixer, trm_flat]     # cell-mixing vs the flat loop (same config, one knob)
+  - [trm_flat, ff_matched]    # sanity: flat loop ~ ff at hard (M23 replication)
+
+train:
+  epochs: 15
+  lr: 1e-3
+  weight_decay: 1e-4
+  batch_size: 256
+  device: cpu
+
+budget_reference: trm_flat
+budget_tol: 0.05
+
+seeds: [0, 1, 2, 3, 4, 5]
+parallel_workers: 3
+results_dir: results

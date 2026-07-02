@@ -483,8 +483,11 @@ behaviour-changing conclusions, and the next pointer. Append detail to LOG.md, n
   width-shrunk to the loop's budget — the *clean* tying control), and `trm_decoupled` (M10
   mechanism ablation: the loop with **per-cell** refinement — each output cell has its own
   latent slice and sees only its own answer, severing the joint multi-output state; budget-
-  matched, multi-output only). In `src/looptab/models/{trm,controls,decoupled}.py`, registered
-  in `src/looptab/registry.py`. **M18 TRM-faithful knobs (all OFF by default = bit-identical to
+  matched, multi-output only), and `trm_mixer` (**M23 re-test — the loop with a CROSS-CELL MIXING
+  update: keeps the grid as per-cell tokens and applies an MLP-mixer over the size² cells (token-mixing
+  = the constraint-propagation operator the flat `trm` LACKS), then a per-cell channel MLP; multi-output
+  only, budget-matchable, `token_hidden` knob**). In `src/looptab/models/{trm,controls,decoupled,mixer}.py`,
+  registered in `src/looptab/registry.py`. **M18 TRM-faithful knobs (all OFF by default = bit-identical to
   pre-M18; `trm` only):** `use_rmsnorm` (RMSNorm on the latent each update), `n_latent` (z-updates
   per answer update; 1 = original 1:1), plus the training-side `n_sup` (detached deep-supervision
   passes) and `ema_decay` — a `trm_faithful` arm stacks all four. **Determinism exception (M11):** unlike every 2-D arm, `trm_decoupled`'s
@@ -532,7 +535,8 @@ behaviour-changing conclusions, and the next pointer. Append detail to LOG.md, n
   m18e_compute_matched, m18f_epochs_matched, m18g_nested_equalcompute, m18h_nested_data16k,
   m18i_nested_equalcompute_h128, m18j_nested_data64k, m21_introspection_{converge,iterated},
   m22_disruption_base, m22_size_{small,base,large},
-  m23_sudoku_{screen,base,scaleup_screen,scaleup_base,scaleup_sig,segments_pretest,act_sweep}).
+  m23_sudoku_{screen,base,scaleup_screen,scaleup_base,scaleup_sig,segments_pretest,act_sweep,
+  mixer_sweep,mixer_lean}).
 - **`hopfield` `bandwidth` regime (M14) — locked setting:** the local ladder needs **w=48** (w≤32 has
   no clean local regime — convergence-vs-triviality tension); b∈{2,4,8} at `γ=10` all 10/10
   convergent, balanced, non-trivial (triv ≤5%), settle ≤6 steps; the dense end (b=24) needs `γ=16`
@@ -1011,10 +1015,12 @@ behaviour-changing conclusions, and the next pointer. Append detail to LOG.md, n
   Canonical: `m22_disruption_base_20260627T160259_*`, `m22_size_{small_20260627T193419,
   base_20260627T203248,large_20260627T222418}_*`. (Minor non-blocking determinism note: grid-vs-standalone
   base agree in sign but differ ~0.02 per-arm — curriculum-RNG / trm_decoupled-matmul; audit pending.)
-- **[⚠ CONFOUNDED — read the M23 ADVERSARIAL REVIEW CORRECTION bullet below/in LOG.md before trusting this:
-  our TRM flattens the grid into one vector (no cross-cell mixing operator), so the "positive control" is NOT
-  a fair test and "implementation validated / negative confirmed" is WITHDRAWN. What survives: the coherence
-  edge + the ACT build.]** **The canonical-TRM positive-control TRIPWIRE (Sudoku) is MET in a SCOPED sense: scaled up, the loop
+- **[✅ RESOLVED by the M23 MIXER re-test — the negative was an ARCHITECTURE ARTIFACT, now OVERTURNED: a
+  weight-tied loop with a cross-cell MIXING update (`trm_mixer`) SOLVES hard Sudoku a param-matched
+  feedforward cannot — Δ(mixer−ff) EM +0.89…+0.96, 6/0, p=0.031, advantage GROWING with difficulty (TRM's
+  real signature). The flat `trm` used in the M23 body below could not mix cells and so tied ff; read the
+  "M23 MIXER re-test" bullet + LOG.md before using the M23 body's "coherence-only / raw-scale" framing.]**
+  **The canonical-TRM positive-control TRIPWIRE (Sudoku) is MET in a SCOPED sense: scaled up, the loop
   SIGNIFICANTLY beats a param-matched MLP on whole-grid EM (+0.092, 15/16 seeds, p=0.0005) — but it is the
   repo's COHERENCE edge in the EASY regime, NOT TRM's hard-puzzle-solving win (M23).** Built `sudoku`
   (synthetic, network-free, deterministic unique-solution puzzles; multi-output fixed point) to test whether
@@ -1062,6 +1068,28 @@ behaviour-changing conclusions, and the next pointer. Append detail to LOG.md, n
   fact that this loop doesn't learn genuine iterative search (fixed-depth pattern-matching — why more
   depth/segments/adaptive-compute all come back null on the hard regime). Pre-test confirmed fixed 8-seg
   depth alone also ties ff at hard. Canonical: `m23_sudoku_segments_pretest_*`, `m23_sudoku_act_sweep_20260702T*`.
+- **★ M23 MIXER re-test — the M23 NEGATIVE is OVERTURNED: the loop DOES do algorithmic hard-solving once
+  its update can MIX cells; the "coherence-only, no hard-solving" verdict was a FLAT-ARCHITECTURE artifact,
+  exactly as the adversarial review predicted.** Built `trm_mixer` (weight-tied loop; update = MLP-mixer
+  over the size² cells [token-mixing = constraint propagation] + per-cell channel MLP) — ONE knob vs the
+  flat `trm` (the mixing operator), everything else matched (tying, deep supervision, RMSNorm, n_steps,
+  data; params ±0.3%). On 6×6 at the difficulties where the flat trm/ff FLOOR (EM≈0 even at 80 epochs/16k in
+  M23): mixer EM **0.970 / 0.955 / 0.893** at n_givens 24/18/14 vs flat/ff ≈ 0 — **Δ(mixer−ff) EM +0.96/+0.96/
+  +0.89, all 6/0, p=0.031**, in ~15 epochs on 8k data. Three facts: **(1)** the advantage is HUGE and GROWS
+  as puzzles harden — TRM's canonical signature, the OPPOSITE of the flat loop's M23 reversal; **(2)** it is
+  the OPERATOR, not loop-vs-ff and not scale — `trm_flat ≈ ff` everywhere (Δ≈0, ns: a weight-tied loop with
+  a FLAT update is no better than a feedforward), the win needs the cell-mixing update, and it appears with
+  LESS compute than the flat arms had in M23; **(3)** discrepancies B (1-step gradient) and C (depth) were NOT
+  needed — full BPTT at n_steps=8 suffices once the operator is right. **Broader implication (flagged, NOT yet
+  tested — the key open question): every M0–M22 negative used the FLAT `trm`, so they are negatives about a
+  loop with a FLAT update.** Pure-tabular / exchangeable-feature targets (parity) have no structure to mix and
+  are likely robust, BUT the **CA / converge / hopfield family has ring/graph structure a mixer could exploit**
+  and should be RE-RUN with `trm_mixer` before their negatives are trusted as architecture-independent. The
+  synthetic thesis must be re-read as "loop-with-a-FLAT-update ≈ feedforward"; whether iterative refinement
+  helps is confounded with whether the update operator matches the task structure (the §8 trap, one axis
+  deeper than controlled). Caveats: 3-D matmul ⇒ bit-repro only at fixed num_threads (=1); baselines floor at
+  15 AND 80 epochs so not merely undertrained; easy cells (n_givens≥30) trivially solved (EM→1, omitted).
+  Canonical: `m23_sudoku_mixer_lean_20260702T*`; full narrative LOG.md "M23 MIXER re-test".
 
 ### (c) Next milestone
 
@@ -1129,23 +1157,21 @@ buys nothing robust over a shallow joint MLP on real tabular; the apparent EM wi
 artifact (§11(b) M20 bullet; LOG.md "M20 — PROPER EVALUATION"). **M19 (the H/L build) is still NOT earned —
 the Task C gate FAILED its equal-compute control test (M18g), Task C re-DEFERRED.** Open threads, in rough
 priority:
-- **The canonical-TRM Sudoku TRIPWIRE is BUILT but CONFOUNDED — an adversarial review downgraded it from
-  "positive control passed / implementation validated" to "not a fair test" (M23 correction).** What holds:
-  scaled up, the loop significantly beats a param-matched MLP on whole-grid EM (+0.092, 15/16, p=0.0005 — the
-  COHERENCE edge, easy regime), and ACT (now built, faithful, demonstrably adaptive — segments scale 1→8 with
-  difficulty) does NOT unlock hard-solving; the loop's edge REVERSES with difficulty. **BUT the review found
-  our TRM lacks the cross-cell MIXING operator the TRM paper's own Sudoku ablation credits (MLP-mixer/attention
-  over cells, 74.7%→87.4%): `make_sudoku` flattens the grid into ONE vector and `TRM.forward` refines it with a
-  structureless 2-layer MLP** — a categorically different model from TRM's Sudoku net, which cannot express
-  constraint propagation regardless of scale. Also missing: TRM's 1-step/no-grad-recursion gradient (we do full
-  BPTT — plausibly why M21 sees fixed-depth pattern-matching) and ~6× less recursion depth. **So M23 does NOT
-  confirm the negatives are implementation-clean; the "gap is raw scale" claim is withdrawn (scale is confounded
-  with architecture).** No bugs found (mechanics clean). Scope: the broad M0–M22 tabular/CA negatives are less
-  affected (no grid structure for mixing to exploit) and stand. **Decisive re-test (open):** add a per-cell-token
-  + cross-cell-mixing `trm` arm (self-attention or MLP-mixer over the size² cells) + ideally the 1-step gradient,
-  budget/tying-matched, re-run the easy→hard sweep — overturns M23 if the loop's edge GROWS with difficulty,
-  strengthens the negative if it still reverses. Reusable: generator + ACT machinery; lessons — EMA OFF at short
-  training, judge on whole-grid EM. Full narrative + sources: LOG.md "M23 — ADVERSARIAL REVIEW CORRECTION".
+- **★ The canonical-TRM Sudoku TRIPWIRE is DONE and the loop PASSES it — but only with the right ARCHITECTURE
+  (M23 → correction → MIXER re-test, resolved).** The flat `trm` tied ff and its edge reversed with difficulty;
+  ACT (built, faithful, adaptive) didn't change that. An adversarial review found the confound — our TRM
+  FLATTENED the grid, lacking the cross-cell MIXING operator the TRM paper credits for Sudoku (74.7%→87.4%) —
+  and the **MIXER re-test OVERTURNED the negative:** `trm_mixer` (MLP-mixer over the cells; one knob vs flat
+  `trm`, budget-matched ±0.3%) SOLVES hard Sudoku ff cannot — **Δ(mixer−ff) EM +0.89…+0.96, 6/0, p=0.031,
+  GROWING with difficulty** (TRM's real signature), in ~15 epochs on 8k data where the flat arms floored at
+  80 epochs/16k. `trm_flat ≈ ff` (a flat-update loop = feedforward), so it is the OPERATOR, not scale or
+  loop-vs-ff. **So the loop DOES do algorithmic hard-solving; the "coherence-only" verdict was a flat-architecture
+  artifact.** **HIGHEST-VALUE open thread this opens: re-run the CA/`converge`/`hopfield` family with `trm_mixer`**
+  — those tasks have ring/graph structure a mixer can exploit, and EVERY M0–M22 negative used the FLAT loop, so
+  "loop ≈ feedforward on structured synthetic tasks" may not survive a mixing update (pure-tabular parity,
+  exchangeable features, likely robust). Until then, read the synthetic negatives as "loop-with-a-FLAT-update ≈
+  feedforward," not a verdict on iterative refinement per se. Reusable: `trm_mixer` + generator + ACT machinery;
+  `trm_mixer` pins num_threads=1 (3-D matmul). Full narrative: LOG.md "M23 MIXER re-test".
 - **M21 (latent/weight introspection) is DONE — and reframes the whole question: the trained loop does NOT
   settle a latent fixed point even where it WINS** (residual ~1.2, ρ>1, frac_expanding=1.0 on BOTH the
   `converge` win regime and the `iterated` fail regime; over-unroll readout collapses everywhere). This
