@@ -540,3 +540,56 @@ def test_mixer_cells_communicate():
     changed = (~torch.isclose(base, pert, atol=1e-6)).any(dim=-1).squeeze(0)  # per-cell changed?
     assert changed[0].item()               # cell 0 changed (trivially)
     assert changed[1:].any().item()        # AND some OTHER cell changed => cross-cell mixing
+
+
+# --- M24e: mixing-matched untied controls (§4b for trm_mixer — the B1 isolation) -----------------
+from looptab.models.mixer import UntiedMixerStack, UntiedMixerStackMatched  # noqa: E402
+
+
+def test_untied_mixer_shapes_and_readouts():
+    torch.manual_seed(0)
+    m = UntiedMixerStack(in_features=27, num_classes=4, out_features=9, hidden_dim=16,
+                         latent_dim=16, n_steps=3, deep_supervision=True, token_hidden=8)
+    logits, all_logits = m(torch.randn(5, 27))
+    assert logits.shape == (5, 9, 4)
+    assert len(all_logits) == 3 and all(a.shape == (5, 9, 4) for a in all_logits)
+
+
+def test_untied_mixer_requires_multi_output_and_divisible():
+    with pytest.raises(ValueError):
+        UntiedMixerStack(in_features=27, num_classes=4, out_features=None)
+    with pytest.raises(ValueError):
+        UntiedMixerStack(in_features=28, num_classes=4, out_features=9)  # 28 % 9 != 0
+
+
+def test_untied_mixer_is_untied():
+    """Distinct weights per block (NOT weight-tied) — the axis vs trm_mixer."""
+    torch.manual_seed(0)
+    m = UntiedMixerStack(in_features=24, num_classes=2, out_features=24, hidden_dim=32,
+                         latent_dim=32, n_steps=4, token_hidden=16)
+    w0 = m.blocks[0].channel[0].weight
+    assert not any(m.blocks[i].channel[0].weight is w0 for i in range(1, 4))
+    assert not torch.equal(m.blocks[0].channel[0].weight, m.blocks[1].channel[0].weight)
+
+
+def test_untied_mixer_matched_within_budget_of_tied():
+    """The §4b clean control lands within ±5% of the tied TRMMixer's params at every width."""
+    torch.manual_seed(0)
+    for w in (24, 32, 48):
+        kw = dict(in_features=w, num_classes=2, out_features=w, hidden_dim=96, latent_dim=64,
+                  n_steps=8, deep_supervision=True, token_hidden=48, use_rmsnorm=True)
+        tied = TRMMixer(**kw).count_params()
+        matched = UntiedMixerStackMatched(**kw).count_params()
+        assert abs(matched / tied - 1.0) <= 0.05, (w, matched, tied)
+
+
+def test_untied_mixer_deterministic_same_seed():
+    torch.set_num_threads(1)
+
+    def build():
+        torch.manual_seed(1)
+        return UntiedMixerStackMatched(in_features=24, num_classes=2, out_features=24,
+                                       hidden_dim=96, latent_dim=64, n_steps=8, token_hidden=48,
+                                       use_rmsnorm=True)
+    a, b = build(), build()
+    assert all(torch.equal(p, q) for p, q in zip(a.parameters(), b.parameters()))

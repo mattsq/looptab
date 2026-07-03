@@ -1,0 +1,72 @@
+# M24d — mixer NEGATIVE control: `multi_parity` (multi-output but EXCHANGEABLE — no cross-cell structure).
+#
+# The structure-specificity check for the M24/M24b mixing capability. `multi_parity` predicts w INDEPENDENT
+# k-parities from the same d input bits — a multi-output target with NO coupling between outputs (§9.4:
+# exchangeable features / independent cells). The mixer's cell reshape (d bits → w cells of d/w) is therefore
+# ARBITRARY: output j is a parity of a k-subset of ALL d bits, unrelated to "cell j". So there is nothing for
+# the token-mixing operator to propagate. EXPECTED: the mixing marginal Δ(mixer − flat) ≈ 0 (the clean
+# negative-control statistic) — in sharp contrast to converge, where it was +0.20→+0.86 and grew with w. This
+# confirms the M24 win is STRUCTURE-specific, not generic capacity. (Δ(flat − ff) may be POSITIVE — that is the
+# M6a DEPTH effect on k≥4 parity, orthogonal to mixing; the loop beats a shallow MLP on high-order parity by
+# depth, and mixing adds nothing on top.)
+#
+# multi_parity takes no distractors arg; the mixer's only constraint is d % w == 0, so d=24 with w∈{4,8}. k=4
+# (depth-positive per M6a, so flat can beat ff — makes the "mixing adds nothing on top of the loop's depth win"
+# contrast crisp). n_train=8000 (parity is data-hungry). Recipe = M24 winner; num_threads=1 (3-D matmul).
+task:
+  name: multi_parity
+  params:
+    d: 24
+    k: 4
+  n_train: 8000
+  n_test: 2000
+  task_seed: 42
+  train_sample_seed: 1
+  test_sample_seed: 2
+
+sweep:
+  param: w
+  values: [4, 8]
+
+arms:
+  - name: trm_mixer
+    label: trm_mixer
+    hidden_dim: 54
+    latent_dim: 88
+    token_hidden: 48
+    n_steps: 8
+    n_latent: 1
+    use_rmsnorm: true
+    deep_supervision: true
+  - name: trm
+    label: trm_flat
+    hidden_dim: 64
+    latent_dim: 64
+    n_steps: 8
+    n_latent: 1
+    use_rmsnorm: true
+    deep_supervision: true
+  - name: ff_matched
+    label: ff_matched
+    hidden_dim: 64
+    latent_dim: 64
+    n_steps: 8
+
+deltas:
+  - [trm_mixer, trm_flat]     # MIXING marginal on exchangeable outputs (expected ~0 — the headline)
+  - [trm_flat, ff_matched]    # M6a depth effect on k=4 parity (may be +; orthogonal to mixing)
+  - [trm_mixer, ff_matched]   # mixer vs shallow MLP
+
+train:
+  epochs: 100
+  lr: 1e-3
+  weight_decay: 1e-4
+  batch_size: 256
+  device: cpu
+
+budget_reference: trm_flat
+budget_tol: 0.05
+
+seeds: [0, 1, 2, 3, 4, 5, 6, 7]
+parallel_workers: 4
+results_dir: results
