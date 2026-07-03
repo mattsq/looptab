@@ -1,0 +1,75 @@
+# M24 — trm_mixer re-test on `converge` (the M8–M12 joint-state CA family).
+#
+# M23 showed the flat `trm` failed Sudoku because its update CANNOT mix cells; `trm_mixer`
+# (token-mixing over the cells = constraint propagation) OVERTURNED that negative. But EVERY
+# M0–M22 negative used the flat loop, so "loop ≈ feedforward on structured synthetic tasks" may
+# not survive a mixing update on the ring CA tasks that have structure to exploit (CLAUDE.md §11c).
+#
+# This is the LEAN M23 isolation ported to converge: 3 arms, same training for all, the cell-mixing
+# operator the ONLY changed variable vs trm_flat. We sweep output width w — deliberately spanning
+# the regime where the FLAT loop's leg-2 edge over ff VANISHED by w≥32 (M9). If the mixer extends
+# the coherence win to w≥32/48, that is the clean "mixing helps on rings" signal; the M23 signature
+# is Δ(mixer − ff) large and GROWING with w, with Δ(flat − ff) ≈ 0 (flat loop ≈ feedforward).
+#
+# distractors=0 for ALL arms: trm_mixer requires in_features % out_features == 0 (no appended
+# distractor cols), and keeping it identical across arms keeps the comparison fair (the CA ring is
+# intact; just a cleaner s0→s_inf map). Budget: mixer within ±5% of trm_flat at w∈{24,32}; at w=48
+# the mixer is ~13% UNDER budget (a CONSERVATIVE breach — any win there is despite fewer params,
+# the same documented pattern as untied in M3a/M13/M22). num_threads pinned to 1 (mixer 3-D matmul).
+task:
+  name: converge
+  params:
+    rule: 78          # verified hard-convergence (ff-hard, EM ~0.31 @ w24); no distractors
+    distractors: 0
+  n_train: 4000
+  n_test: 1000
+  task_seed: 42
+  train_sample_seed: 1
+  test_sample_seed: 2
+
+sweep:
+  param: w
+  values: [24, 32, 48]   # 24 = flat edge present, 32/48 = flat edge vanished (M9)
+
+arms:
+  - name: trm_mixer
+    label: trm_mixer
+    hidden_dim: 96
+    latent_dim: 64
+    token_hidden: 48
+    n_steps: 8
+    n_latent: 1
+    use_rmsnorm: true
+    deep_supervision: true
+  - name: trm
+    label: trm_flat
+    hidden_dim: 64
+    latent_dim: 64
+    n_steps: 8
+    n_latent: 1
+    use_rmsnorm: true
+    deep_supervision: true
+  - name: ff_matched
+    label: ff_matched
+    hidden_dim: 64
+    latent_dim: 64
+    n_steps: 8
+
+deltas:
+  - [trm_mixer, ff_matched]   # headline: cell-mixing loop vs feedforward, vs width
+  - [trm_mixer, trm_flat]     # cell-mixing vs the flat loop (one knob)
+  - [trm_flat, ff_matched]    # sanity: flat loop ~ ff (M23 replication)
+
+train:
+  epochs: 100          # match the m9–m12 converge precedent (convergent target needs budget, M18)
+  lr: 1e-3
+  weight_decay: 1e-4
+  batch_size: 256
+  device: cpu
+
+budget_reference: trm_flat
+budget_tol: 0.05
+
+seeds: [0, 1, 2, 3, 4, 5, 6, 7]
+parallel_workers: 4
+results_dir: results

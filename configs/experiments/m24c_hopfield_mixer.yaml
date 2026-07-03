@@ -1,0 +1,75 @@
+# M24c — mixer NULL control: `hopfield` (dense threshold-net attractor, NO local structure).
+#
+# The bound on the M24/M24b mixing capability. M13 established the loop's joint-state edge does NOT
+# transfer to a DENSE, fully-coupled threshold net — ff is the BEST arm there (it already "sees the
+# whole row"; there is no local structure for a joint refinement to exploit). This asks whether the
+# cell-MIXING operator changes that. The mixer's token-mix is all-to-all, so it COULD in principle
+# match a dense coupling — this is a genuine test, not a foregone null: does mixing help where the
+# structure is dense/non-local? Expected (per M13 / §11c): NULL — the mixer needs LOCAL structure to
+# propagate; on a dense net the shallow MLP already has global view. Report honestly either way.
+#
+# Lean M24 isolation (mixer vs flat vs ff, same recipe, mixing the only changed variable). Locked M13
+# instance minus distractors (mixer needs in_features % out_features == 0; distractors=0 for all arms —
+# gamma=16 is the coupling self-term, independent of the appended distractor cols, so PSD convergence is
+# intact; the net is simply a touch less ff-hard without the noise bits). w∈{24,32} (M13's widths; same
+# cell shape as converge ⇒ the converge mixer dims transfer, within ±5%). num_threads=1 (3-D matmul).
+task:
+  name: hopfield
+  params:
+    weights: hebbian
+    n_patterns: 12
+    gamma: 16
+    distractors: 0
+    T: 6
+  n_train: 4000
+  n_test: 1000
+  task_seed: 42
+  train_sample_seed: 1
+  test_sample_seed: 2
+
+sweep:
+  param: w
+  values: [24, 32]
+
+arms:
+  - name: trm_mixer
+    label: trm_mixer
+    hidden_dim: 96
+    latent_dim: 64
+    token_hidden: 48
+    n_steps: 8
+    n_latent: 1
+    use_rmsnorm: true
+    deep_supervision: true
+  - name: trm
+    label: trm_flat
+    hidden_dim: 64
+    latent_dim: 64
+    n_steps: 8
+    n_latent: 1
+    use_rmsnorm: true
+    deep_supervision: true
+  - name: ff_matched
+    label: ff_matched
+    hidden_dim: 64
+    latent_dim: 64
+    n_steps: 8
+
+deltas:
+  - [trm_mixer, ff_matched]   # does mixing beat the shallow MLP on a DENSE net? (expected NULL)
+  - [trm_mixer, trm_flat]     # mixing marginal over the flat loop (expected ~0 — no local structure)
+  - [trm_flat, ff_matched]    # M13 replication: flat loop ≤ ff on dense
+
+train:
+  epochs: 100
+  lr: 1e-3
+  weight_decay: 1e-4
+  batch_size: 256
+  device: cpu
+
+budget_reference: trm_flat
+budget_tol: 0.05
+
+seeds: [0, 1, 2, 3, 4, 5, 6, 7]
+parallel_workers: 4
+results_dir: results

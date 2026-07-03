@@ -1,0 +1,76 @@
+# M24 — trm_mixer re-test on `iterated` (Task B, the depth / step-operator probe).
+#
+# Paired with m24_mixer_converge.yaml. `iterated` maps s0 → s_T of a CA (rule 110, Turing-complete,
+# genuine local propagation) — the NON-convergent, moving-target regime where the flat loop was
+# UNLEARNABLE one-shot past T=4 for EVERY arm, incl. the 16× untied ceiling (M3a). Sudoku also
+# "floored at EM≈0" for flat/ff and the mixer cracked it — this is the direct CA analog. Question:
+# does the cross-cell mixing operator (the natural expression of a local CA rule) let the loop track
+# more CA steps where the flat loop floored?
+#
+# We couple the loop's unroll depth to T (couple_n_steps_to_param), so at each difficulty the loop
+# gets exactly T refinement steps ≈ T CA updates (the mechanistic alignment). The M23 signature is
+# Δ(mixer − ff) growing as T deepens, with Δ(flat − ff) ≈ 0. Rule 110 (not 90, whose T-step map is
+# linear over GF(2) — M3a's "not a fair depth stress"; not 30's pure chaos). distractors=0 (mixer
+# constraint; identical across arms). Single width w=24 ⇒ budget-clean (mixer within ~0.3% of flat).
+# num_threads pinned to 1 (mixer 3-D matmul).
+task:
+  name: iterated
+  params:
+    w: 24
+    rule: 110         # Turing-complete local propagation; ff-hard past T=4 (M3a)
+    distractors: 0
+  n_train: 4000
+  n_test: 1000
+  task_seed: 42
+  train_sample_seed: 1
+  test_sample_seed: 2
+
+sweep:
+  param: T
+  values: [4, 8, 12]
+
+# Couple every loop arm's unroll depth to the swept T (each step ≈ one CA update).
+couple_n_steps_to_param: T
+
+arms:
+  - name: trm_mixer
+    label: trm_mixer
+    hidden_dim: 96
+    latent_dim: 64
+    token_hidden: 32
+    n_steps: 8            # ignored — coupled to T
+    n_latent: 1
+    use_rmsnorm: true
+    deep_supervision: true
+  - name: trm
+    label: trm_flat
+    hidden_dim: 64
+    latent_dim: 64
+    n_steps: 8            # ignored — coupled to T
+    n_latent: 1
+    use_rmsnorm: true
+    deep_supervision: true
+  - name: ff_matched
+    label: ff_matched
+    hidden_dim: 64
+    latent_dim: 64
+    n_steps: 8
+
+deltas:
+  - [trm_mixer, ff_matched]   # headline: cell-mixing loop vs feedforward, vs depth T
+  - [trm_mixer, trm_flat]     # cell-mixing vs the flat loop (one knob)
+  - [trm_flat, ff_matched]    # sanity: flat loop ~ ff (M3a replication)
+
+train:
+  epochs: 100          # match the m3a iterated precedent (non-convergent target is training-hungry)
+  lr: 1e-3
+  weight_decay: 1e-4
+  batch_size: 256
+  device: cpu
+
+budget_reference: trm_flat
+budget_tol: 0.05
+
+seeds: [0, 1, 2, 3, 4, 5, 6, 7]
+parallel_workers: 4
+results_dir: results

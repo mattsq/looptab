@@ -486,7 +486,11 @@ behaviour-changing conclusions, and the next pointer. Append detail to LOG.md, n
   matched, multi-output only), and `trm_mixer` (**M23 re-test — the loop with a CROSS-CELL MIXING
   update: keeps the grid as per-cell tokens and applies an MLP-mixer over the size² cells (token-mixing
   = the constraint-propagation operator the flat `trm` LACKS), then a per-cell channel MLP; multi-output
-  only, budget-matchable, `token_hidden` knob**). In `src/looptab/models/{trm,controls,decoupled,mixer}.py`,
+  only, budget-matchable, `token_hidden` knob**), and (**M24e — the B1 mixing-matched §4b controls**)
+  `untied_mixer` (the `trm_mixer` block stacked `n_steps`× WITHOUT weight tying — ~7× params, a labelled
+  ceiling) and `untied_mixer_matched` (that stack width-shrunk to the tied mixer's budget — the CLEAN tying
+  control; both reuse a standalone `_MixerBlock` = one `TRMMixer` step, so `TRMMixer` is untouched and M24
+  results stay bit-identical). In `src/looptab/models/{trm,controls,decoupled,mixer}.py`,
   registered in `src/looptab/registry.py`. **M18 TRM-faithful knobs (all OFF by default = bit-identical to
   pre-M18; `trm` only):** `use_rmsnorm` (RMSNorm on the latent each update), `n_latent` (z-updates
   per answer update; 1 = original 1:1), plus the training-side `n_sup` (detached deep-supervision
@@ -536,7 +540,8 @@ behaviour-changing conclusions, and the next pointer. Append detail to LOG.md, n
   m18i_nested_equalcompute_h128, m18j_nested_data64k, m21_introspection_{converge,iterated},
   m22_disruption_base, m22_size_{small,base,large},
   m23_sudoku_{screen,base,scaleup_screen,scaleup_base,scaleup_sig,segments_pretest,act_sweep,
-  mixer_sweep,mixer_lean}).
+  mixer_sweep,mixer_lean}, m24_mixer_{converge,iterated}, m24b_converge_ablation,
+  m24c_hopfield_mixer, m24d_multiparity_mixer, m24e_converge_mixer_untied).
 - **`hopfield` `bandwidth` regime (M14) — locked setting:** the local ladder needs **w=48** (w≤32 has
   no clean local regime — convergence-vs-triviality tension); b∈{2,4,8} at `γ=10` all 10/10
   convergent, balanced, non-trivial (triv ≤5%), settle ≤6 steps; the dense end (b=24) needs `γ=16`
@@ -1090,6 +1095,79 @@ behaviour-changing conclusions, and the next pointer. Append detail to LOG.md, n
   deeper than controlled). Caveats: 3-D matmul ⇒ bit-repro only at fixed num_threads (=1); baselines floor at
   15 AND 80 epochs so not merely undertrained; easy cells (n_givens≥30) trivially solved (EM→1, omitted).
   Canonical: `m23_sudoku_mixer_lean_20260702T*`; full narrative LOG.md "M23 MIXER re-test".
+- **[⚠ ADVERSARIAL-REVIEW CORRECTION + M24e RESOLUTION apply to ALL M24 bullets below — read first. The Δs
+  REPRODUCE, but the headline ATTRIBUTION is walked back. (B1, BLOCKER — now RESOLVED by M24e toward
+  ARCHITECTURE): "the LOOP does algorithmic hard-solving" is FALSE. The mixing-matched §4b controls
+  (`untied_mixer`/`untied_mixer_matched`) show a NON-recurrent untied mixer stack MATCHES the tied loop given
+  equal capacity — Δ(tied − 7×-untied-ceiling) EM is ns at every w (p≥.07), while even a BUDGET-matched untied
+  mixer beats ff by EM +0.31/+0.60/+0.65 (8/0). So the cross-cell MIXING ARCHITECTURE does the hard-solving;
+  weight-tied recurrence adds only the ordinary parameter-EFFICIENCY edge (P1: Δ(tied − untied_matched) EM
+  +0.03/+0.07/+0.29, 8/0, growing with w) but NO capability an untied mixer of equal capacity lacks — mirroring
+  M21 ("the loop is dressed-up depth"). Corrected headline: *a mixing architecture does the hard-solving; tying =
+  efficiency, not recurrence-qua-capability.* The "it's the operator not recurrence, because flat≈ff" logic was
+  also FALSE on converge (Δ(flat−ff) EM +0.14/+0.14/+0.08, 8/0 — the flat loop beats ff). (M1) M24b's "opposite
+  width-scaling ⇒ distinct mechanisms" is an EM-FLOOR artifact: on token-acc tying Δ(flat−untied) GROWS
+  (+0.087→+0.120), leg-1 is stable (~0.07); keep only "the mixer is width-robust while flat-update arms degrade."
+  (M3) the converge win is RAW per-cell accuracy (coh_excess vs ff is NEGATIVE −0.061), NOT the coherence
+  mechanism. (M4) the multi_parity mixer is ~broken on parity, so that control shows DIRECTION (mixer<ff 0/8) not
+  a clean marginal≈0. Full blocks: LOG.md "M24 — ADVERSARIAL-REVIEW CORRECTION" + "M24e".]**
+- **★ M24 — the MIXER re-test carried to the ORIGINAL ring tasks (`converge` + `iterated`): the verdict SPLITS
+  along the CONVERGENT / NON-CONVERGENT axis. On the CONVERGENT fixed-point ring the mixer SOLVES the task and
+  the win GROWS with difficulty (the CA `converge` negatives WERE a flat-architecture artifact); on the
+  NON-CONVERGENT moving CA the mixer improves the per-step operator but does NOT crack the depth wall (the
+  depth-extrapolation negatives SURVIVE the mixer).** Lean M23 isolation — `trm_mixer` vs `trm_flat` vs
+  `ff_matched`, same training (standard train + deep supervision + RMSNorm + full BPTT), the mixing operator the
+  ONLY changed variable; `distractors: 0` for all arms (mixer needs `in_features % out_features == 0`); 8 seeds;
+  num_threads=1. **`converge` (rule 78, sweep w∈{24,32,48}):** the mixer solves it at every width (acc ~0.998 ⇒
+  EM ≈ 1.0) while flat/ff degrade with w (acc 0.982→0.934 flat, 0.976→0.889 ff ⇒ EM collapses at ~0.93^48).
+  **Δ(mixer−ff) EM +0.345 / +0.676 / +0.942 and Δ(mixer−flat) EM +0.204 / +0.538 / +0.859 — all 8/0, p=.008,
+  GROWING monotonically with w** (the M23 signature on a ring CA). The flat loop's leg-2 edge over ff reproduces
+  (Δ(flat−ff) EM +0.14/+0.14/+0.08, 8/0) but is DWARFED — so the "small/marginal CA loop edge" the whole M8–M15
+  program characterized was the flat architecture leaving the win on the table (conservative at w48: mixer wins
+  with ~13% FEWER params, budget ratio 0.866). **`iterated` (rule 110, non-convergent moving CA, sweep T∈{4,8,12},
+  couple_n_steps_to_param=T):** a LARGE per-step operator win at the learnable depth — T=4 mixer acc 0.903 vs
+  flat 0.661 ≈ ff 0.665, **Δ(mixer−ff) acc +0.238 / EM +0.109, both 8/0, p=.008** (flat≈ff, 4/4, p=1.0 — the
+  M3a "flat loop = feedforward" replicated) — but the mixer does NOT crack the depth wall: at T≥8 the M3a
+  moving-target wall reasserts (all arms ~baseline 0.53, mixer edge +0.016 ns at T=8, gone at T=12), so the
+  advantage is LARGEST at T=4 and vanishes (the OPPOSITE of grows-with-difficulty). **Net: the mixer amplifies
+  the loop's value exactly where the program located it — fixed-point / convergent targets (§9.2) — without
+  unlocking depth-extrapolation (M1/M3a/M7/M8/M21).** So of the M0–M22 negatives, the COHERENCE-on-convergent-ring
+  ones are now shown to be flat-architecture artifacts (mixer solves them); the DEPTH-extrapolation negatives
+  survive. **M24b — the MECHANISM ablation (adding `trm_decoupled`/`untied_matched` to the converge setup) —
+  ANSWERS the attribution: the mixer's win is a DISTINCT capability, NOT leg-1 done better.** Using the flat loop
+  as the pivot (it already carries the joint state ⇒ Δ(mixer−flat) isolates mixing): the win decomposes into TWO
+  significant mechanisms with OPPOSITE width-scaling — leg-1 joint-state Δ(flat−decoupled) and P1 tying
+  Δ(flat−untied) are large but SHRINK with w (EM +0.58→+0.09, +0.60→+0.10), while the MIXING marginal
+  Δ(mixer−flat) GROWS (EM +0.20→+0.54→+0.86); all 8/0, p=.008, decoupled trainability-clean (acc 0.86–0.92). So
+  ordinary joint-state/tying coherence (the established §9.2 value) dominates at small w and plateaus; the explicit
+  cross-cell propagation operator is width-robust (mixer acc 0.999→0.998 vs flat 0.982→0.934) and carries the win
+  at w≥32 — exactly where M9 found the flat loop's coherence edge over ff vanished. P1 is BUDGET-CLEAN here (untied
+  within ±2%). Updated picture of the loop's value on local-update fixed-point rings: **joint-state coherence
+  (leg-1/P1, established) + a cell-mixing propagation capability (M24/M24b, NEW) — the latter is what the flat
+  architecture left on the table.**
+- **★ M24c + M24d — the two mixer CONTROLS bound the capability and REFRAME the dividing line: the mixer helps
+  wherever outputs are CROSS-CELL COUPLED (local `converge` AND — OVERTURNING the pre-registered null — DENSE
+  `hopfield`), and NOT where they are EXCHANGEABLE (`multi_parity`). "Cross-cell dependency," not "local rule," is
+  the axis.** Same lean 3-arm isolation (mixer vs flat vs ff, M24 recipe, distractors=0 for all — mixer divisibility
+  constraint; 8 seeds, num_threads=1). **M24c `hopfield` (dense threshold-net attractor, w∈{24,32}) — NOT the
+  expected null: the mixer WINS 8/0** — Δ(mixer−ff) acc +0.046/+0.044, EM +0.454/+0.362; Δ(mixer−flat) acc
+  +0.063/+0.059, EM +0.496/+0.377; all p=.008, budget-clean. The flat loop REPLICATES M13 (Δ(flat−ff) acc
+  −0.017/−0.015, 0/8 — flat < ff on a dense net) but the mixer beats both: the token-mix is a learned ALL-TO-ALL
+  cross-cell map, so it fits DENSE coupling as naturally as local — **M13's "loop edge is CA/local-specific, dies on
+  a dense net" was a FLAT-loop property, not a property of refinement** (same lesson as M23/M24). Caveat: distractors=0
+  ⇒ easier than M13's noise regime (ff acc 0.93 vs M13 EM ~0.26), and the mixer's divisibility constraint makes the
+  distractor=8 instance untestable — so the qualitative reframe stands, the exact-M13-regime question is out of reach.
+  **M24d `multi_parity` (w independent k=4 parities, w∈{4,8}) — the NEGATIVE control WORKS:** Δ(mixer−flat) ≤ 0 and ns
+  (acc −0.050 p=.29 / −0.087 p=.07; EM −0.033/−0.008) — mixing adds NO positive marginal on exchangeable outputs (vs
+  converge's +0.20→+0.86), and the mixer NEVER beats ff (Δ(mixer−ff) acc −0.32/−0.23, 0/8, p=.008 — a plain MLP is
+  best where outputs are uncoupled). So the M24 win is STRUCTURE-specific, not generic capacity. Caveat: loop arms
+  train unstably on parity under this recipe (some seeds at chance), so the airtight statement is the 0/8 mixer<ff.
+  **Net reframe (branch-closing): the mixer's cross-cell propagation capability is gated by cross-cell DEPENDENCY,
+  not locality — fires on local (`converge`) AND dense (`hopfield`) coupling, inert on independent outputs
+  (`multi_parity`); this further localizes the M13 negative as a flat-architecture artifact.** Canonical:
+  `m24c_hopfield_mixer_20260703T150202_*`, `m24d_multiparity_mixer_20260703T150912_*`; full narrative LOG.md M24c+M24d.
+  STILL untested (low priority): `mixed_converge`/`disruption` (MED structure). Earlier bullets' claim that these
+  controls were "expected NULL" is superseded by M24c (hopfield is a mixer WIN).
 
 ### (c) Next milestone
 
@@ -1166,12 +1244,41 @@ priority:
   GROWING with difficulty** (TRM's real signature), in ~15 epochs on 8k data where the flat arms floored at
   80 epochs/16k. `trm_flat ≈ ff` (a flat-update loop = feedforward), so it is the OPERATOR, not scale or
   loop-vs-ff. **So the loop DOES do algorithmic hard-solving; the "coherence-only" verdict was a flat-architecture
-  artifact.** **HIGHEST-VALUE open thread this opens: re-run the CA/`converge`/`hopfield` family with `trm_mixer`**
-  — those tasks have ring/graph structure a mixer can exploit, and EVERY M0–M22 negative used the FLAT loop, so
-  "loop ≈ feedforward on structured synthetic tasks" may not survive a mixing update (pure-tabular parity,
-  exchangeable features, likely robust). Until then, read the synthetic negatives as "loop-with-a-FLAT-update ≈
-  feedforward," not a verdict on iterative refinement per se. Reusable: `trm_mixer` + generator + ACT machinery;
-  `trm_mixer` pins num_threads=1 (3-D matmul). Full narrative: LOG.md "M23 MIXER re-test".
+  artifact.** The open thread this opened — re-run the CA ring family with `trm_mixer` — is **PARTLY DONE (M24,
+  below).** Reusable: `trm_mixer` + generator + ACT machinery; `trm_mixer` pins num_threads=1 (3-D matmul). Full
+  narrative: LOG.md "M23 MIXER re-test".
+- **★ M24 (the M23-mixer re-test carried to `converge` + `iterated`) is DONE — the verdict SPLITS on the
+  convergent/non-convergent axis.** On the CONVERGENT fixed-point ring (`converge`, rule 78, w∈{24,32,48}) the
+  mixer SOLVES the task (EM ≈ 1.0 at every width) while flat/ff degrade, **Δ(mixer−ff) EM +0.35/+0.68/+0.94 and
+  Δ(mixer−flat) +0.20/+0.54/+0.86, all 8/0 p=.008, GROWING with w** — so the marginal CA `converge` loop edge the
+  M8–M15 program characterized WAS a flat-architecture artifact (conservative at w48, mixer wins with ~13% fewer
+  params). On the NON-CONVERGENT moving CA (`iterated`, rule 110) the mixer gives a large per-step operator win at
+  the learnable depth (T=4: Δ(mixer−ff) acc +0.238 / EM +0.109, 8/0; flat≈ff) but does NOT crack the M3a depth
+  wall (T≥8 all arms ~baseline) — so the depth-extrapolation negatives SURVIVE the mixer. Net: the mixer amplifies
+  the loop's value on fixed-point/convergent targets (§9.2) without unlocking depth (M1/M8/M21). **The mechanism
+  ablation (M24b) is DONE:** adding `trm_decoupled`/`untied_matched` to the converge setup shows the mixer's win is
+  a DISTINCT capability, not leg-1 done better — joint-state (leg-1) + tying (P1) dominate at small w and FADE (EM
+  +0.58→+0.09), the MIXING marginal Δ(mixer−flat) GROWS (+0.20→+0.86) and carries the win at w≥32 where the flat
+  loop's coherence runs out; all 8/0, decoupled trainability-clean, P1 budget-clean. **The two CONTROLS are DONE
+  (M24c/M24d) and reframe the dividing line:** the mixer helps wherever outputs are CROSS-CELL COUPLED — local
+  `converge` AND (overturning the pre-registered M13-based null) DENSE `hopfield` (mixer beats flat+ff 8/0, EM
+  +0.36…+0.50; the flat loop still fails M13-style) — and NOT where outputs are EXCHANGEABLE (`multi_parity`:
+  Δ(mixer−flat)≤0 ns, mixer<ff 0/8). So "cross-cell dependency," not "local rule," is the axis, and the M13 negative
+  is further localized as a flat-architecture artifact. **[⚠ see the M24 ADVERSARIAL-REVIEW CORRECTION above: the
+  M24b "opposite width-scaling ⇒ distinct mechanisms" claim in this bullet is an EM-floor ARTIFACT — on token-acc
+  tying GROWS, not fades; keep only "mixer is width-robust while flat-update arms degrade." And the whole M24 arc
+  lacks the §4 mixing-matched controls, so "loop does the hard-solving" is unearned.]** **B1 RESOLVED (M24e)
+  toward ARCHITECTURE:** the §4b mixing-matched controls (`untied_mixer` ceiling + `untied_mixer_matched`) show a
+  NON-recurrent untied mixer stack MATCHES the tied loop at equal capacity (Δ(tied−7×-ceiling) EM ns at every w,
+  p≥.07) and a budget-matched untied mixer already beats ff by EM +0.31/+0.60/+0.65 (8/0) — so the cross-cell
+  MIXING architecture does the hard-solving; weight-tied recurrence adds only the parameter-EFFICIENCY edge (P1:
+  Δ(tied−untied_matched) EM +0.03/+0.07/+0.29, 8/0, growing with w), NOT a capability an untied mixer of equal
+  capacity lacks (mirrors M21's "dressed-up depth"). "The loop does hard-solving" → "a mixer does; tying =
+  efficiency." **STILL OPEN (low priority):** a stricter single-pass feedforward-mixer §4a (the untied stack
+  already shows non-recurrent mixing suffices, so it would only reinforce M24e); `mixed_converge`/`disruption`
+  (MED structure). Canonical: `m24_mixer_{converge,iterated}_20260703T*`, `m24b_converge_ablation_20260703T102323_*`,
+  `m24{c_hopfield,d_multiparity}_mixer_20260703T*`, `m24e_converge_mixer_untied_20260703T235935_*`; full narrative
+  LOG.md M24 / M24b / M24c+M24d / M24e + correction.
 - **M21 (latent/weight introspection) is DONE — and reframes the whole question: the trained loop does NOT
   settle a latent fixed point even where it WINS** (residual ~1.2, ρ>1, frac_expanding=1.0 on BOTH the
   `converge` win regime and the `iterated` fail regime; over-unroll readout collapses everywhere). This
