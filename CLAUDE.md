@@ -468,6 +468,21 @@ behaviour-changing conclusions, and the next pointer. Append detail to LOG.md, n
   **Eval (M20-review fix):** `multilabel_f1` (micro+macro, the honest co-headline to EM) and **K-fold CV**
   (`n_folds`/`cv_seed` in `make_multilabel_splits` — disjoint test folds, so the paired sign test is valid;
   the legacy random-split mode overlaps ~0.30 and suppresses the sign test). Configs use 10-fold CV.
+  **SCHEDULE-HISTORY BRIDGE (infrastructure only, no milestone/experiment run yet):**
+  `src/looptab/data/schedule_history.py` (`ScheduleHistory` + `transform_schedule_history` +
+  `fit_bank_vocabulary`) converts a real, versioned flight-state HISTORY table — one row per
+  change-event snapshot, keyed by `(flight_id, version)` — into `make_disruption`'s exact `(X, y)`
+  contract (`[severe_0, is_head, bank_onehot]` per-flight blocks, canonical tail-then-departure
+  order, no distractor columns so `trm_mixer`'s `in_features % out_features == 0` holds). Each
+  flight's FIRST recorded snapshot supplies `severe_0` + structural features (t0, no lookahead);
+  its LAST supplies the settled `y` label. Disruption-component membership is taken as an explicit
+  input column (real data has no `task_seed`-derived coupling matrix to infer it from); components
+  whose flight count ≠ `w` are dropped and reported, not padded/truncated. `bank_categories` must be
+  fit once (`fit_bank_vocabulary`) and reused across train/test, mirroring `real.py`'s
+  train-stats-only discipline; an unseen bank value raises loudly. Determinism/contract-matching
+  tests in `tests/test_schedule_history.py`. Not yet wired into `make_splits`/a config/an
+  experiment — that (plus a real disruption-history source) is future work, analogous to how M20
+  vendored `multilabel` before any run used it.
   **SUDOKU (M23, the canonical-TRM positive-control TRIPWIRE):** `sudoku` (one row = one unique-solution
   puzzle; X = one-hot per cell over {blank,1..size}, y = the solved grid as `(size*size,)` classes
   `0..size-1` — a multi-output FIXED POINT, shape-compatible with converge/disruption). `make_sudoku`
