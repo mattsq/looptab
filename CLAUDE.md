@@ -541,7 +541,8 @@ behaviour-changing conclusions, and the next pointer. Append detail to LOG.md, n
   m22_disruption_base, m22_size_{small,base,large},
   m23_sudoku_{screen,base,scaleup_screen,scaleup_base,scaleup_sig,segments_pretest,act_sweep,
   mixer_sweep,mixer_lean}, m24_mixer_{converge,iterated}, m24b_converge_ablation,
-  m24c_hopfield_mixer, m24d_multiparity_mixer, m24e_converge_mixer_untied).
+  m24c_hopfield_mixer, m24d_multiparity_mixer, m24e_converge_mixer_untied,
+  m24f_disruption_{mixer_w24,mixer_w32,ablation_w24,ablation_w32,untied_w24,untied_w32}).
 - **`hopfield` `bandwidth` regime (M14) — locked setting:** the local ladder needs **w=48** (w≤32 has
   no clean local regime — convergence-vs-triviality tension); b∈{2,4,8} at `γ=10` all 10/10
   convergent, balanced, non-trivial (triv ≤5%), settle ≤6 steps; the dense end (b=24) needs `γ=16`
@@ -1020,6 +1021,19 @@ behaviour-changing conclusions, and the next pointer. Append detail to LOG.md, n
   Canonical: `m22_disruption_base_20260627T160259_*`, `m22_size_{small_20260627T193419,
   base_20260627T203248,large_20260627T222418}_*`. (Minor non-blocking determinism note: grid-vs-standalone
   base agree in sign but differ ~0.02 per-arm — curriculum-RNG / trm_decoupled-matmul; audit pending.)
+  **[⚠ UPDATE — this leg-2 NULL is OVERTURNED as a FLAT-ARCHITECTURE artifact by M24f (verdict post-adversarial-review):
+  re-run with the cross-cell `trm_mixer`, the mixer significantly out-accuracies ff — Δ(mixer−ff) ACC +0.041/+0.034
+  @ w24/w32, 8/0, p=.008 (EM +0.49/+0.48 is the SAME edge amplified by whole-row EM; `coherence_excess` Δ(mixer−ff)
+  −0.044/+0.004 [≤0 / ≈0-ns], so it is a RAW per-cell-accuracy win on a ~93%-linear task, NOT a coherence edge) —
+  while the flat loop ties/trails ff (acc −0.006/−0.009), so the null was flat-update-specific. It is PRIMARILY the
+  mixer ARCHITECTURE not recurrence (M24e-style control, both widths: budget-matched untied mixer already beats ff
+  acc +0.034/+0.026 8/0) — with a width-dependent tying refinement: tying is ns at w24 but SIGNIFICANT at w32 (tied
+  beats even the 7.5× untied ceiling acc +0.005 / EM +0.088 8/0 — consistent with the untied stack overfitting,
+  train 1.0→test 0.755), so recurrence is not entirely irrelevant at higher width, unlike M24e's near-solve
+  converge (one width transition, an evidenced observation not a proven law). The mixing operator is
+  a distinct capability (untied mixer > untied non-mixer +0.098 acc) but does NOT "dwarf" the §9.2 legs on accuracy
+  (mixing +0.047 vs leg-1 +0.065 / P1 +0.058 — the EM "dwarfs" was an EM-floor artifact). Read the M24 cluster
+  bullet + LOG.md M24f before citing this null.]**
 - **[✅ RESOLVED by the M23 MIXER re-test — the negative was an ARCHITECTURE ARTIFACT, now OVERTURNED: a
   weight-tied loop with a cross-cell MIXING update (`trm_mixer`) SOLVES hard Sudoku a param-matched
   feedforward cannot — Δ(mixer−ff) EM +0.89…+0.96, 6/0, p=0.031, advantage GROWING with difficulty (TRM's
@@ -1166,8 +1180,11 @@ behaviour-changing conclusions, and the next pointer. Append detail to LOG.md, n
   not locality — fires on local (`converge`) AND dense (`hopfield`) coupling, inert on independent outputs
   (`multi_parity`); this further localizes the M13 negative as a flat-architecture artifact.** Canonical:
   `m24c_hopfield_mixer_20260703T150202_*`, `m24d_multiparity_mixer_20260703T150912_*`; full narrative LOG.md M24c+M24d.
-  STILL untested (low priority): `mixed_converge`/`disruption` (MED structure). Earlier bullets' claim that these
-  controls were "expected NULL" is superseded by M24c (hopfield is a mixer WIN).
+  `disruption` (MED structure) since tested and is a mixer WIN too (M24f — the M22 leg-2 null was a
+  flat-architecture artifact; Δ(mixer−ff) ACC +0.041/+0.034, 8/0 — EM +0.49/+0.48 is that edge amplified, NOT a
+  coherence win [coh_excess Δ ≤ 0]; architecture-not-recurrence per the M24e-style control). STILL untested (low
+  priority): `mixed_converge` (the last MED-structure task). Earlier bullets' claim
+  that these controls were "expected NULL" is superseded by M24c (hopfield is a mixer WIN).
 
 ### (c) Next milestone
 
@@ -1274,10 +1291,23 @@ priority:
   MIXING architecture does the hard-solving; weight-tied recurrence adds only the parameter-EFFICIENCY edge (P1:
   Δ(tied−untied_matched) EM +0.03/+0.07/+0.29, 8/0, growing with w), NOT a capability an untied mixer of equal
   capacity lacks (mirrors M21's "dressed-up depth"). "The loop does hard-solving" → "a mixer does; tying =
-  efficiency." **STILL OPEN (low priority):** a stricter single-pass feedforward-mixer §4a (the untied stack
-  already shows non-recurrent mixing suffices, so it would only reinforce M24e); `mixed_converge`/`disruption`
-  (MED structure). Canonical: `m24_mixer_{converge,iterated}_20260703T*`, `m24b_converge_ablation_20260703T102323_*`,
-  `m24{c_hopfield,d_multiparity}_mixer_20260703T*`, `m24e_converge_mixer_untied_20260703T235935_*`; full narrative
+  efficiency." **`disruption` DONE (M24f, verdict post-adversarial-review):** carried the mixer re-test (+ M24b
+  mechanism + M24e tying controls) to the airline `disruption` operator — the M22 leg-2 NULL was a FLAT-ARCHITECTURE
+  artifact: the mixer significantly out-accuracies ff (Δ(mixer−ff) ACC +0.041/+0.034 @ w24/w32, 8/0, p=.008; EM
+  +0.49/+0.48 is the SAME edge amplified by whole-row EM — `coherence_excess` Δ(mixer−ff) −0.044/+0.004 [≤0/≈0-ns],
+  a raw per-cell-accuracy win on a ~93%-linear task, NOT coherence) where the flat loop ties/trails ff, and it is
+  PRIMARILY the ARCHITECTURE not recurrence (budget-matched untied mixer beats ff acc +0.034/+0.026 8/0 at w24/w32).
+  Tying is width-dependent: ns at w24 (M24e efficiency edge) but SIGNIFICANT at w32 (tied beats the 7.5× untied
+  ceiling acc +0.005 / EM +0.088 8/0 — consistent with the untied stack overfitting; one width transition, an
+  evidenced observation not a proven law). The mixing operator is a distinct capability (untied mixer > untied
+  non-mixer +0.098 acc) but does NOT "dwarf" the §9.2 legs on accuracy (an EM-floor artifact) — so `disruption`
+  (MED structure: LOCAL rotation chains + NON-LOCAL bank cliques) joins the CROSS-CELL-COUPLED side alongside
+  `converge`/`hopfield`.
+  **STILL OPEN (low priority):** a stricter single-pass feedforward-mixer §4a (the untied stack already shows
+  non-recurrent mixing suffices, so it would only reinforce M24e); `mixed_converge` (the last MED-structure task).
+  Canonical: `m24_mixer_{converge,iterated}_20260703T*`, `m24b_converge_ablation_20260703T102323_*`,
+  `m24{c_hopfield,d_multiparity}_mixer_20260703T*`, `m24e_converge_mixer_untied_20260703T235935_*`,
+  `m24f_disruption_{mixer_w24,mixer_w32,ablation_w24,ablation_w32,untied_w24,untied_w32}_20260704T*`; full narrative
   LOG.md M24 / M24b / M24c+M24d / M24e + correction.
 - **M21 (latent/weight introspection) is DONE — and reframes the whole question: the trained loop does NOT
   settle a latent fixed point even where it WINS** (residual ~1.2, ρ>1, frac_expanding=1.0 on BOTH the
