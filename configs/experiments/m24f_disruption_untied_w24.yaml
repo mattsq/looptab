@@ -1,0 +1,89 @@
+# M24f Stage 2b — the TYING control: is the M24f disruption win the mixer ARCHITECTURE or weight-tied
+# RECURRENCE? (w=24). Mirrors M24e on converge, which RESOLVED toward ARCHITECTURE.
+#
+# Stage 1's only mixing arm was the tied loop, so Δ(mixer−ff)/(mixer−flat) confound the cross-cell
+# MIXING OPERATOR with the flat→mixer redesign — neither isolates whether weight-tied RECURRENCE
+# contributes. The token-mix is all-to-all, so a single non-looped mixer block already couples every
+# cell; a NON-tied mixer stack might solve disruption just as well. Add the §4b mixing-matched controls:
+#   - untied_mixer_matched (CLEAN §4b): the SAME mixer block stacked n_steps× WITHOUT weight tying,
+#     width-shrunk to the tied mixer's param budget. Δ(trm_mixer − untied_mixer_matched) = TYING at
+#     fixed budget.
+#   - untied_mixer (CEILING, ~7× params, full width, budget-EXEMPT): if even a 7×-param untied mixer
+#     stack fails to match the tied loop, tying genuinely helps; if it matches/beats it, the win is
+#     architecture+depth, NOT recurrence.
+#   - ff_matched: continuity + the "does an untied mixer already beat the MLP" read.
+# READING (mirrors M8c/M2 tying logic): trm_mixer beats BOTH untied arms → tied recurrence does real
+# work; untied_mixer (ceiling) matches/beats trm_mixer → M24f is an ARCHITECTURE result, recurrence
+# irrelevant (the M24e converge verdict — expect the same, report honestly). Same task/recipe/width/
+# seeds as m24f_disruption_mixer_w24 (standard train + deep supervision + full BPTT; untied arms share
+# the mixer's rmsnorm/token_hidden). num_threads=1 (mixer 3-D matmul). budget_reference=trm_mixer (the
+# arm under test); untied_mixer is the exempt ceiling. gamma=14 (minimal-PSD @ w24, Stage-0 confirmed).
+task:
+  name: disruption
+  params:
+    w: 24
+    n_banks: 4
+    w_rot: 6
+    w_bank: 3
+    min_tail: 2
+    max_tail: 8
+    gamma: 14
+    distractors: 0
+  n_train: 4000
+  n_test: 1000
+  task_seed: 42
+  train_sample_seed: 1
+  test_sample_seed: 2
+
+arms:
+  - name: trm_mixer
+    label: trm_mixer
+    hidden_dim: 96
+    latent_dim: 64
+    token_hidden: 192
+    n_steps: 8
+    n_latent: 1
+    use_rmsnorm: true
+    deep_supervision: true
+  - name: untied_mixer_matched
+    label: untied_mixer_matched   # CLEAN §4b: untied mixer stack, budget-matched (tying isolated)
+    hidden_dim: 96
+    latent_dim: 64
+    token_hidden: 192
+    n_steps: 8
+    use_rmsnorm: true
+    deep_supervision: true
+  - name: untied_mixer
+    label: untied_mixer           # CEILING (~7× params, full width) — capacity-unconstrained
+    hidden_dim: 96
+    latent_dim: 64
+    token_hidden: 192
+    n_steps: 8
+    use_rmsnorm: true
+    deep_supervision: true
+  - name: ff_matched
+    label: ff_matched
+    hidden_dim: 64
+    latent_dim: 64
+    n_steps: 8
+
+deltas:
+  - [trm_mixer, untied_mixer_matched]   # HEADLINE: does tying the mixer help at fixed budget?
+  - [trm_mixer, untied_mixer]           # does tying beat a ~7×-param full-width untied mixer stack?
+  - [trm_mixer, ff_matched]             # M24f continuity (the confounded loop+mixing vs flat MLP)
+  - [untied_mixer_matched, ff_matched]  # does an untied mixer (budget-matched) already beat the MLP?
+
+train:
+  epochs: 100
+  lr: 1e-3
+  weight_decay: 1e-4
+  batch_size: 256
+  device: cpu
+
+budget_reference: trm_mixer
+budget_ceiling: [untied_mixer]
+budget_tol: 0.05
+
+seeds: [0, 1, 2, 3, 4, 5, 6, 7]
+parallel_workers: 4
+results_dir: results

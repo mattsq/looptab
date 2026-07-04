@@ -239,11 +239,14 @@ class UntiedMixerStackMatched(nn.Module):
     """Param-matched UNTIED mixer stack — the CLEAN weight-tying control for ``trm_mixer`` (§4b/§8).
 
     ``UntiedMixerStack`` is depth-matched but ~n_steps× over budget, so its Δ co-varies tying with
-    capacity. This width-shrinks every block (hidden = latent = w) so the stack's TOTAL params ≈ the
-    tied mixer's budget (same nearest-match search the flat ``UntiedStackMatched`` uses), holding
-    capacity AND depth fixed and varying ONLY weight tying. ``token_hidden`` is held at the tied
-    mixer's value (the token-mix is the operator under test); only the channel/latent width shrinks.
-    Budget reference = a ``TRMMixer`` at the passed ``hidden_dim/latent_dim/token_hidden``.
+    capacity. This width-shrinks every block (hidden = latent = token_hidden = w) so the stack's
+    TOTAL params match the tied mixer's budget (the nearest-match search the flat
+    ``UntiedStackMatched`` uses), holding capacity AND depth fixed and varying ONLY weight tying.
+    Note the token-mix width shrinks WITH the channel width (=w) -- see ``_mixer_stack_params``: the
+    untied stack's ``n_steps`` token-mix layers dominate the budget, so a fair match must narrow
+    them too (the untied control ends up with a NARROWER mixer than the tied loop, which if anything
+    strengthens "architecture, not tying"). Budget ref = a ``TRMMixer`` at the passed
+    hidden/latent/token_hidden.
     """
 
     def __init__(self, in_features, num_classes, hidden_dim=64, latent_dim=64, n_steps=4,
