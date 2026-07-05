@@ -29,7 +29,9 @@ from .eval.metrics import (
     delta_report,
     evaluate,
     evaluate_act,
+    evaluate_regression,
     majority_baseline,
+    persistence_baseline_mse,
     subset_accuracy_baseline,
 )
 from .registry import get_model
@@ -96,6 +98,14 @@ def _baselines(loader, *, want_exact_match: bool) -> dict[str, float]:
     return out
 
 
+def _regression_baselines(loader, *, lookback: int, n_vars: int) -> dict[str, float]:
+    """Persistence (naive-forecast) baseline for M26: predict the last observed value for every
+    horizon step. `accuracy`=−mse mirrors the classification baseline so the runner's gap plumbing
+    stays uniform; the meaningful figures are mse/mae/r2."""
+    b = persistence_baseline_mse(loader, lookback=lookback, n_vars=n_vars)
+    return {"accuracy": -b["mse"], "mse": b["mse"], "mae": b["mae"], "r2": b["r2"]}
+
+
 def run_point(cfg: ExperimentConfig, task_params: dict, seed: int) -> tuple[dict, dict, dict]:
     """Train every arm for one (sweep-value, seed) point. Returns (results, models)."""
     task_cfg = cfg.task
@@ -118,17 +128,26 @@ def run_point(cfg: ExperimentConfig, task_params: dict, seed: int) -> tuple[dict
 
     X_sample, _ = train_ds[0]
     in_features = int(X_sample.shape[0])
-    # The binary suite (M0–M22) is 2-class per cell; Sudoku (M23) is `size`-class. Infer the class
-    # count from the training targets (max label + 1), clamped to ≥2. Every binary task has both
-    # classes present in every column, so this is exactly 2 there → model construction and all
-    # committed results stay bit-identical; multi-class tasks (sudoku) get their true `size`.
-    num_classes = max(2, int(train_ds.y.max()) + 1)
 
-    # Exact-match is only a distinct metric for multi-output targets (§3). For
-    # single-output tasks it equals accuracy, so we don't report it (avoids a
-    # redundant CSV row that reads like an independent signal).
-    multi_output = train_ds.y.ndim > 1
-    out_features = int(train_ds.y.shape[-1]) if multi_output else None
+    # M26 forecasting REGRESSION: targets are (N, M, H) float — M variable-cells each predicting an
+    # H-step horizon. The readout width per cell = the horizon (num_classes=H, no softmax), cells =
+    # M variables. Detected by objective so every classification task stays byte-identical.
+    regression = getattr(task_cfg, "objective", "classification") == "regression"
+    if regression:
+        num_classes = int(train_ds.y.shape[-1])       # horizon H = readout width per cell
+        out_features = int(train_ds.y.shape[-2])      # M variables = cells
+        multi_output = True
+    else:
+        # The binary suite (M0–M22) is 2-class per cell; Sudoku (M23) is `size`-class. Infer the
+        # class count from the training targets (max label + 1), clamped to ≥2. Every binary task
+        # has both classes present in every column, so this is exactly 2 there → model construction
+        # and all committed results stay bit-identical; multi-class tasks (sudoku) get their `size`.
+        num_classes = max(2, int(train_ds.y.max()) + 1)
+        # Exact-match is only a distinct metric for multi-output targets (§3). For single-output
+        # tasks it equals accuracy, so we don't report it (avoids a redundant CSV row that reads
+        # like an independent signal).
+        multi_output = train_ds.y.ndim > 1
+        out_features = int(train_ds.y.shape[-1]) if multi_output else None
 
     # M3a: optionally couple every arm's unroll depth to a swept task param (e.g. T), so
     # one config sweeps depth with the loop's n_steps tracking the CA step count.
@@ -162,6 +181,14 @@ def run_point(cfg: ExperimentConfig, task_params: dict, seed: int) -> tuple[dict
         # shuffle stream are identical across arms and independent of arm order.
         torch.manual_seed(seed)
         m = _build_model(arm, in_features, num_classes, out_features, n_steps=coupled_steps)
+        if regression and (curriculum is not None or arm.use_act or arm.n_sup > 1):
+            # M26 regression uses the standard MSE train path only; the curriculum/ACT/N_sup
+            # routines are CA-trajectory / classification mechanisms (they build CE losses and
+            # exact-match halt targets). Fail loudly rather than silently train on the wrong loss.
+            raise ValueError(
+                f"arm '{arm.resolved_label()}': regression (objective=regression) supports only "
+                "standard train path — curriculum / use_act / n_sup>1 are classification routines."
+            )
         if curriculum is not None and arm.n_sup > 1:
             # The N_sup detached-carry routine is a standard-train mechanism; combining it with
             # the trajectory curriculum would conflate two different supervision schemes. Fail
@@ -255,8 +282,28 @@ def run_point(cfg: ExperimentConfig, task_params: dict, seed: int) -> tuple[dict
                 weight_decay=cfg.train.weight_decay,
                 deep_supervision_weight=arm.deep_supervision_weight,
                 ema_decay=arm.ema_decay,
+                loss_type="mse" if regression else "ce",
                 device=device,
             )
+        # M26 forecasting: MSE/MAE/R² from the raw regression readout (no argmax). `accuracy`
+        # mirrors −mse so the generic curve/baseline plumbing stays meaningful; the reported
+        # headline metrics are mse/mae/r2. Train "accuracy" here is −train-MSE (same diagnostic
+        # role: a big train/test MSE gap = overfit).
+        if regression:
+            want_f1 = False
+            test_metrics = evaluate_regression(m, test_loader, device)
+            train_acc = evaluate_regression(m, train_loader, device)["accuracy"]
+            metrics = {
+                "accuracy": test_metrics["accuracy"],
+                "train_accuracy": train_acc,
+                "n_params": m.count_params(),
+                "mse": test_metrics["mse"],
+                "mae": test_metrics["mae"],
+                "r2": test_metrics["r2"],
+            }
+            results[arm.resolved_label()] = metrics
+            models[arm.resolved_label()] = m
+            continue
         # One forward pass over the test set yields both accuracy and (for multi-output
         # Task B) exact-match; train accuracy is a separate pass. F1 is multilabel-only
         # (M20) so synthetic-task evals stay byte-identical.
@@ -319,7 +366,13 @@ def run_point(cfg: ExperimentConfig, task_params: dict, seed: int) -> tuple[dict
                 seed=seed,
             )
 
-    return results, models, _baselines(test_loader, want_exact_match=multi_output), diagnostics
+    if regression:
+        baselines = _regression_baselines(
+            test_loader, lookback=int(task_params.get("lookback", 96)), n_vars=out_features
+        )
+    else:
+        baselines = _baselines(test_loader, want_exact_match=multi_output)
+    return results, models, baselines, diagnostics
 
 
 def _std(xs: list[float]) -> float:
@@ -358,6 +411,11 @@ def _aggregate(per_seed: list[dict], labels: list[str]) -> dict:
                 vals = [s[lbl][f1k] for s in per_seed]
                 stats[f"{f1k}_mean"] = float(np.mean(vals))
                 stats[f"{f1k}_std"] = _std(vals)
+        for rk in ("mse", "mae", "r2"):  # M26 forecasting-regression metrics
+            if rk in per_seed[0][lbl]:
+                vals = [s[lbl][rk] for s in per_seed]
+                stats[f"{rk}_mean"] = float(np.mean(vals))
+                stats[f"{rk}_std"] = _std(vals)
         if "avg_segments" in per_seed[0][lbl]:  # M23 ACT adaptive-compute diagnostic
             segs = [s[lbl]["avg_segments"] for s in per_seed]
             stats["avg_segments_mean"] = float(np.mean(segs))
@@ -630,9 +688,12 @@ def cv_sign_test_status(task_name: str, task_params: dict, seeds: list[int]) -> 
     Computed from the **per-point** ``task_params`` (not the base config) so a sweep/grid that
     overrides ``n_folds`` is honoured.
     """
-    if task_name != "multilabel":
+    if task_name not in ("multilabel", "etth1"):
         return True, "independent (fresh function + rows per seed)"
-    n_folds = task_params.get("n_folds")
+    # M26 etth1: the expanding-window backtest maps seed → a DISJOINT chronological test block
+    # (fold = seed % n_folds), same validity condition as multilabel K-fold — and stronger, since
+    # each block's train set is its own past prefix (more independent than K-fold's shared train).
+    n_folds = task_params.get("n_folds", 10 if task_name == "etth1" else None)
     if not n_folds:
         return False, "random real-data splits overlap and are not independent"
     folds = [s % int(n_folds) for s in seeds]
@@ -642,10 +703,10 @@ def cv_sign_test_status(task_name: str, task_params: dict, seeds: list[int]) -> 
             f"selected seeds map to {len(set(folds))} distinct fold(s) of {len(folds)} seeds "
             f"(seed % n_folds collides; need n_folds ≥ #seeds with distinct residues)",
         )
+    kind = "expanding-window backtest blocks" if task_name == "etth1" else "K-fold test sets"
     return (
         True,
-        "DISJOINT K-fold test sets (train sets still overlap — treat p as indicative, "
-        "cf. Dietterich 1998)",
+        f"DISJOINT {kind} (treat p as indicative, cf. Dietterich 1998)",
     )
 
 
@@ -754,6 +815,18 @@ def main():
                     )
                     deltas[f"{a}-{b}"]["coherence_excess"] = ce_rep
                     line += f"  [coh {ce_rep['delta_mean']:+.4f} ± {ce_rep['delta_std']:.4f}]"
+            # M26: forecasting-regression Δs (lower MSE/MAE is better, so a NEGATIVE Δ favours the
+            # first arm — the opposite sign convention to accuracy; the writeup states this).
+            for rk, tag in (("mse", "MSE"), ("mae", "MAE"), ("r2", "R2")):
+                if rk in per_seed[0][a]:
+                    r_rep = delta_report(
+                        [s[a][rk] for s in per_seed],
+                        [s[b][rk] for s in per_seed],
+                        label=rk,
+                        paired_sign_test=paired_sign_tests,
+                    )
+                    deltas[f"{a}-{b}"][rk] = r_rep
+                    line += f"  [{tag} {r_rep['delta_mean']:+.4f} ± {r_rep['delta_std']:.4f}]"
             print(line)
 
         # Aggregate extrapolation results across seeds
@@ -855,6 +928,10 @@ def main():
             if "exact_match" in p["agg"].get("baselines", {}):
                 b = p["agg"]["baselines"]["exact_match"]
                 w.writerow([p["label"], "baseline", "exact_match", b["mean"], b["std"], 0])
+            for rk in ("mse", "mae", "r2"):  # M26 persistence-forecast baseline
+                if rk in p["agg"].get("baselines", {}):
+                    b = p["agg"]["baselines"][rk]
+                    w.writerow([p["label"], "baseline", rk, b["mean"], b["std"], 0])
             for lbl in labels:
                 a = p["agg"][lbl]
                 w.writerow(
@@ -900,6 +977,11 @@ def main():
                                 a[f"{f1k}_std"],
                                 a["n_params"],
                             ]
+                        )
+                for rk in ("mse", "mae", "r2"):  # M26 forecasting-regression metrics
+                    if f"{rk}_mean" in a:
+                        w.writerow(
+                            [p["label"], lbl, rk, a[f"{rk}_mean"], a[f"{rk}_std"], a["n_params"]]
                         )
                 if "avg_segments_mean" in a:  # M23 ACT adaptive-compute diagnostic
                     w.writerow(

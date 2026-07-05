@@ -1,0 +1,94 @@
+# M25 (confirm) — the cross-cell MIXER re-test on real multi-label `scene`.
+#
+# The second large decisive venue, with the OPPOSITE label coupling to yeast: scene is near
+# mutually-exclusive (294 features, 6 labels, cardinality 1.07 — 177/2407 rows truly multi-label).
+# M20 replicated its yeast verdict here (leg-1 robust but not loop-specific; Δ(trm−ff) EM-only, a
+# 5/5 F1 tie). This asks whether the cross-cell mixer transfers on mutual-exclusion coupling.
+#
+# Same 6-arm design / deltas / recipe as m25_mixer_multilabel_yeast.yaml (see there for the full
+# rationale). scene's 294 features ARE divisible by 6 (=49 per cell), so NO padding is needed.
+# Mixer widths re-sized per dataset (cell_dim=49 makes the token-mix cheap, so hidden/latent carry
+# the budget) to land within ±5% of trm_flat.
+
+task:
+  name: multilabel
+  params:
+    dataset: scene
+    n_folds: 10
+    cv_seed: 0
+    standardize: true
+  n_train: 4000                 # non-binding; each fold ~2166 train / ~241 test of 2407 rows
+  n_test: 1000
+  task_seed: 42
+  train_sample_seed: 1
+  test_sample_seed: 2
+
+arms:
+  - name: trm_mixer
+    label: trm_mixer
+    hidden_dim: 112
+    latent_dim: 96
+    token_hidden: 32
+    n_steps: 8
+    n_latent: 1
+    use_rmsnorm: true
+    deep_supervision: true
+  - name: trm
+    label: trm_flat
+    hidden_dim: 64
+    latent_dim: 64
+    n_steps: 8
+    n_latent: 1
+    use_rmsnorm: true
+    deep_supervision: true
+  - name: ff_matched
+    label: ff_matched
+    hidden_dim: 64
+    latent_dim: 64
+    n_steps: 8
+  - name: untied_mixer_matched
+    label: untied_mixer_matched
+    hidden_dim: 112
+    latent_dim: 96
+    token_hidden: 32
+    n_steps: 8
+    use_rmsnorm: true
+    deep_supervision: true
+  - name: untied_mixer
+    label: untied_mixer
+    hidden_dim: 112
+    latent_dim: 96
+    token_hidden: 32
+    n_steps: 8
+    use_rmsnorm: true
+    deep_supervision: true
+  - name: trm_decoupled
+    label: trm_decoupled
+    hidden_dim: 64
+    latent_dim: 64
+    n_steps: 8
+    deep_supervision: true
+
+deltas:
+  - [trm_mixer, ff_matched]
+  - [trm_mixer, trm_flat]
+  - [trm_mixer, untied_mixer_matched]
+  - [trm_mixer, untied_mixer]
+  - [untied_mixer_matched, ff_matched]
+  - [trm_flat, ff_matched]              # M20 replication: does THIS recipe's flat loop still tie ff?
+  - [trm_flat, trm_decoupled]
+
+budget_reference: trm_flat
+budget_ceiling: [untied_mixer]
+budget_tol: 0.05
+
+train:
+  epochs: 300
+  lr: 1e-3
+  weight_decay: 1e-4
+  batch_size: 128
+  device: cpu
+
+seeds: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
+parallel_workers: 4
+results_dir: results

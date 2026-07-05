@@ -1,0 +1,89 @@
+# M26 REPLICATION — the mixer forecasting re-test on `weather` (21 vars), the adversarial-review
+# #1 check on the ETTh1 positive (single-instance MAJOR). A structurally DIFFERENT, WIDER dataset:
+# 21 coupled meteorological variables (vs ETTh1's 7 loads+OT), 10-min cadence, 52696 steps. If the
+# mixer beats the MLP here too — and is again the ARCHITECTURE not recurrence — the ETTh1 result
+# generalizes across variable count and domain. Everything matched to m26_etth1_forecast.yaml except
+# the dataset and the (necessarily different) budget-matched mixer widths.
+
+task:
+  name: weather
+  objective: regression
+  params:
+    dataset: weather
+    lookback: 96
+    horizon: 24
+    n_folds: 10
+    test_frac: 0.3
+  n_train: 6000
+  n_test: 1000
+  task_seed: 0
+
+arms:
+  - name: trm_mixer
+    label: trm_mixer            # cross-VARIABLE mixing loop (budget-matched to trm_flat)
+    hidden_dim: 384
+    latent_dim: 192
+    token_hidden: 8
+    n_steps: 8
+    n_latent: 1
+    use_rmsnorm: true
+    deep_supervision: true
+  - name: trm
+    label: trm_flat            # flat loop (channel-dependent, no mixing) — budget reference
+    hidden_dim: 64
+    latent_dim: 64
+    n_steps: 8
+    n_latent: 1
+    use_rmsnorm: true
+    deep_supervision: true
+  - name: ff_matched
+    label: ff_matched         # §4a param-matched shallow joint MLP — the external control
+    hidden_dim: 64
+    latent_dim: 64
+    n_steps: 8
+  - name: untied_mixer_matched
+    label: untied_mixer_matched  # §4b CLEAN tying control: budget-matched untied mixer (arch, no tying)
+    hidden_dim: 384
+    latent_dim: 192
+    token_hidden: 8
+    n_steps: 8
+    use_rmsnorm: true
+    deep_supervision: true
+  - name: untied_mixer
+    label: untied_mixer       # CEILING (~7.9× params, full width) — capacity-unconstrained, exempt
+    hidden_dim: 384
+    latent_dim: 192
+    token_hidden: 8
+    n_steps: 8
+    use_rmsnorm: true
+    deep_supervision: true
+  - name: trm_decoupled
+    label: trm_decoupled      # channel-INDEPENDENT (per-variable latents) — leg-1 / the CI baseline
+    hidden_dim: 64
+    latent_dim: 64
+    n_steps: 8
+    deep_supervision: true
+
+deltas:
+  - [trm_mixer, ff_matched]
+  - [trm_mixer, trm_flat]
+  - [trm_mixer, untied_mixer_matched]
+  - [trm_mixer, untied_mixer]
+  - [untied_mixer_matched, ff_matched]
+  - [trm_flat, ff_matched]
+  - [trm_flat, trm_decoupled]
+
+budget_reference: trm_flat
+budget_ceiling: [untied_mixer]
+budget_tol: 0.05
+
+train:
+  epochs: 25
+  lr: 1e-3
+  weight_decay: 1e-4
+  batch_size: 128
+  device: cpu
+
+seeds: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
+parallel_workers: 4
+results_dir: results

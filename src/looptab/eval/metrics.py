@@ -213,6 +213,65 @@ def evaluate(
     return out
 
 
+@torch.inference_mode()
+def _predict_regression(
+    model: nn.Module, loader: DataLoader, device: str, **kwargs
+) -> tuple[np.ndarray, np.ndarray]:
+    """Raw model outputs as regression predictions (M26). No argmax — the readout values ARE the
+    forecast. Returns (preds, targets), both ``(N, M, H)`` float (variable-cells × horizon)."""
+    model.eval()
+    preds, targets = [], []
+    for X, y in loader:
+        X = X.to(device)
+        out, _ = model(X, **kwargs)
+        preds.append(out.cpu().numpy())
+        targets.append(y.numpy())
+    return np.concatenate(preds), np.concatenate(targets)
+
+
+def evaluate_regression(
+    model: nn.Module, loader: DataLoader, device: str = "cpu", **kwargs
+) -> dict:
+    """Forecasting metrics on standardized targets (M26): MSE, MAE, and R² (the MTS-benchmark
+    convention). MSE/MAE are pooled over all (example, variable, horizon) entries; R² = 1 − SSE/SST
+    against the per-entry target mean. ``accuracy`` mirrors ``-mse`` so the runner's generic
+    "higher is better" plumbing (baseline gap, curve rows) stays meaningful for a regression run
+    without special-casing every downstream key — the reported headline metrics are mse/mae/r2.
+    (R² uses the TEST-set target mean for SST; on standardized targets that mean ≈ 0, so it is
+    indistinguishable from the train-mean convention — MSE is the headline, R² a companion.)"""
+    preds, targets = _predict_regression(model, loader, device, **kwargs)
+    err = preds - targets
+    mse = float(np.mean(err**2))
+    mae = float(np.mean(np.abs(err)))
+    sst = float(np.mean((targets - targets.mean()) ** 2))
+    r2 = float(1.0 - mse / sst) if sst > 0 else 0.0
+    return {"mse": mse, "mae": mae, "r2": r2, "accuracy": -mse}
+
+
+def persistence_baseline_mse(loader: DataLoader, lookback: int, n_vars: int) -> dict:
+    """Naive-forecast (persistence) baseline for M26: predict every horizon step = the LAST observed
+    value of each variable. On standardized inputs/targets this is directly comparable to the arms'
+    MSE/MAE. X is the flattened ``(N, M*lookback)`` window (cell i = variable i's history), so the
+    last observed value per variable is column ``i*lookback + (lookback-1)``."""
+    all_y, all_last = [], []
+    for X, y in loader:
+        Xr = X.numpy().reshape(len(X), n_vars, lookback)
+        last = Xr[:, :, -1:]  # (N, M, 1) last observed value per variable
+        yb = y.numpy()  # (N, M, H)
+        all_y.append(yb)
+        all_last.append(np.broadcast_to(last, yb.shape))
+    if not all_y:
+        return {"mse": 0.0, "mae": 0.0, "r2": 0.0}
+    Y = np.concatenate(all_y)
+    P = np.concatenate(all_last)
+    err = P - Y
+    mse = float(np.mean(err**2))
+    mae = float(np.mean(np.abs(err)))
+    sst = float(np.mean((Y - Y.mean()) ** 2))
+    r2 = float(1.0 - mse / sst) if sst > 0 else 0.0
+    return {"mse": mse, "mae": mae, "r2": r2}
+
+
 def majority_baseline(loader: DataLoader) -> float:
     """Compute token-level majority class baseline accuracy."""
     targets = []

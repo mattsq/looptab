@@ -19,8 +19,11 @@ from pydantic import BaseModel, Field, model_validator
 class TaskConfig(BaseModel):
     name: Literal[
         "linear", "parity", "multi_parity", "iterated", "converge", "hopfield", "mixed_converge",
-        "nested_converge", "disruption", "multilabel", "sudoku",
+        "nested_converge", "disruption", "multilabel", "sudoku", "etth1", "weather",
     ]
+    # "classification" (default; all M0–M25 tasks) trains with cross-entropy and reports
+    # accuracy/EM/F1. "regression" (M26 forecasting) trains with MSE and reports MSE/MAE/R².
+    objective: Literal["classification", "regression"] = "classification"
     params: dict = Field(default_factory=dict)
     n_train: int = 4000
     n_test: int = 1000
