@@ -1,0 +1,85 @@
+# M27 (screen) — pick the contraction weight for the `trm_stable` arm.
+#
+# WHY. M21 MEASURED that the trained loop never settles a fixed point (Jacobian ρ>1,
+# frac_expanding=1.0, latent residual ~1.2) EVEN on the `converge` WIN regime, and over-unrolling
+# decays. The M21 lever (evidence-gated, never built until now): push the one-step latent map toward
+# contraction (ρ<1) and test whether that finally buys depth-extrapolation / test-time compute —
+# judged against BOTH the extrapolation metric AND the coherence Δ it costs. This screen finds the
+# `jac_reg_weight` that drives the M21-measured ρ below 1 WITHOUT collapsing per-cell accuracy, so
+# the two downstream configs (m27_stable_converge, m27_stable_iterated_extrap) can pin one weight.
+#
+# READ (from *_diagnostics.csv + the curve): spectral_radius_mean / operator_norm_mean /
+# frac_expanding should FALL as the weight rises (contraction), while test accuracy stays put. The
+# elbow — smallest weight giving ρ<1 with intact accuracy — is the pinned weight. `trm` (weight 0)
+# is the non-contractive control the whole milestone is a Δ against (never a lone stable number, §2).
+#
+# Task = converge rule 78, w=24, distractors=0 (the M9/M24 mixer-compatible clean fixed point where
+# the loop's coherence win lives). Standard train (train_stable is the standard-train path).
+
+task:
+  name: converge
+  params:
+    w: 24
+    T: 6
+    rule: 78
+    distractors: 0
+  n_train: 4000
+  n_test: 1000
+  task_seed: 42
+  train_sample_seed: 1
+  test_sample_seed: 2
+
+arms:
+  - name: trm
+    label: trm                 # weight 0 — the non-contractive control (M21 baseline)
+    hidden_dim: 64
+    latent_dim: 64
+    n_steps: 6
+    deep_supervision: true
+  - name: trm
+    label: trm_stable_1e-3
+    hidden_dim: 64
+    latent_dim: 64
+    n_steps: 6
+    deep_supervision: true
+    jac_reg_weight: 1.0e-3
+  - name: trm
+    label: trm_stable_1e-2
+    hidden_dim: 64
+    latent_dim: 64
+    n_steps: 6
+    deep_supervision: true
+    jac_reg_weight: 1.0e-2
+  - name: trm
+    label: trm_stable_1e-1
+    hidden_dim: 64
+    latent_dim: 64
+    n_steps: 6
+    deep_supervision: true
+    jac_reg_weight: 1.0e-1
+
+deltas:
+  - [trm_stable_1e-3, trm]
+  - [trm_stable_1e-2, trm]
+  - [trm_stable_1e-1, trm]
+
+budget_reference: trm            # every stable arm is param-IDENTICAL to trm (ratio 1.000)
+budget_tol: 0.02
+
+diagnostics:
+  enabled: true                  # ρ / operator-norm / za_alignment / over-unroll drop side-car
+  overunroll_factor: 4
+  n_random_inits: 5
+  power_iter_steps: 20
+  jac_n_examples: 8
+
+train:
+  epochs: 100
+  lr: 1e-3
+  weight_decay: 1e-4
+  batch_size: 256
+  device: cpu
+
+seeds: [0, 1, 2, 3, 4, 5, 6, 7]
+parallel_workers: 4
+results_dir: results

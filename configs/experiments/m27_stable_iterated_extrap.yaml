@@ -1,0 +1,82 @@
+# M27 (cross-check) — contraction on the NON-CONVERGENT moving-target regime (iterated rule 30).
+#
+# WHY. m27_stable_converge tests contraction where a fixed point EXISTS (the natural home). This is
+# the FAIL-regime control: `iterated` rule 30's target s_T is a MOVING target (s_{T+1}≠s_T, no
+# attractor), so there is no fixed point for a contractive map to approach. Prediction: contraction
+# should NOT unlock the OOD depth-extrapolation that M1/M3b/M7 could never crack here, and may cap
+# accuracy — confirming that if contraction helps at all, it is BECAUSE the target is convergent
+# (isolating the mechanism, not just observing a null). If, surprisingly, trm_stable DOES lift OOD
+# T≥12 above baseline where trm does not, that is a genuine transferable-operator signal (report it).
+#
+# Standard train at fixed depth (train_stable is the standard-train path — NOT the M7 curriculum), so
+# the honest comparison is M1 (fixed-T standard train, then extrapolate), not M3b/M7's curriculum.
+# READ the extrapolation diagonal (R'=T) at T∈{4,8,12,16}; T∈{12,16} is OOD (> the trained T=8).
+#
+# WEIGHT (adversarial-review fix A2). jac_reg_weight=3e-2 is the ITERATED elbow from
+# m27_stable_iterated_screen: on this non-convergent map the converge elbow (1e-2) left ρ=1.026
+# (still EXPANDING), so a re-screen was needed. 3e-2 drives spectral_radius_mean to 0.610 (<1,
+# genuinely contractive, za=1.0) — but at a STEEP accuracy cost (acc 0.883→0.736), because a
+# moving target resists a single-fixed-point map. So this run tests the real hypothesis (does a
+# CONTRACTIVE loop crack OOD?), unlike the first run which pinned a still-expanding weight.
+
+task:
+  name: iterated
+  params:
+    w: 9
+    T: 8
+    rule: 30
+    distractors: 4
+  n_train: 4000
+  n_test: 1000
+  task_seed: 42
+  train_sample_seed: 1
+  test_sample_seed: 2
+
+arms:
+  - name: trm
+    label: trm_stable          # contraction-regularized loop
+    hidden_dim: 64
+    latent_dim: 64
+    n_steps: 8
+    deep_supervision: true
+    jac_reg_weight: 3.0e-2      # ← ITERATED elbow (ρ=0.61<1); m27_stable_iterated_screen
+  - name: trm
+    label: trm                 # non-contractive loop — the M1/M21 baseline
+    hidden_dim: 64
+    latent_dim: 64
+    n_steps: 8
+    deep_supervision: true
+  - name: ff_matched
+    label: ff_matched          # §4a grounding (depthless; ill-posed under OOD depth — expected weak)
+    hidden_dim: 64
+    latent_dim: 64
+    n_steps: 8
+
+deltas:
+  - [trm_stable, trm]          # does contraction change over-unroll / OOD behaviour vs the plain loop?
+  - [trm_stable, ff_matched]
+
+budget_reference: trm          # trm_stable is param-identical to trm (ratio 1.000)
+budget_tol: 0.02
+
+diagnostics:
+  enabled: true
+  overunroll_factor: 4
+  n_random_inits: 5
+  power_iter_steps: 20
+  jac_n_examples: 8
+
+train:
+  epochs: 100
+  lr: 1e-3
+  weight_decay: 1e-4
+  batch_size: 256
+  device: cpu
+
+extrapolation:
+  T_values: [4, 8, 12, 16]     # 8 = trained depth; 12,16 = OOD extrapolation
+  R_values: [4, 8, 12, 16]     # over-unroll R' >= R to recover longer computations
+
+seeds: [0, 1, 2, 3, 4, 5, 6, 7]
+parallel_workers: 4
+results_dir: results

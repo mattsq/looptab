@@ -128,6 +128,26 @@ the final step). Optional learned halting (ACT/PonderNet-style) was a later knob
 (M23): `use_act` + `train_act`/`evaluate_act`; it is faithful and demonstrably adaptive (segments
 scale with difficulty) but did NOT unlock the canonical hard-solving win — §11(b) M23-ACT.**
 
+**⭐ DEFAULT ARCHITECTURE = the CROSS-CELL MIXER (`trm_mixer`), NOT the flat `trm`.** The single most
+load-bearing finding of the whole program (M23 Sudoku → M24 rings → M26 forecasting): a weight-tied loop
+whose update is a *flat MLP over the concatenated grid* is **≈ a feedforward net** — it cannot let cells
+communicate, so "does iterative refinement help?" was systematically confounded with "does the update
+operator match the task structure?" for M0–M22. The thing that makes TRM *work* — constraint propagation,
+the hard-solving win, the transfer to real forecasting — **is the cross-cell token-mixing update**, not the
+loop per se. So **start every new recurrent experiment from `trm_mixer`; use the flat `trm` only as the
+COMPARISON control** (the §4b "is it the mixing operator or just recurrence?" ablation — flat `trm` ≈ ff on
+structured tasks, so `Δ(trm_mixer − trm_flat)` is the operator's contribution). Do NOT default to flat
+`trm` as a "simplest starting point" — a null measured on it is a null about a feedforward-equivalent, not
+about refinement (the §8 trap, one axis deeper). **Caveats that bound the default (don't misapply it):**
+(1) `trm_mixer` is **multi-output only** and requires **`in_features % out_features == 0`** — so distractor
+columns are unsupported (use `distractors: 0` or `pad_to_label_multiple`); single-output tasks (e.g.
+scalar-`y` parity) have no mixer, use flat `trm` there. (2) The mixer helps only where outputs are
+**cross-cell COUPLED with a shared input/output cell topology** (rings/grids/graphs, forecasting) — it is
+inert on **exchangeable** features (`multi_parity`, M24d) and on the **naive multi-label reshape** (no
+input↔output correspondence, M25), where a plain MLP is best; a mixer null there is expected, not a
+refinement null. (3) 3-D matmul ⇒ pin `num_threads=1` for bit-repro. When in doubt, run `trm_mixer` AND
+flat `trm` AND `ff_matched` together (the M24 lean triple) so the operator's contribution is always visible.
+
 **Controls (MANDATORY — at least one, ideally both):**
 - **(a) param-matched feedforward** — same parameter budget, no weight sharing, no loop.
   Isolates *does refinement help beyond raw capacity*.
@@ -405,9 +425,13 @@ hierarchy mandate.)
 1. Read this whole file before editing.
 2. Validate any change against **Task 0 first, then Task A**.
 3. **Always emit the control** alongside the recurrent run; report `Δ` and variance.
-4. Write a determinism test for any new generator.
-5. Keep diffs scoped to one milestone item.
-6. Update §11 when you land something. That section is how the next (context-free) agent
+4. **Default the recurrent arm to `trm_mixer`, use flat `trm` only as the comparison control** (§4 ⭐):
+   the flat update is feedforward-equivalent, so a finding measured on it is not a finding about
+   refinement. Mixer needs multi-output + `in_features % out_features == 0` (distractors=0 / padding);
+   it is inert on exchangeable-feature tasks — see the §4 caveats before applying it.
+5. Write a determinism test for any new generator.
+6. Keep diffs scoped to one milestone item.
+7. Update §11 when you land something. That section is how the next (context-free) agent
    knows where the repo stands.
 
 ## 11. Project status / next milestone
@@ -493,7 +517,9 @@ behaviour-changing conclusions, and the next pointer. Append detail to LOG.md, n
   inert except `distractors`. **The ONE multi-class task** — it forced `run.py` to infer
   `num_classes = max(2, y.max()+1)` instead of the hardcoded 2 (exactly 2 for every binary M0–M22 task ⇒
   bit-identical). Determinism/validity/uniqueness-tested in `tests/test_generators.py` (golden hash pinned).
-- **Models/arms:** `trm` (weight-tied refinement loop, optional per-step readouts),
+- **Models/arms:** (**⭐ DEFAULT recurrent arm = `trm_mixer`; flat `trm` is the COMPARISON control, not
+  the starting point — §4 / §10.4.**) `trm` (weight-tied FLAT refinement loop, optional per-step readouts
+  — feedforward-equivalent on structured tasks, so use it as the "is it the mixing operator?" contrast),
   `ff_matched` (§4a param-matched shallow MLP), `untied_stack` (§4b untied, ~`n_steps`×
   params — a confounded ceiling, NOT param-matched), `untied_matched` (§4b untied,
   width-shrunk to the loop's budget — the *clean* tying control), and `trm_decoupled` (M10
@@ -517,7 +543,7 @@ behaviour-changing conclusions, and the next pointer. Append detail to LOG.md, n
   2-D arms only.
 - **Train/eval:** deep supervision is a **per-arm weight** (`src/looptab/train/loop.py`),
   not a global flag. **`train` takes `loss_type` ("ce" default / "mse" for M26 regression; "ce" ⇒
-  bit-identical).** Five training routines: `train` (standard), `train_curriculum` (M3b
+  bit-identical).** Six training routines: `train` (standard), `train_curriculum` (M3b
   depth-curriculum + step-aligned DS), `train_progressive` (M7 Deep Thinking progressive
   loss: detach `(T−k)` steps, gradient on `k`, modes `progressive_final`/`progressive_step`),
   `train_deep_supervision` (M18 — canonical TRM/HRM deep supervision: `n_sup` supervised passes
@@ -526,7 +552,13 @@ behaviour-changing conclusions, and the next pointer. Append detail to LOG.md, n
   computation, the §4/§12 unbuilt TRM ingredient, now BUILT**: `train_deep_supervision` + a learned
   halt head trained by BCE to predict per-example exact-match; `evaluate_act`/`act_predict` do
   per-example adaptive-segment inference and report `avg_segments`. Enabled per-arm via `use_act`
-  (TRM only; `n_sup` = max segments); OFF by default ⇒ bit-identical). `train`/`train_deep_supervision`
+  (TRM only; `n_sup` = max segments); OFF by default ⇒ bit-identical), and `train_stable` (**M27 —
+  the M21 contractive-loop lever, now BUILT**: standard train + a penalty on the one-step latent map
+  `F(z)=update(cat[X,z,readout(z)])` — a grad-enabled `torch.func.jvp` Hutchinson `jac_reg_weight·
+  mean‖Jv‖²` [drives ρ↓, DEQ Bai 2021] + optional `fixed_point_weight·‖Δz‖/‖z‖` [Anil 2022]. TRM-only,
+  param-identical to `trm`; per-arm `jac_reg_weight`/`fixed_point_weight`/`n_reg_steps`, all default 0
+  ⇒ OFF ⇒ bit-identical. Same jvp float-reduction determinism caveat as `trm_decoupled` — bit-repro at
+  pinned `num_threads=1` only). `train`/`train_deep_supervision`
   take an optional `ema_decay` (M18 ingredient 2) folded into the weights for eval.
   `TRM.forward` takes optional `init_state`/`return_state` (additive, bit-identical when unused)
   so a rollout can be detached and resumed (M7). Metrics `accuracy` / `exact_match` / `majority_baseline` and the
@@ -601,7 +633,8 @@ behaviour-changing conclusions, and the next pointer. Append detail to LOG.md, n
   TRM-faithful knobs (bit-identity-when-off, `train_deep_supervision` + EMA determinism), and (M21)
   the introspection layer (`test_introspection.py`: spectral-radius / effective-rank known-answer
   sanity, same-seed determinism incl. `trm_decoupled`, F(z) n_latent faithfulness, right families per
-  arm). Run `uv run --extra dev pytest -q` (215 tests); lint `uv run ruff check`.
+  arm), and (M27) the contractive `train_stable` arm (`test_stable.py`: penalty-lowers-ρ, determinism,
+  accuracy-preserved). Run `uv run --extra dev pytest -q` (270 tests); lint `uv run ruff check`.
 - **`hopfield` regime (M13) — locked setting:** `weights=hebbian, n_patterns=12, γ=16, distractors=8`,
   w∈{24,32}. Screened multi-seed over the real task_seeds 42..51: **0/10 non-convergence raises**,
   balanced (majority ~0.50), per-row convergence depth typical **median ~2–3** (batch-max ~10 ≪ the
@@ -1397,14 +1430,54 @@ priority:
   corroborates the (M9–M15c-established) STATIC joint-state-coherence reading of the loop's value; the
   strongest dynamical contrast is the loop's path-independence (za 0.97 vs 0.43, `trm` only — `trm_decoupled`,
   also a winner, shows a weak 0.55/0.32, so za tracks the target not winning) (§11(b) M21 bullet; LOG.md M21). The
-  **evidence-gated follow-up** this licenses (NOT yet built): a `trm_stable` arm — Jacobian-spectral /
-  Lipschitz regularization (DEQ Jacobian-reg 2106.14342 / Rethinking Deep Thinking 2410.23451) +
-  path-independence training (Anil 2211.09961) + a fixed-point
-  loss — to push ρ<1 and test whether a *contractive* loop finally extrapolates / uses test-time compute.
-  **Judge it against BOTH the depth-extrapolation metric AND the coherence Δ it may cost** (the loop wins while
-  non-contractive, so forcing contraction is a bet on a different capability and may trade the win away). The
+  **evidence-gated follow-up** this licensed is now DONE (M27, below) — a `trm_stable` arm
+  (Jacobian-spectral reg, DEQ 2106.14342 + a fixed-point/path-independence residual, Anil 2211.09961)
+  that pushes ρ<1 — and it largely CLOSES the lever: contraction is achievable and does exactly what
+  theory predicts (over-unrolling no longer decays) but buys ZERO test-time-compute GAIN and does not
+  crack OOD depth — architecture-independently (flat AND mixer); its EM cost is a saturation effect, free
+  when the model already solves the task (M27). The
   introspection suite is reusable anywhere (one line on real-tabular M20, or on a step-aligned-DS/progressive
   loop whose dynamics M21 did not probe).
+- **M27 (the `trm_stable` contractive arm — the M21 lever) is DONE — a constructive NULL, and (after 2
+  adversarial-review passes + a disentangling test) ARCHITECTURE-INDEPENDENT: contraction is achievable and
+  FREE-when-solved, but buys no capability, on both the flat loop AND the mixer.**
+  Built `train_stable` (standard train + a grad-enabled `torch.func.jvp` Jacobian penalty on the one-step
+  latent map `F(z)=update(cat[X,z,readout(z)])`, + an optional fixed-point residual; all off-by-default ⇒
+  M0–M26 bit-identical; `trm`/`trm_mixer`, param-identical to the plain arm). **(1) The manipulation is real, clean,
+  monotone:** on `converge` rule 78 w24, `jac_reg_weight` drives ρ 1.264→0.654 (1e-2, the elbow)→0.114
+  (1e-1), za→1.000, over-unroll drop 0.204→0.002 — the FIRST stable loop in the repo. **(2) But stability
+  is BY CONSTRUCTION and buys nothing:** under over-unroll R'6→24 plain `trm` DECAYS (EM 0.632→0.059,
+  the M8/M21 signature) while `trm_stable` HOLDS FLAT (EM ~0.52) — so Δ(trm_stable−trm) grows to +0.200
+  acc @R'24 (8/0) but that is ENTIRELY trm decaying; trm_stable never RISES, so the "test-time compute
+  benefit" hypothesis is **falsified even in the WIN regime**, and it loses to `ff_matched` at every R'.
+  **(3) Contraction COSTS EM:** Δ(trm_stable−trm) EM −0.097 (8/0, p=.008); the cost appears at the
+  contraction onset (1e-3/ρ=1.16 ~zero cost → 1e-2/ρ=0.65 cost). **(4) OOD depth null is CLEAN** (after
+  an adversarial-review fix — see below): with a genuinely contractive weight on `iterated` (elbow 3e-2 ⇒
+  ρ=0.610), OOD T=12/16 STILL collapse to baseline for every arm, and on the moving target contraction
+  merely caps the fit (acc 0.883→0.736). **(5) MIXER re-test + disentangling test — the cost is SATURATION,
+  not architecture.** Extended `train_stable` + the ρ diagnostics to the cross-cell `trm_mixer` and repeated
+  converge: the WINNING architecture is EVEN MORE non-contractive (ρ=2.307 > flat 1.264, decays EM
+  0.938→0.031) — the dynamical null is architecture-INDEPENDENT. The first-draft "contraction is FREE on the
+  mixer → architecture-specific" headline was OVERSTATED (2nd review): the split (mixer Δ EM +0.007 ns vs
+  flat −0.097) lives ONLY in EM — on ACCURACY the cost is ns for BOTH arms (flat Δacc −0.006 p=.07; mixer
+  +0.00002 p=.29) — and EM tracks accuracy LEVEL (the M9 confound: flat base EM 0.63 vs mixer 0.94
+  near-solved). A **disentangling sweep** (flat `trm`, w∈{8,12,16,24}, matched ρ≈0.65) SETTLES it: the flat
+  loop's EM cost is ~0 at every saturating width (w≤16: +0.02/−0.01/+0.05) and the −0.097 appears ONLY at
+  w=24 where it is not saturated — so the flat loop is *equally free when solved*, exactly as the mixer is.
+  **Verdict: architecture-INDEPENDENT — contraction is achievable at ~zero accuracy cost, its EM cost is a
+  saturation/operating-point effect (free when the model already solves the task, flat OR mixer), and it buys
+  NO capability either way (flat under over-unroll = no test-time-compute gain; no OOD crack even when
+  contractive ρ=0.610). The M21 lever is CLOSED architecture-independently; contraction buys ROBUSTNESS
+  (step-count invariance), not extrapolation.** Upholds every depth-extrapolation null (M1/M3a/M7/M8).
+  **Adversarial review (TWO passes) corrected FOUR overstatements:** (i) "coherence win to trade" FALSE —
+  Δ(trm−ff) EM a tie (−0.011, p=.73), cost is vs trm's OWN baseline (not M9's +0.133); (ii) first iterated
+  run left ρ=1.026 (still expanding) — re-screened to 3e-2/ρ=0.610, re-run (superseded run removed); (iii)
+  "did we check the mixer?" — extended to `trm_mixer`; (iv) the mixer "free = architecture" headline was an
+  EM/saturation confound (accuracy cost ns for both), resolved by the disentangling sweep (+ an acc-mislabeled-
+  as-EM number fixed). Code review (both passes): jac map faithful, penalty grad-enabled, off-by-default
+  bit-identical, over-unroll valid for the mixer; loud guard added (contraction + `use_act`/`n_sup` raise).
+  Scope: converge + iterated, jac penalty only; single-knob. Canonical: `m27_stable_{screen,converge,
+  iterated_screen,iterated_extrap,mixer_converge,flat_saturation}_20260706T*`; full narrative LOG.md M27.
 - **The real-tabular bridge gave the loop a fair shot and it did not transfer (M20) — now CONFIRMED on a
   3rd dataset.** `scene` (6 labels, mutual-exclusion) replicated the corrected verdict exactly: leg-1 robust
   10/0 on EM+F1 but ff also beats decoupled (not loop-specific); Δ(trm−ff) EM-only, a 5/5 F1 tie; and it

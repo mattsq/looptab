@@ -3070,3 +3070,198 @@ The mixer NEVER beats ff — it TIES on micro-F1/accuracy on both large datasets
 5. **It is a GENERALIZATION win, not capacity** (adversarial-review-verified): the mixer arms fit TRAIN worse (ETTh1 0.185/0.194 vs ff 0.142; weather 0.105/0.085 vs ff 0.069) yet TEST better, while ff/flat OVERFIT (weather ff train 0.069 → test 0.390, a 5.6× gap). An inductive-bias/regularization benefit of the mixing structure, not more fitting.
 
 **Verdict.** The cross-cell mixer DOES transfer to real tabular — specifically to multivariate time-series forecasting (multi-target regression with coupled targets, shared input/output topology), on TWO datasets spanning 7→21 variables and hourly-load→10-min-weather domains, with the edge growing with variable count. Honestly attributed: a mixing ARCHITECTURE does the hard part; weight-tied recurrence adds a width-dependent efficiency/regularization edge (tie at 7 vars, sig at 21); cross-variable coupling (CD>CI) helps. This is the POSITIVE bookend to M25's multi-label NULL, and the M23–M26 arc now reads cleanly: **the mixer helps wherever there is cross-cell coupling AND a shared input/output cell topology; the naive multi-label reshape lacked the topology (M25), forecasting has it (M26).** **Honest scope limits (adversarial review):** (i) two datasets, ONE lookback/horizon (96→24), 25 epochs, standardized MSE — not a full MTS benchmark sweep (horizons 96/192/336/720, more datasets untested); (ii) the sign-test p is INDICATIVE not clean — the backtest test blocks are disjoint but the train sets are NESTED/overlapping, so per-block Δs are correlated (Dietterich 1998; the effect is consistent across easy AND hard blocks, so real, but the exact binomial is anti-conservative); (iii) tiny CPU models — the CD>CI finding may not survive at benchmark scale where channel-independence is known to win; (iv) R² SST uses the test-target mean (≈0 on standardized data, harmless). Rigor: 10 disjoint backtest blocks, exact two-sided sign test, budget-clean ±0.5%, additive code (all M0–M25 bit-identical), determinism-tested both datasets, generalization verified (train vs test MSE). Canonical: `m26_etth1_forecast_20260705T212226_*`, `m26_weather_forecast_20260706T005434_*`; full narrative this section.
+
+---
+
+## M27 — the `trm_stable` contractive arm (the M21 lever): contraction is ACHIEVABLE and does what theory predicts, but buys NO accuracy or test-time compute — the lever is CLOSED (constructive null)
+
+**WHY.** M21 MEASURED that the trained loop never settles a fixed point — Jacobian spectral radius
+ρ>1, `frac_expanding`=1.0, latent residual ~1.2 — **even on the `converge` WIN regime**, and
+over-unrolling R'>R decays the readout (a dynamical restatement of the M1/M8 "no transferable
+operator / dressed-up depth" null). §11(b)'s M21 bullet handed forward a single evidence-gated
+follow-up: push the one-step latent map toward CONTRACTION (ρ<1) — DEQ Jacobian regularization
+(Bai 2021 arXiv 2106.14342) + a path-independence / fixed-point residual (Anil 2022 arXiv 2211.09961)
+— and test whether a *contractive* loop finally (a) extrapolates in depth / benefits from test-time
+compute, at (b) some COST to the loop's static joint-state coherence (§9.2). The M21 note warned
+explicitly: the loop wins WHILE non-contractive, so forcing contraction is a bet on a different
+capability and may trade the win away — **judge against BOTH axes.**
+
+**WHAT (built, additive/off-by-default ⇒ all M0–M26 bit-identical; 270 tests, 4 new).** A new
+`train_stable` routine (`src/looptab/train/loop.py`): standard train + a per-batch penalty on the
+one-step map `F(z)=update(cat[X, z, readout(z)])` (the same map `eval/introspection._step_z_fn`
+measures) — a grad-enabled `torch.func.jvp` Hutchinson estimate `jac_reg_weight·mean‖J v‖²` (drives
+ρ/σ_max↓) and an optional fixed-point residual `fixed_point_weight·mean(‖z_{t+1}−z_t‖/‖z_t‖)`. Three
+config knobs (`jac_reg_weight`/`fixed_point_weight`/`n_reg_steps`, all default 0 ⇒ off). `trm`-only
+(needs the latent map); `trm_stable` is param-IDENTICAL to `trm`, so budget parity vs the control is
+exact (ratio 1.000). Determinism caveat: the jvp is float-reduction-order-sensitive, so like
+`trm_decoupled` / the M21 diagnostics it reproduces bit-for-bit only at pinned CPU threads
+(`num_threads=1`, the committed default).
+
+### Screen (converge rule 78, w=24, 8 seeds) — the elbow is `jac_reg_weight=1e-2`
+
+| weight | ρ (spectral radius) | over-unroll drop | za_align | test acc | Δacc vs trm | ΔEM vs trm |
+|---|---|---|---|---|---|---|
+| trm (0) | 1.264 | 0.204 | 0.895 | 0.969 | — | — |
+| 1e-3 | 1.163 (**>1**) | 0.171 | 0.943 | 0.972 | +0.003 (7/1, ns) | +0.023 (ns) |
+| **1e-2** | **0.654** (<1) | **0.002** | **1.000** | 0.963 | −0.006 (1/7, ns) | −0.097 (8/0) |
+| 1e-1 | 0.114 | 0.000 | 1.000 | 0.949 | −0.020 (8/0) | −0.225 (8/0) |
+
+`1e-2` is the smallest weight that makes the loop genuinely contractive (ρ 1.264→0.654) and kills
+the over-unroll decay (0.204→0.002, za→1.0). 1e-3 is too weak (still expanding); 1e-1 over-contracts.
+
+### Converge main (rule 78, w=24, n_steps=6, jac=1e-2, 8 seeds) — the two axes
+
+**Per-arm at the trained readout depth (acc / EM):** ff_matched 0.976 / **0.643** > trm 0.969 / 0.632
+> trm_stable 0.963 / 0.535 > untied_matched 0.940 / 0.355 > trm_decoupled 0.911 / 0.193.
+
+**Over-unroll (fixed-point target, sweep R' 6→24):**
+
+| arm | EM @R'6 | @R'8 | @R'12 | @R'16 | @R'24 |
+|---|---|---|---|---|---|
+| trm (non-contractive) | 0.632 | 0.543 | 0.297 | 0.160 | 0.059 — **DECAYS** (M8/M21 signature) |
+| trm_stable (ρ=0.65) | 0.535 | 0.530 | 0.523 | 0.524 | 0.523 — **HOLDS FLAT** |
+
+Δ(trm_stable − trm) acc grows −0.006(R'6) → +0.054(R'12) → **+0.200(R'24), 8/0, p=.008**. Diagnostics
+confirm the manipulation: trm_stable ρ=0.654, za=1.000, over-unroll drop=0.002 vs trm ρ=1.264,
+za=0.895, drop=0.204.
+
+**Deltas at trained depth:** Δ(trm_stable − trm) EM **−0.097 (8/0, p=.008)**, acc −0.006 (ns),
+coherence_excess −0.034 (7/1, **p=.07, ns**); Δ(trm_stable − ff) EM −0.108 (8/0); leg-1 intact
+Δ(trm − trm_decoupled) EM +0.439 (8/0). **Crucially Δ(trm − ff_matched) EM = −0.011 (3/5, p=.73, a
+TIE)** and acc −0.007 (0/8, trm worse) — i.e. **on this config the plain loop has NO EM win over the
+shallow MLP.**
+
+### Iterated screen (rule 30, w=9, 8 seeds) — contraction on a MOVING target is expensive
+
+| weight | ρ | test acc | note |
+|---|---|---|---|
+| trm (0) | 1.778 | 0.883 | non-contractive |
+| **3e-2** | **0.610** (<1) | 0.736 | the iterated elbow (converge's 1e-2 left ρ=1.026, still expanding) |
+| 1e-1 | 0.129 | 0.653 | |
+| 1e0 | 0.008 | 0.585 | ≈ baseline 0.507 |
+
+Reaching ρ<1 on the non-convergent map costs far more accuracy than on converge (0.883→0.736 at the
+elbow, sliding toward baseline as ρ→0) — a single-fixed-point map cannot represent a moving target.
+
+### Iterated OOD extrapolation (rule 30, w=9, jac=3e-2 ⇒ ρ=0.610, 8 seeds) — the CONCLUSIVE null
+
+At the trained depth T=8, R'=8: trm_stable 0.736 ≪ trm 0.883 ≈ ff 0.887 (Δ(trm_stable−trm) acc
+−0.146 / EM −0.360; Δ(trm_stable−ff) acc −0.150, all 8/0). Under over-unroll trm decays
+(0.883→0.610→0.541 as R'8→12→16) while trm_stable holds (0.736→0.731→0.727) — but far below ff.
+**OOD T=12 and T=16: EVERY arm collapses to baseline (~0.48–0.50, EM ~0.00), the now-genuinely-
+contractive trm_stable included.** So even a contractive loop does NOT crack the OOD depth wall
+(M1/M3a/M7 reconfirmed).
+
+### Mixer re-test (converge rule 78, w=24, distractors=0, jac sweep, 8 seeds) — does the flat-loop cost generalize?
+
+The above is all the FLAT `trm`. An adversarial-review question — *"did we check the mixer?"* — forced
+the §8/M23–M24 test: the flat loop is the architecture that arc showed is systematically handicapped, and
+on `converge` the cross-cell `trm_mixer` SOLVES the task (M24, EM≈1.0) where the flat loop only ties ff.
+So `train_stable` + the ρ/za diagnostics were extended to `trm_mixer` (its per-cell `(z,a)` state shares
+the resumable API; `_stable_step_map` is shape-agnostic) and the converge run repeated.
+
+| arm | ρ | over-unroll drop | za | acc | EM @R'6 → @R'24 (over-unroll) |
+|---|---|---|---|---|---|
+| trm_mixer (0) | **2.307** | 0.336 | 0.603 | 0.995 | **0.938 → 0.031** (SOLVES, then DECAYS hard) |
+| mixer_stable 1e-2 | 0.637 | 0.001 | 0.985 | 0.995 | 0.945 → 0.933 (SOLVES + HOLDS) |
+| mixer_stable 1e-1 | 0.407 | −0.000 | 0.999 | 0.993 | 0.924 → 0.959 (holds) |
+| mixer_stable 3e-1 | 0.412 | −0.001 | 1.000 | 0.966 | 0.649 → 0.693 (over-contracted, high var) |
+
+**(1) The dynamical null is architecture-INDEPENDENT (solid):** the WINNING `trm_mixer` is even MORE
+non-contractive (ρ=2.307 > flat trm's 1.264, frac_expanding=1.0) and decays under over-unroll (EM
+0.938→0.031) — so "dressed-up depth, non-contractive even where it wins" (M21) holds for the mixer too;
+contraction stops the decay by construction (mixer_stable HOLDS EM ~0.94, over-unroll drop 0.336→0.001).
+The over-unroll Δ(mixer_stable − mixer) grows to **+0.336 accuracy** (NOT EM — a first-draft mislabel; the
+EM Δ there is +0.902) @R'24 (8/0) — but that is *entirely the un-regularized mixer decaying*, the same
+by-construction tautology as the flat loop, NOT a new capability.
+
+**(2) The "contraction is FREE on the mixer" reading was OVERSTATED — it is a SATURATION artifact, not an
+architecture property** (2nd adversarial-review blocker, then resolved by the disentangling test below). The
+apparent split — Δ(mixer_stable_1e-2 − mixer) EM +0.007 (6/2, p=.29, ns) vs flat's −0.097 (8/0) — lives
+ONLY in EM: on ACCURACY (the level-robust metric) the contraction cost is **non-significant for BOTH** arms
+(flat Δacc −0.006, p=.07; mixer Δacc +0.00002, p=.29). And EM cross-arm gaps are the M9-documented confound
+with accuracy LEVEL: the two base arms sit at very different EM (flat 0.63, mixer 0.94 = near-solved), so
+"cost ∝ (1 − answer quality)" explains the split as well as "architecture". The mixer's own 3e-1 arm DOES
+cost −0.289 EM, so contraction is not "free on the mixer" in general — only at the mild weight that barely
+perturbs an already-solved model. (Budget caveat: the mixer's M24 win Δ(mixer − ff) EM +0.295 is a re-confirmation
+of M24, and ff is 1.4153× the mixer's params here — a §5 breach, conservative in direction but the win is not
+an M27 contribution; the stable-vs-mixer comparisons are param-identical, ratio 1.000.)
+
+### Disentangling test — SATURATION, not architecture (flat `trm`, converge rule 78, w sweep {8,12,16,24}, 8 seeds)
+
+To break the architecture-vs-saturation tie the mixer run could not: sweep the FLAT loop across widths (smaller
+w ⇒ higher base EM ⇒ the flat loop SATURATES, M9) at MATCHED contraction (the flat z is 64-dim regardless of w,
+so jac=1e-2 drives ρ≈0.55–0.69 at every width). If the flat cost shrinks toward ~0 as it saturates, the "free
+on the mixer" result is operating-point, not architecture.
+
+| w | flat base acc (≈saturation) | Δ(stable_1e-2 − trm) EM | Δ acc |
+|---|---|---|---|
+| 8 | 0.990 (near-solved) | **+0.022** | +0.006 |
+| 12 | 0.998 (solved) | **−0.007** | −0.001 |
+| 16 | 0.990 | **+0.046** | +0.006 |
+| 24 | 0.969 (NOT saturated, EM 0.63) | **−0.097** | −0.006 |
+
+**Decisive: the flat loop's EM cost is ~ZERO at every width where it saturates (w≤16) and the −0.097 appears
+ONLY at w=24 where it is not saturated** — with contraction held at ρ≈0.65 throughout. So the flat loop is
+*equally free* when solved, exactly as the mixer is. The "free vs costly" split is **saturation / operating
+point, NOT the mixing architecture**; the mixer was free because it solves converge, not because it mixes.
+(Consistent with the M9 caution that cross-arm EM gaps track accuracy level.)
+
+### Reading
+
+1. **The contraction manipulation is real, clean, and monotone** (ρ 1.264→0.654→0.114 with weight;
+   backprop through the jvp verified; determinism at pinned threads). trm_stable is the **first stable
+   loop in the repo** — over-unrolling no longer decays (drop 0.204→0.002, za→1.000).
+2. **But the over-unroll "stability win" is largely BY CONSTRUCTION** — we optimized ρ<1 and then
+   observe the ρ<1 map is stable under iteration. The +0.200 Δ at R'24 is *entirely plain-trm decaying*;
+   trm_stable is FLAT (0.535→0.523), so extra test-time compute buys it **nothing** — the "benefit from
+   test-time compute" hypothesis is **falsified in the WIN regime**, not merely absent OOD.
+3. **Contraction costs EM and never beats the control.** Δ(trm_stable−trm) EM −0.097 (8/0); trm_stable
+   loses to ff at every R'. The cost tracks contraction ONSET (1e-3, ρ=1.16, ~zero cost; 1e-2, ρ=0.65,
+   the cost appears) — suggestive it is contraction, not generic reg drag, though single-knob so not
+   isolated. NB the `coherence_excess` component of the cost is **ns** (−0.034, p=.07), so it is partly
+   per-cell accuracy, not cleanly a *coherence* loss.
+4. **OOD extrapolation is a CLEAN null** now that trm_stable is genuinely contractive on iterated
+   (ρ=0.610): it still collapses at T=12/16, and on the moving target contraction merely caps the fit.
+5. **The dynamical null is ARCHITECTURE-INDEPENDENT, and so is the contraction cost — it tracks SATURATION,
+   not architecture.** The winning `trm_mixer` is even more non-contractive (ρ=2.307) and decays under
+   over-unroll, just like the flat loop. Contraction's EM "cost" appears only where the base model is NOT
+   near-solved: on ACCURACY it is ns for both arms, and the flat loop is *equally free* when saturated
+   (w≤16 EM cost ~0, w=24 −0.097). So the mixer being "free" is because it solves converge, not because it
+   mixes; the earlier "architecture-specific cost" reading was an operating-point (M9-level) confound.
+
+### Verdict — a constructive null, ARCHITECTURE-INDEPENDENT: contraction is achievable and free-when-solved, but buys no capability
+
+**Contraction is achievable and does exactly what DEQ/Anil theory predicts — it drives ρ<1 so over-unrolling
+no longer decays.** Everything that matters here is **architecture-INDEPENDENT**: (a) the dynamical null —
+BOTH the flat loop (ρ=1.264) AND the *winning* mixer (ρ=2.307) are non-contractive and decay under
+over-unroll ("dressed-up depth, even where it wins", M21); (b) contraction is reachable at **~zero ACCURACY
+cost for both** (Δacc ns everywhere); (c) its EM "cost" tracks **SATURATION, not architecture** — it appears
+only where the base model is not near-solved (flat w=24 EM 0.63 → −0.097; flat w≤16 and the near-solved mixer
+→ ~0), decisively shown by the flat loop being equally free once saturated (disentangling sweep). And (d)
+contraction buys NO capability either way: flat under over-unroll (no test-time-compute GAIN — the held level
+is just the trained-depth answer), and no OOD-depth crack even when genuinely contractive (iterated ρ=0.610,
+T=12/16 still baseline). Net: **the M21 "make the loop contractive and it'll extrapolate" lever is CLOSED,
+architecture-independently** — a contractive loop is dressed-up depth with a step-count-invariant readout, not
+an extrapolator. What contraction buys is ROBUSTNESS (invariance to the number of test-time steps), free when
+the model already solves the task; the loop's *value* remains static joint-state coherence (§9.2; leg-1
+reproduces here at ΔEM +0.439). Upholds every prior depth-extrapolation null (M1/M3a/M7/M8).
+
+**Adversarial review (this branch, TWO passes) — findings incorporated:** the write-up overstated several
+points; each was corrected against fresh data. (i) "the loop's coherence win is still there to trade" was
+FALSE — Δ(trm−ff) EM is a tie on this config (−0.011, p=.73); the cost is vs trm's OWN baseline (do not
+import M9's +0.133, a different config). (ii) The FIRST iterated run pinned converge's 1e-2 weight, leaving
+ρ=1.026 (still EXPANDING) — a confounded "weak-reg" test; RE-SCREENED (elbow 3e-2, ρ=0.610) and re-run
+(superseded run removed). (iii) "did we check the MIXER?" — we had not; extended `train_stable` + the
+diagnostics to `trm_mixer` and re-ran. (iv) The mixer's first-draft headline ("contraction is FREE on the
+mixer → architecture-specific") was itself OVERSTATED — the 2nd review flagged it as an EM-only / saturation
+confound (accuracy cost ns for both arms; M9-level trap), and the **disentangling sweep RESOLVED it**: the
+flat loop is equally free when saturated, so the split is operating-point, not architecture (a mislabel of an
+accuracy Δ as "EM +0.336" was fixed too). Code review (both passes) confirmed the jac map faithful, the
+penalty grad-enabled, off-by-default bit-identical, over-unroll valid for the mixer; a silent-skip guard was
+added (`use_act`/`n_sup` + contraction raise). **Honest scope:** converge + iterated, one rule / size, jac
+penalty only (fixed_point_weight built + unit-tested, not headlined); single-knob so "cost = contraction" is
+suggestive not isolated.
+Canonical: `m27_stable_screen_20260706T135247_*`, `m27_stable_converge_20260706T140412_*`,
+`m27_stable_iterated_screen_20260706T155416_*`, `m27_stable_iterated_extrap_20260706T155648_*`,
+`m27_stable_mixer_converge_20260706T172948_*`, `m27_stable_flat_saturation_20260706T180307_*`.

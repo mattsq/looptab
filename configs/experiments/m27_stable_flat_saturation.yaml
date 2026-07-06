@@ -1,0 +1,89 @@
+# M27 (disentangling test) — is the flat-loop contraction COST an ARCHITECTURE property, or a
+# SATURATION (operating-point) artifact? The decisive control the mixer re-test lacked.
+#
+# WHY (adversarial-review blocker A2). The mixer re-test claimed "contraction is free on the mixer,
+# costly on the flat loop → architecture-specific". But the two arms sat at very different operating
+# points: flat trm EM 0.63 (headroom to lose), mixer EM 0.94 (near-solved). "Cost ∝ (1 − answer
+# quality)" explains the split as well as "architecture", and neither run had a SATURATED flat loop
+# nor a NON-saturated mixer to break the tie. On ACCURACY (the level-robust metric) the contraction
+# cost was non-significant for BOTH arms; the whole contrast lived in EM, the M9-documented confound
+# with accuracy LEVEL.
+#
+# THE TEST. Sweep the FLAT trm across widths w∈{8,12,16,24}: smaller w ⇒ fewer output cells ⇒ higher
+# base EM (the flat loop SATURATES at small w, M9). At each width apply the SAME contraction (the flat
+# z is 64-dim regardless of w, so jac=1e-2 drives ρ≈0.65 uniformly) and read Δ(trm_stable − trm) EM
+# AND acc. DECISIVE READ: if the EM cost SHRINKS toward ~0 as the flat loop saturates (small w, high
+# base EM) — matching the near-solved mixer — then the "free on the mixer" result is SATURATION, not
+# architecture. If the flat loop keeps paying an EM cost even when saturated, the architecture reading
+# survives. (No extrapolation harness here — the claim is about the trained-depth COST, not over-unroll;
+# and a sweep + the (T,R)-keyed extrapolation harness don't compose.)
+
+task:
+  name: converge
+  params:
+    w: 24            # overridden by the sweep
+    T: 6
+    rule: 78
+    distractors: 0
+  n_train: 4000
+  n_test: 1000
+  task_seed: 42
+  train_sample_seed: 1
+  test_sample_seed: 2
+
+sweep:
+  param: w
+  values: [8, 12, 16, 24]
+
+arms:
+  - name: trm
+    label: trm                 # weight 0 — the base (its EM rises as w shrinks = the saturation axis)
+    hidden_dim: 64
+    latent_dim: 64
+    n_steps: 6
+    deep_supervision: true
+  - name: trm
+    label: trm_stable_1e-2      # the elbow weight (ρ≈0.65 across widths)
+    hidden_dim: 64
+    latent_dim: 64
+    n_steps: 6
+    deep_supervision: true
+    jac_reg_weight: 1.0e-2
+  - name: trm
+    label: trm_stable_1e-1
+    hidden_dim: 64
+    latent_dim: 64
+    n_steps: 6
+    deep_supervision: true
+    jac_reg_weight: 1.0e-1
+  - name: ff_matched
+    label: ff_matched          # §4a control (context for the base EM level)
+    hidden_dim: 64
+    latent_dim: 64
+    n_steps: 6
+
+deltas:
+  - [trm_stable_1e-2, trm]     # THE cost as a function of width/saturation
+  - [trm_stable_1e-1, trm]
+  - [trm, ff_matched]
+
+budget_reference: trm
+budget_tol: 0.02
+
+diagnostics:
+  enabled: true                # confirm ρ<1 reached at each width
+  overunroll_factor: 4
+  n_random_inits: 5
+  power_iter_steps: 20
+  jac_n_examples: 8
+
+train:
+  epochs: 100
+  lr: 1e-3
+  weight_decay: 1e-4
+  batch_size: 256
+  device: cpu
+
+seeds: [0, 1, 2, 3, 4, 5, 6, 7]
+parallel_workers: 4
+results_dir: results
