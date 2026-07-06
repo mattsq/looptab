@@ -41,6 +41,7 @@ from .train.loop import (
     train_curriculum,
     train_deep_supervision,
     train_progressive,
+    train_stable,
 )
 
 
@@ -181,13 +182,30 @@ def run_point(cfg: ExperimentConfig, task_params: dict, seed: int) -> tuple[dict
         # shuffle stream are identical across arms and independent of arm order.
         torch.manual_seed(seed)
         m = _build_model(arm, in_features, num_classes, out_features, n_steps=coupled_steps)
-        if regression and (curriculum is not None or arm.use_act or arm.n_sup > 1):
-            # M26 regression uses the standard MSE train path only; the curriculum/ACT/N_sup
+        stable = arm.jac_reg_weight > 0 or arm.fixed_point_weight > 0
+        if regression and (curriculum is not None or arm.use_act or arm.n_sup > 1 or stable):
+            # M26 regression uses the standard MSE train path only; the curriculum/ACT/N_sup/stable
             # routines are CA-trajectory / classification mechanisms (they build CE losses and
             # exact-match halt targets). Fail loudly rather than silently train on the wrong loss.
             raise ValueError(
                 f"arm '{arm.resolved_label()}': regression (objective=regression) supports only "
-                "standard train path — curriculum / use_act / n_sup>1 are classification routines."
+                "standard train path — curriculum / use_act / n_sup>1 / contraction-reg are "
+                "classification routines."
+            )
+        if curriculum is not None and stable:
+            # The M27 contraction penalty is a standard-train mechanism; combining it with the
+            # trajectory curriculum would conflate two schemes (§5.6, one knob per ablation).
+            raise ValueError(
+                f"arm '{arm.resolved_label()}' sets jac_reg_weight/fixed_point_weight, which is "
+                "incompatible with a curriculum run (train_stable is for the standard-train path)."
+            )
+        if stable and (arm.use_act or arm.n_sup > 1):
+            # The ACT / N_sup branches are dispatched BEFORE the stable branch below, so an arm
+            # setting both would silently drop the contraction penalty. Fail loudly (§5.6, one
+            # knob): train_stable, train_act and train_deep_supervision are distinct routines.
+            raise ValueError(
+                f"arm '{arm.resolved_label()}' sets jac_reg_weight/fixed_point_weight together "
+                "with use_act/n_sup>1; these are mutually exclusive routines (one knob per arm)."
             )
         if curriculum is not None and arm.n_sup > 1:
             # The N_sup detached-carry routine is a standard-train mechanism; combining it with
@@ -271,6 +289,31 @@ def run_point(cfg: ExperimentConfig, task_params: dict, seed: int) -> tuple[dict
                 weight_decay=cfg.train.weight_decay,
                 deep_supervision_weight=arm.deep_supervision_weight,
                 ema_decay=arm.ema_decay,
+                device=device,
+            )
+        elif stable:
+            # M27: contraction-regularized loop (`trm_stable` / `trm_mixer` — the mixer re-test).
+            # Standard train + a Jacobian / fixed-point penalty on the one-step latent map. Needs a
+            # `readout` + the init_state/return_state API; `trm` (flat z) and `trm_mixer` (per-cell
+            # z) both have it, decoupled/ff/untied do not — fail loudly rather than crash inside
+            # torch.func.jvp. (_stable_step_map is shape-agnostic: just readout + one step.)
+            if arm.name not in ("trm", "trm_mixer"):
+                raise ValueError(
+                    f"arm '{arm.resolved_label()}' (name '{arm.name}') sets a contraction-reg "
+                    "weight, but only 'trm'/'trm_mixer' have the map train_stable regularizes."
+                )
+            train_stable(
+                m,
+                train_loader,
+                jac_reg_weight=arm.jac_reg_weight,
+                fixed_point_weight=arm.fixed_point_weight,
+                n_reg_steps=arm.n_reg_steps,
+                epochs=cfg.train.epochs,
+                lr=cfg.train.lr,
+                weight_decay=cfg.train.weight_decay,
+                deep_supervision_weight=arm.deep_supervision_weight,
+                ema_decay=arm.ema_decay,
+                reg_seed=seed,
                 device=device,
             )
         else:
@@ -506,8 +549,8 @@ def run_extrapolation_point(
         lbl = arm.resolved_label()
         m = models[lbl]
 
-        # recurrent arms (TRM and the decoupled variant) can be unrolled to different steps R'
-        if arm.name in ("trm", "trm_decoupled"):
+        # recurrent arms (TRM, the decoupled variant, and the M27 mixer) can be unrolled to R'
+        if arm.name in ("trm", "trm_decoupled", "trm_mixer"):
             for R in R_test_values:
                 point_results[(lbl, R)] = evaluate(
                     m, test_loader, device, want_exact_match=multi_output, n_steps=R

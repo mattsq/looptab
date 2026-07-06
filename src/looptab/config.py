@@ -98,6 +98,23 @@ class ModelConfig(BaseModel):
     # the carry from the raw 4× step-count. Only used when n_sup>1.
     n_sup_carry: bool = True
 
+    # --- M27: contraction regularization (the M21 `trm_stable` lever; `trm` only) --------------
+    # M21 MEASURED that the trained loop never settles a fixed point (Jacobian ρ>1, frac_expanding
+    # =1.0, residual ~1.2) EVEN where it wins, and over-unrolling decays. These two OFF-by-default
+    # penalties push the one-step latent map F(z)=update(cat[X,z,readout(z)]) toward contraction so
+    # we can test whether a CONTRACTIVE loop finally extrapolates / uses test-time compute — judged
+    # against BOTH the extrapolation metric AND the coherence Δ it costs (a trm-only, param-
+    # identical arm, so budget parity vs the plain `trm` control is exact). Both default 0.0 ⇒ the
+    # routine is never entered and every committed M0–M26 result is bit-identical.
+    #   jac_reg_weight   — DEQ Jacobian penalty (Bai 2021 arXiv 2106.14342): weight on a Hutchinson
+    #                      estimate mean‖J v‖² of the one-step map's amplification (drives ρ↓).
+    #   fixed_point_weight — path-independence / fixed-point residual (Anil 2022 arXiv 2211.09961):
+    #                      weight on the normalized step residual ‖z_{t+1}−z_t‖/‖z_t‖ (→0).
+    #   n_reg_steps      — outer steps rolled (detached) to the linearization / residual point.
+    jac_reg_weight: float = 0.0
+    fixed_point_weight: float = 0.0
+    n_reg_steps: int = 4
+
     def resolved_label(self) -> str:
         return self.label or self.name
 

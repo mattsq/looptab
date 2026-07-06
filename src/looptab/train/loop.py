@@ -275,6 +275,113 @@ def train_act(
     return losses
 
 
+def _stable_step_map(model: nn.Module, X: torch.Tensor):
+    """The one-step latent map ``F(z) = update(cat[X, z, readout(z)])`` as a function of ``z`` only.
+
+    Mirrors ``introspection._step_z_fn`` (the answer ``a`` is slaved to ``z`` via ``readout``, as it
+    is past step 0 of the loop), but grad-ENABLED so its Jacobian penalty backpropagates to the
+    weights. ``X`` is the fixed batch; the map is per-row independent, so a single random tangent
+    gives an unbiased per-row Hutchinson estimate. Faithful for any ``n_latent`` because it goes
+    through the model's own one-outer-step ``forward`` (which runs the inner z-updates)."""
+
+    def F(z: torch.Tensor) -> torch.Tensor:
+        a = model.readout(z)
+        _, _, (z2, _) = model(X, n_steps=1, init_state=(z, a), return_state=True)
+        return z2
+
+    return F
+
+
+def train_stable(
+    model: nn.Module,
+    train_loader: DataLoader,
+    *,
+    jac_reg_weight: float = 0.0,
+    fixed_point_weight: float = 0.0,
+    n_reg_steps: int = 4,
+    epochs: int = 100,
+    lr: float = 1e-3,
+    weight_decay: float = 1e-4,
+    deep_supervision_weight: float = 1.0,
+    ema_decay: float | None = None,
+    reg_seed: int = 0,
+    device: str = "cpu",
+    verbose: bool = False,
+) -> list[float]:
+    """Standard training + a contraction penalty on the loop's one-step latent map (M27).
+
+    On top of the ordinary task (+ per-step DS) loss this adds, per batch:
+      - a **Jacobian penalty** (DEQ; Bai 2021 arXiv 2106.14342): ``jac_reg_weight · mean‖J v‖²``
+        with ``J = ∂F/∂z`` of the one-step map ``F`` at the (detached) ``n_reg_steps``-rolled state
+        and ``v`` a fresh random unit-variance tangent — a Hutchinson estimate that drives the map's
+        amplification (ρ / σ_max, the M21 ``jacobian_spectrum`` quantities) down toward contraction;
+      - a **fixed-point residual penalty** (path independence; Anil 2022 arXiv 2211.09961):
+        ``fixed_point_weight · mean(‖z_{t+1}−z_t‖ / ‖z_t‖)`` at the rolled state — the residual
+        M21's ``latent_dynamics`` measures, driven toward 0.
+
+    Requires the ``init_state``/``return_state`` API and a ``readout`` (``trm`` flat-z or
+    ``trm_mixer`` per-cell-z; ``_stable_step_map`` is shape-agnostic). With both
+    weights 0 the penalties are skipped entirely (but the routine is a distinct code path from
+    ``train`` and is NOT asserted bit-identical to it — the runner only dispatches here when a
+    weight is > 0). Determinism caveat: the ``jvp`` involves float-reduction-order-sensitive ops, so
+    like
+    ``trm_decoupled`` / the M21 diagnostics this reproduces bit-for-bit only with CPU threads pinned
+    (``num_threads=1``, the committed default). ``reg_seed`` seeds the tangent sampler.
+    """
+    model = model.to(device)
+    opt = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=weight_decay)
+    ema = EMA(model, ema_decay) if ema_decay is not None else None
+    gen = torch.Generator(device=device).manual_seed(reg_seed)
+    losses = []
+
+    for epoch in range(epochs):
+        model.train()
+        epoch_loss = 0.0
+        n_batches = 0
+        for X, y in train_loader:
+            X, y = X.to(device), y.to(device)
+            opt.zero_grad()
+            logits, all_logits = model(X)
+            loss = _loss_fn(logits, y)
+            if all_logits is not None and deep_supervision_weight > 0:
+                ds_loss = sum(_loss_fn(sl, y) for sl in all_logits) / len(all_logits)
+                loss = loss + deep_supervision_weight * ds_loss
+
+            if jac_reg_weight > 0 or fixed_point_weight > 0:
+                # Detached linearization / residual point: the n_reg_steps-rolled latent. We
+                # penalize the operator's LOCAL amplification at that point (point held constant,
+                # à la DEQ), so the gradient flows through the penalty to the weights, not state.
+                with torch.no_grad():
+                    _, _, (z_pt, a_pt) = model(X, n_steps=n_reg_steps, return_state=True)
+                z_pt = z_pt.detach()
+                if jac_reg_weight > 0:
+                    F = _stable_step_map(model, X)
+                    v = torch.randn(z_pt.shape, generator=gen, device=device, dtype=z_pt.dtype)
+                    _, Jv = torch.func.jvp(F, (z_pt,), (v,))
+                    loss = loss + jac_reg_weight * Jv.pow(2).sum(dim=-1).mean()
+                if fixed_point_weight > 0:
+                    _, _, (z2, _) = model(
+                        X, n_steps=1, init_state=(z_pt, a_pt.detach()), return_state=True
+                    )
+                    resid = (z2 - z_pt).norm(dim=-1) / z_pt.norm(dim=-1).clamp_min(1e-12)
+                    loss = loss + fixed_point_weight * resid.mean()
+
+            loss.backward()
+            opt.step()
+            if ema is not None:
+                ema.update(model)
+            epoch_loss += loss.item()
+            n_batches += 1
+        avg = epoch_loss / max(n_batches, 1)
+        losses.append(avg)
+        if verbose and (epoch % 10 == 0 or epoch == epochs - 1):
+            print(f"  epoch {epoch:3d}  loss={avg:.4f}")
+
+    if ema is not None:
+        ema.copy_to(model)
+    return losses
+
+
 def _forward_steps(model: nn.Module, X: torch.Tensor, n_steps: int):
     """Call a model with an explicit unroll depth, uniformly across arms.
 

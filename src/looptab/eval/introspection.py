@@ -47,11 +47,15 @@ import torch.nn as nn
 
 from ..models.controls import FFMatched, UntiedStack, UntiedStackMatched
 from ..models.decoupled import TRMDecoupled
+from ..models.mixer import TRMMixer
 from ..models.trm import TRM
 
 # GELU is ~1.085-Lipschitz; we treat the nonlinearities as 1-Lipschitz and report the
 # product of the *linear* layers' spectral norms. Named so the approximation is explicit.
-_RECURRENT = (TRM, TRMDecoupled)
+# TRMMixer (M27 mixer re-test) shares the (z, a) resumable API and a per-cell readout, so the
+# Family-A dynamics probes apply unchanged — its z is (B, n_cells, latent) instead of (B, latent),
+# which the ``reshape(B, -1)`` / last-dim ops throughout this module already handle.
+_RECURRENT = (TRM, TRMDecoupled, TRMMixer)
 
 
 def is_recurrent(model: nn.Module) -> bool:
@@ -66,7 +70,7 @@ def _final_repr_module(model: nn.Module) -> nn.Module:
     refined ``z`` for the recurrent arms, the last block's latent for the untied stack, the
     penultimate activation for the feedforward control.
     """
-    if isinstance(model, (TRM, TRMDecoupled)):
+    if isinstance(model, (TRM, TRMDecoupled, TRMMixer)):
         return model.readout
     if isinstance(model, FFMatched):
         return model.net[-1]

@@ -1,0 +1,99 @@
+# M27 (mixer re-test) — is the M27 contraction verdict ARCHITECTURE-INDEPENDENT, or a flat-loop
+# artifact? Carry the trm_stable lever to the cross-cell MIXER (the §8 / M23–M24 trap).
+#
+# WHY. M27's null ("a contractive loop gains no test-time compute / doesn't extrapolate") was
+# measured on the FLAT `trm` — the exact architecture the M23–M26 arc showed is systematically
+# handicapped on structured tasks ("loop-with-a-FLAT-update ≈ feedforward"). On `converge` the MIXER
+# SOLVES the task (M24: EM≈1.0) where the flat loop only ties ff. So the open question: is the
+# *winning* architecture ALSO non-contractive dressed-up depth (does it decay under over-unroll like
+# flat trm?), and does forcing contraction cost it the win? A smoke already shows trm_mixer at
+# weight 0 is non-contractive (ρ≈1.25, frac_expanding=1.0) — same dynamics as flat trm — so this run
+# quantifies it and tests whether contraction (a) stops the over-unroll decay and (b) at what cost.
+#
+# READ two axes (mirrors the flat-loop m27_stable_converge):
+#   (1) is trm_mixer(weight 0) non-contractive AND does it DECAY under over-unroll R'6→24? (the
+#       extrapolation table + the ρ/za/drop diagnostics). If yes → even the winning architecture is
+#       dressed-up depth (strengthens M21/M27). (2) does a contractive weight HOLD it, and at what
+#       EM cost (Δ(mixer_stable − mixer))? The elbow = smallest weight with spectral_radius_mean<1.
+#
+# converge rule 78, w=24, distractors=0 (the mixer needs in_features % out_features == 0 — M24
+# setting). trm_mixer arms are param-IDENTICAL (contraction is training-only), so budget-clean.
+# 3-D mixer matmul ⇒ num_threads pinned to 1 (the committed default) for bit-repro.
+
+task:
+  name: converge
+  params:
+    w: 24
+    T: 6
+    rule: 78
+    distractors: 0
+  n_train: 4000
+  n_test: 1000
+  task_seed: 42
+  train_sample_seed: 1
+  test_sample_seed: 2
+
+arms:
+  - name: trm_mixer
+    label: trm_mixer           # the WINNING architecture, weight 0 — the baseline (M24 solves converge)
+    hidden_dim: 64
+    latent_dim: 64
+    n_steps: 6
+    deep_supervision: true
+  - name: trm_mixer
+    label: trm_mixer_stable_1e-2
+    hidden_dim: 64
+    latent_dim: 64
+    n_steps: 6
+    deep_supervision: true
+    jac_reg_weight: 1.0e-2
+  - name: trm_mixer
+    label: trm_mixer_stable_1e-1
+    hidden_dim: 64
+    latent_dim: 64
+    n_steps: 6
+    deep_supervision: true
+    jac_reg_weight: 1.0e-1
+  - name: trm_mixer
+    label: trm_mixer_stable_3e-1
+    hidden_dim: 64
+    latent_dim: 64
+    n_steps: 6
+    deep_supervision: true
+    jac_reg_weight: 3.0e-1
+  - name: ff_matched
+    label: ff_matched          # §4a param-matched shallow control
+    hidden_dim: 64
+    latent_dim: 64
+    n_steps: 6
+
+deltas:
+  - [trm_mixer_stable_1e-2, trm_mixer]   # cost of (weak) contraction
+  - [trm_mixer_stable_1e-1, trm_mixer]   # cost at the likely elbow
+  - [trm_mixer_stable_3e-1, trm_mixer]   # cost of strong contraction
+  - [trm_mixer, ff_matched]              # is the mixer's win present here (unlike the flat loop)?
+
+budget_reference: trm_mixer    # every stable arm is param-identical to trm_mixer (ratio 1.000)
+budget_tol: 0.02
+
+diagnostics:
+  enabled: true
+  overunroll_factor: 4
+  n_random_inits: 5
+  power_iter_steps: 20
+  jac_n_examples: 8
+
+train:
+  epochs: 100
+  lr: 1e-3
+  weight_decay: 1e-4
+  batch_size: 256
+  device: cpu
+
+extrapolation:
+  T_values: [6]                # fixed-point target; hold T, sweep R'
+  R_values: [6, 8, 12, 16, 24] # does trm_mixer DECAY, and does contraction HOLD it?
+
+seeds: [0, 1, 2, 3, 4, 5, 6, 7]
+parallel_workers: 4
+results_dir: results

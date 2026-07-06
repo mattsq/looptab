@@ -1,0 +1,4 @@
+config,arm,n_params,ref_params,ratio,role,within_tol
+single,trm_stable,11538,11538,1.0000,matched,True
+single,trm,11538,11538,1.0000,reference,True
+single,ff_matched,11518,11538,0.9983,matched,True
