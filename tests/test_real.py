@@ -164,6 +164,153 @@ def test_kfold_determinism_and_seed_independence(name):
     assert not np.array_equal(a1[1].y, b[1].y[: len(a1[1].y)])
 
 
+# --- M25: optional feature-padding for the cell-mixing arm (trm_mixer needs d % L == 0) ----------
+def test_pad_to_label_multiple_off_is_identical():
+    # Flag absent/False ⇒ byte-identical to the un-padded loader (M20 runs stay bit-identical).
+    base = {"dataset": "yeast", "n_folds": 10, "cv_seed": 0, "standardize": True}
+    tr0, te0 = make_multilabel_splits(base, split_seed=0, fold=2)
+    off = {**base, "pad_to_label_multiple": False}
+    tr1, te1 = make_multilabel_splits(off, split_seed=0, fold=2)
+    assert np.array_equal(tr0.X, tr1.X) and np.array_equal(te0.X, te1.X)
+    assert tr0.X.shape[1] == EXPECTED["yeast"]["d"]  # unchanged (103, not divisible by 14)
+
+
+def test_pad_to_label_multiple_pads_yeast_to_divisible():
+    cfg = {"dataset": "yeast", "n_folds": 10, "cv_seed": 0, "standardize": False,
+           "pad_to_label_multiple": True}
+    tr, te = make_multilabel_splits(cfg, split_seed=0, fold=1)
+    L = EXPECTED["yeast"]["L"]  # 14
+    d_padded = tr.X.shape[1]
+    assert d_padded == 112 and d_padded % L == 0  # 103 -> 112 (next multiple of 14)
+    assert te.X.shape[1] == d_padded
+    # 9 pad columns total (112 - 103), all constant zero (no information, no leakage).
+    n_zero_cols = int(np.sum(np.all(tr.X == 0.0, axis=0)))
+    assert n_zero_cols == d_padded - EXPECTED["yeast"]["d"]  # exactly 9 zero columns
+    # No real feature is lost: the non-zero columns reproduce the un-padded features as a MULTISET
+    # (order within cells is preserved but padding is interleaved, so compare column content).
+    tr_ref, _ = make_multilabel_splits({k: v for k, v in cfg.items()
+                                        if k != "pad_to_label_multiple"}, split_seed=0, fold=1)
+    kept = tr.X[:, ~np.all(tr.X == 0.0, axis=0)]
+    assert np.array_equal(kept, tr_ref.X)  # the padding only INSERTS zeros, never reorders reals
+
+
+def test_pad_distributed_no_dead_mixer_cell():
+    # M25-review fix: pad columns are DISTRIBUTED one-per-cell, so NO mixer cell (reshape to
+    # (L, cell_dim)) is left with all-zero input — the yeast label-13 dead-cell confound.
+    cfg = {"dataset": "yeast", "n_folds": 10, "cv_seed": 0, "standardize": True,
+           "pad_to_label_multiple": True}
+    tr, _ = make_multilabel_splits(cfg, split_seed=0, fold=0)
+    L, d = EXPECTED["yeast"]["L"], tr.X.shape[1]
+    cells = tr.X.reshape(tr.X.shape[0], L, d // L)
+    dead = [c for c in range(L) if np.all(cells[:, c, :] == 0.0)]
+    assert dead == [], f"cells with zero input: {dead}"
+    # Every cell keeps at least cell_dim - 1 real (non-constant) features.
+    for c in range(L):
+        zero_slots = int(np.sum(np.all(cells[:, c, :] == 0.0, axis=0)))
+        assert zero_slots <= 1
+
+
+def test_pad_to_label_multiple_noop_when_already_divisible():
+    # scene 294 / 6 = 49 exactly ⇒ padding is a no-op (no columns added).
+    cfg = {"dataset": "scene", "n_folds": 10, "cv_seed": 0, "standardize": False,
+           "pad_to_label_multiple": True}
+    tr, _ = make_multilabel_splits(cfg, split_seed=0, fold=0)
+    assert tr.X.shape[1] == EXPECTED["scene"]["d"]
+
+
+def test_pad_to_label_multiple_determinism():
+    cfg = {"dataset": "yeast", "n_folds": 10, "cv_seed": 0, "standardize": True,
+           "pad_to_label_multiple": True}
+    a = make_multilabel_splits(cfg, split_seed=0, fold=3)
+    b = make_multilabel_splits(cfg, split_seed=0, fold=3)
+    assert np.array_equal(a[0].X, b[0].X) and np.array_equal(a[1].X, b[1].X)
+
+
+# --- M26: multivariate time-series forecasting (regression bridge) --------------------------------
+_FORECAST_SHAPES = {"etth1": (17420, 7), "weather": (52696, 21)}
+_have_forecast = {ds: (_CACHE_DIR / f"{ds}.npz").exists() for ds in _FORECAST_SHAPES}
+_forecast_params = [
+    pytest.param(ds, marks=pytest.mark.skipif(not have, reason=f"datasets/{ds}.npz absent"))
+    for ds, have in _have_forecast.items()
+]
+
+
+@pytest.mark.parametrize("dataset", _forecast_params)
+def test_forecast_series_shape_and_hash(dataset):
+    import hashlib
+
+    from looptab.data.real import _FORECAST_SHA256, load_forecast_series
+
+    series = load_forecast_series(dataset)
+    assert series.shape == _FORECAST_SHAPES[dataset] and series.dtype == np.float32
+    assert hashlib.sha256(series.tobytes()).hexdigest() == _FORECAST_SHA256[dataset]
+
+
+@pytest.mark.parametrize("dataset", _forecast_params)
+def test_forecast_windows_shapes_and_divisibility(dataset):
+    from looptab.data.real import make_forecast_splits
+
+    M = _FORECAST_SHAPES[dataset][1]
+    L, H = 96, 24
+    cfg = {"dataset": dataset, "lookback": L, "horizon": H, "n_folds": 10, "test_frac": 0.3}
+    tr, te = make_forecast_splits(cfg, split_seed=0, fold=0)
+    assert tr.X.shape[1] == M * L and tr.X.shape[1] % M == 0  # divisible ⇒ mixer-compatible
+    assert tr.y.shape[1:] == (M, H) and te.y.shape[1:] == (M, H)  # M variable-cells × horizon
+    assert tr.X.dtype == np.float32 and tr.y.dtype == np.float32
+
+
+@pytest.mark.parametrize("dataset", _forecast_params)
+def test_forecast_determinism_and_seed_maps_to_fold(dataset):
+    from looptab.data.real import make_forecast_splits
+
+    cfg = {"dataset": dataset, "lookback": 96, "horizon": 24, "n_folds": 10, "test_frac": 0.3}
+    a = make_forecast_splits(cfg, split_seed=0, fold=3)
+    b = make_forecast_splits(cfg, split_seed=0, fold=3)
+    assert np.array_equal(a[1].X, b[1].X) and np.array_equal(a[1].y, b[1].y)
+    c = make_forecast_splits(cfg, split_seed=0, fold=4)  # different fold ⇒ disjoint block
+    assert not np.array_equal(a[1].y[:3], c[1].y[:3])
+
+
+@pytest.mark.parametrize("dataset", _forecast_params)
+def test_forecast_no_lookahead_leakage(dataset):
+    # Every TRAIN window must end strictly before the test block's first input (expanding-window
+    # backtest with a purge gap). Raw (unstandardized) windows compared to the source series.
+    from looptab.data.real import _forecast_windows, load_forecast_series, make_forecast_splits
+
+    M = _FORECAST_SHAPES[dataset][1]
+    L, H = 96, 24
+    cfg = {"dataset": dataset, "lookback": L, "horizon": H, "n_folds": 10, "test_frac": 0.3,
+           "standardize": False}
+    tr, te = make_forecast_splits(cfg, split_seed=0, fold=5)
+    Xall, _ = _forecast_windows(load_forecast_series(dataset), L, H)  # (N, M, L)
+    first_test = te.X[0].reshape(M, L)
+    test_origin = int(np.where((Xall == first_test).all(axis=(1, 2)))[0][0])
+    last_train = tr.X[-1].reshape(M, L)
+    last_train_start = int(np.where((Xall == last_train).all(axis=(1, 2)))[0][0])
+    assert last_train_start + L + H - 1 < test_origin  # train window ends before the test origin
+
+
+@pytest.mark.parametrize("dataset", _forecast_params)
+def test_forecast_standardization_no_leakage(dataset):
+    # M26-review m-1: the z-score stats must come ONLY from series strictly before the test block.
+    from looptab.data.real import _forecast_windows, load_forecast_series, make_forecast_splits
+
+    M = _FORECAST_SHAPES[dataset][1]
+    L, H = 96, 24
+    cfg = {"dataset": dataset, "lookback": L, "horizon": H, "n_folds": 10, "test_frac": 0.3,
+           "standardize": True}
+    series = load_forecast_series(dataset)
+    te = make_forecast_splits(cfg, split_seed=0, fold=5)[1]
+    Xall, _ = _forecast_windows(series, L, H)
+    raw_te = make_forecast_splits({**cfg, "standardize": False}, split_seed=0, fold=5)[1]
+    raw = raw_te.X[0].reshape(M, L)
+    origin = int(np.where((Xall == raw).all(axis=(1, 2)))[0][0])
+    mu, sd = series[:origin].mean(axis=0), series[:origin].std(axis=0)
+    sd = np.where(sd < 1e-8, 1.0, sd)
+    expected = ((raw - mu[:, None]) / sd[:, None]).astype(np.float32)
+    assert np.allclose(te.X[0].reshape(M, L), expected, atol=1e-5)
+
+
 def test_multilabel_f1_matches_hand_computation():
     from looptab.eval.metrics import multilabel_f1
 

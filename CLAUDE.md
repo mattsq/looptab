@@ -468,6 +468,22 @@ behaviour-changing conclusions, and the next pointer. Append detail to LOG.md, n
   **Eval (M20-review fix):** `multilabel_f1` (micro+macro, the honest co-headline to EM) and **K-fold CV**
   (`n_folds`/`cv_seed` in `make_multilabel_splits` — disjoint test folds, so the paired sign test is valid;
   the legacy random-split mode overlaps ~0.30 and suppresses the sign test). Configs use 10-fold CV.
+  **M25 adds `pad_to_label_multiple`** (additive, off-by-default ⇒ M20 bit-identical): right-pads X with
+  constant-zero columns so `d % L == 0`, needed only by the cell-mixing arm `trm_mixer`
+  (`in_features % out_features == 0`) — e.g. yeast 103→112; scene 294/6 and emotions 72/6 need no pad.
+  **FORECASTING (M26, the real-tabular REGRESSION form):** `etth1` (7 vars) / `weather` (21 vars),
+  multivariate time-series forecasting = multi-target regression with COUPLED targets. Vendored
+  `datasets/{etth1,weather}.npz` (content-sha256-guarded, network-free; built by
+  `scratchpad/fetch_forecast.py`), loader `make_forecast_splits` (`real.py`): one window = M variables'
+  `lookback`-step history → `horizon`-step future, arranged as VARIABLE-CELLS (cell i = variable i's
+  lookback, so `in_features = M·lookback` is mixer-divisible and cell i is variable i on input AND output
+  — the SHARED topology M25's multi-label lacked). Split = **EXPANDING-WINDOW (rolling-origin) backtest**
+  (disjoint chronological test blocks, seed=block, train = its own past prefix minus a purge gap; the
+  time-series analog of K-fold — but NESTED train sets, so sign-test p is *indicative*, Dietterich 1998),
+  per-variable z-scored on train-only stats. `objective: regression` ⇒ MSE loss + MSE/MAE/R² eval +
+  persistence baseline (all additive, off-by-default ⇒ M0–M25 bit-identical). Both `etth1`/`weather` task
+  names dispatch to `make_forecast_splits` (the `dataset` param picks the series); determinism +
+  no-leakage (window-purge AND standardization) tested for both.
   **SUDOKU (M23, the canonical-TRM positive-control TRIPWIRE):** `sudoku` (one row = one unique-solution
   puzzle; X = one-hot per cell over {blank,1..size}, y = the solved grid as `(size*size,)` classes
   `0..size-1` — a multi-output FIXED POINT, shape-compatible with converge/disruption). `make_sudoku`
@@ -500,7 +516,8 @@ behaviour-changing conclusions, and the next pointer. Append detail to LOG.md, n
   (M10 vs M11 differ ~±0.015; the effect sizes dwarf this). The "bit-identical" guarantees below cover the
   2-D arms only.
 - **Train/eval:** deep supervision is a **per-arm weight** (`src/looptab/train/loop.py`),
-  not a global flag. Five training routines: `train` (standard), `train_curriculum` (M3b
+  not a global flag. **`train` takes `loss_type` ("ce" default / "mse" for M26 regression; "ce" ⇒
+  bit-identical).** Five training routines: `train` (standard), `train_curriculum` (M3b
   depth-curriculum + step-aligned DS), `train_progressive` (M7 Deep Thinking progressive
   loss: detach `(T−k)` steps, gradient on `k`, modes `progressive_final`/`progressive_step`),
   `train_deep_supervision` (M18 — canonical TRM/HRM deep supervision: `n_sup` supervised passes
@@ -542,7 +559,8 @@ behaviour-changing conclusions, and the next pointer. Append detail to LOG.md, n
   m23_sudoku_{screen,base,scaleup_screen,scaleup_base,scaleup_sig,segments_pretest,act_sweep,
   mixer_sweep,mixer_lean}, m24_mixer_{converge,iterated}, m24b_converge_ablation,
   m24c_hopfield_mixer, m24d_multiparity_mixer, m24e_converge_mixer_untied,
-  m24f_disruption_{mixer_w24,mixer_w32,ablation_w24,ablation_w32,untied_w24,untied_w32}).
+  m24f_disruption_{mixer_w24,mixer_w32,ablation_w24,ablation_w32,untied_w24,untied_w32},
+  m25_mixer_multilabel_{yeast,scene,emotions}, m26_{etth1,weather}_forecast, m26_etth1_smoke).
 - **`hopfield` `bandwidth` regime (M14) — locked setting:** the local ladder needs **w=48** (w≤32 has
   no clean local regime — convergence-vs-triviality tension); b∈{2,4,8} at `γ=10` all 10/10
   convergent, balanced, non-trivial (triv ≤5%), settle ≤6 steps; the dense end (b=24) needs `γ=16`
@@ -557,7 +575,10 @@ behaviour-changing conclusions, and the next pointer. Append detail to LOG.md, n
 - **Metrics:** `accuracy` / `exact_match` / `majority_baseline`, the single-pass `evaluate`, and
   (M9) `coherence_excess = EM − token_acc**w` (whole-row coherence beyond what independent per-cell
   errors would give; >0 = errors clustered) with a `mean_wrong_per_row` companion — all in
-  `src/looptab/eval/metrics.py`; paired Δ with variance + sign test is `delta_report`.
+  `src/looptab/eval/metrics.py`; paired Δ with variance + sign test is `delta_report`. **Regression
+  (M26):** `evaluate_regression` (MSE/MAE/R² on standardized targets; no argmax) + `persistence_baseline_mse`
+  (naive last-value forecast) — gated by `objective: regression`, and MSE the honest headline (lower is
+  better ⇒ a NEGATIVE Δ favours the first arm, opposite of accuracy).
 - **Introspection (M21) — measurement-only latent/weight diagnostics:** `src/looptab/eval/
   introspection.py` (`run_introspection` dispatcher) reads a TRAINED arm and emits, per arm:
   Jacobian spectral radius ρ + operator norm (autograd JVP/VJP power iteration), latent residual
@@ -1309,6 +1330,67 @@ priority:
   `m24{c_hopfield,d_multiparity}_mixer_20260703T*`, `m24e_converge_mixer_untied_20260703T235935_*`,
   `m24f_disruption_{mixer_w24,mixer_w32,ablation_w24,ablation_w32,untied_w24,untied_w32}_20260704T*`; full narrative
   LOG.md M24 / M24b / M24c+M24d / M24e + correction.
+- **★ M25 — the M24 cross-cell MIXER re-test carried to REAL multi-label tabular (`yeast`/`scene`/`emotions`):
+  a CLEAN NEGATIVE (verdict SHARPENED by an adversarial review) — the mixer does NOT transfer; the M20 result
+  HOLDS for the mixer architecture too.** M24 showed the mixer solves synthetic tasks wherever outputs are
+  cross-cell COUPLED; real multi-label labels are coupled (yeast co-occurrence, scene mutual-exclusion), so this
+  tests whether mixing crosses over where the flat loop tied (M20). 6-arm design (trm_mixer / trm_flat /
+  ff_matched / untied_mixer_matched / untied_mixer ceiling / trm_decoupled), 10-fold CV, judged on
+  **micro/macro-F1** (not EM — the M20 modal-combo caveat), M24e attribution controls, budget-clean. **Headline
+  Δ(trm_mixer−ff_matched): the mixer NEVER beats the shallow MLP — it TIES on the PRIMARY metrics (micro-F1,
+  accuracy) on BOTH large datasets: yeast miF1 −0.005 (5/5, p=1.0), scene −0.005 (4/6, ns).** The ONLY
+  significant mixer deficit is the TIED mixer on yeast macro-F1/EM (maF1 −0.032, 1/9, p=.021) — and the
+  distributed-padding rerun re-attributes it to **TYING**, not an artifact and not the architecture:
+  Δ(trm_mixer−untied_mixer_matched) maF1 −0.028 (p=.021), while Δ(untied_mixer_matched−ff) is **ns on every
+  metric** (the mixing architecture ties the MLP). Δ(mixer−flat) ns-to-neg (the mixing OPERATOR buys nothing;
+  OPPOSITE of synthetic's +0.2…+0.9 EM). **NEW `Δ(trm_flat−ff)` M20-replication delta (sign-tested):** the flat
+  loop TIES ff on F1 all three (yeast all ns; scene miF1/maF1 ns, EM-only +0.054 10/0; emotions p=1.0) — "the
+  loop doesn't beat the MLP" reproduces recipe-independently. **Leg-1 (Δ(flat−decoupled) joint>binary-relevance
+  on F1: yeast maF1 +0.034 10/0; scene +0.056/+0.055 10/0) is the one robust positive — but a plain joint MLP
+  gets it too (ff>decoupled everywhere), so joint-MODELING not a loop/mixer property (exactly M20).**
+  **★ ADVERSARIAL-REVIEW FIX (MAJOR, sharpened the negative):** the first yeast run's "significantly worse macro-F1
+  −0.033, p=.002" was a PADDING ARTIFACT — contiguous 103→112 padding put all 9 zeros into mixer cell 13 = the
+  RAREST label (base 0.014), a dead-input cell hitting macro-F1 only (verified; appeared in both mixer arms). Fix:
+  DISTRIBUTE the pad one-per-cell (no dead cell) + re-ran yeast → micro-F1 −0.012→−0.005 (**clean p=1.0 tie**) and
+  the architecture macro deficit VANISHED (untied_mixer_matched−ff maF1 −0.013 [p=.002] → −0.005 [ns]); the residual
+  is the TYING cost above. **Mechanistic why it doesn't transfer:** synthetic mixer wins because input cells
+  correspond POSITIONALLY to output cells (shared ring/grid/graph topology) so token-mixing propagates real
+  constraints; the real-tabular reshape groups ARBITRARY feature-blocks into label-cells with NO input↔output
+  correspondence, so the token-mix is just a differently-parameterized MLP. M24's "cross-cell dependency" is
+  sharper than "outputs correlated" — it needs a SHARED input/output cell topology real tabular lacks. **Scope
+  limit (review framing point):** the naive reshape handicaps the mixer by construction, so M25 shows "the NAIVE
+  reshape doesn't transfer"; a learned input→cell projection is the untried steelman (future work). Closes the
+  mixer arc. Caveats: emotions underpowered (593 rows, all p≥.11); mixer mildly under-fits train where it loses
+  (yeast 0.993 / emotions 0.980 vs ff 1.0; scene both ~0.9998 and mixer still no win, so not merely optimization);
+  multi-target coupled REGRESSION the one untested real-tabular FORM (§11c). Additive code
+  (`pad_to_label_multiple`, DISTRIBUTED, off-by-default ⇒ all M0–M24 bit-identical; 5 padding tests, 256 total).
+  Canonical: `m25_mixer_multilabel_{yeast_20260705T164426,scene_20260705T190349,emotions_20260705T201321}_*`
+  (superseded contiguous-padding yeast `_20260705T120725` removed); full narrative LOG.md M25.
+- **★ M26 — the mixer DOES transfer to real data: a clean POSITIVE on multivariate TIME-SERIES
+  forecasting (`etth1` 7 vars, `weather` 21 vars), the §9.4 bridge's last untested FORM (multi-target
+  REGRESSION with coupled targets) — the positive bookend to M25's multi-label null.** M25 failed
+  because real multi-label's feature→label reshape had NO input↔output cell correspondence; forecasting
+  has the SHARED cell topology (cell i = variable i on both the L-step-lookback input AND the H-step
+  horizon), so the mixer's cross-variable token-mixing has real structure. **Δ(trm_mixer − ff_matched)
+  MSE −0.089 (ETTh1, 9/1) / −0.188 (weather, 0/10, p=.002) — the mixer beats the shallow MLP on both,
+  edge GROWING with variable count.** Honestly attributed (M24e/M24f controls): **primarily the mixing
+  ARCHITECTURE not recurrence** — a non-recurrent budget-matched untied mixer captures the bulk
+  (Δ(untied_mixer_matched−ff) −0.087 / −0.163), and the tied loop ≈ the 7.9× ceiling — with a
+  WIDTH-DEPENDENT tying edge (P1 Δ(mixer−untied_mixer_matched) a tie −0.002 at 7 vars but SIG −0.025,
+  0/10 at 21 vars — the M24f regularization-at-scale pattern). Plain recurrence does NOT do it (flat loop
+  ties/only-modestly-beats ff; the win needs the MIXING operator, mixer−flat −0.097/−0.120 both sig).
+  Leg-1 CD>CI: cross-variable coupling helps, SIG at 21 vars (Δ(flat−decoupled) −0.087, 9/1; channel-
+  independent `trm_decoupled` is the WORST arm) — a partial counterpoint to DLinear/PatchTST "CI wins" at
+  this tiny scale. It is a **GENERALIZATION win** (adversarial-review-verified): the mixer fits TRAIN
+  worse but TESTS better while ff/flat OVERFIT (weather ff train 0.069 → test 0.390). Net (M23–M26 arc):
+  **the mixer helps wherever there is cross-cell coupling AND a shared input/output cell topology —
+  forecasting has it (M26), the naive multi-label reshape lacked it (M25).** NEW repo capability: the
+  first REGRESSION path (`objective: regression` → MSE loss / MSE-MAE-R² eval / persistence baseline /
+  expanding-window rolling-origin backtest; additive, off-by-default ⇒ all M0–M25 bit-identical). Honest
+  scope: 2 datasets, ONE lookback/horizon (96→24), 25 epochs, standardized MSE, tiny CPU models; the
+  sign-test p is INDICATIVE (disjoint test blocks but NESTED train sets ⇒ correlated Δs, Dietterich 1998).
+  Canonical: `m26_etth1_forecast_20260705T212226_*`, `m26_weather_forecast_20260706T005434_*`; full
+  narrative LOG.md M26.
 - **M21 (latent/weight introspection) is DONE — and reframes the whole question: the trained loop does NOT
   settle a latent fixed point even where it WINS** (residual ~1.2, ρ>1, frac_expanding=1.0 on BOTH the
   `converge` win regime and the `iterated` fail regime; over-unroll readout collapses everywhere). This
@@ -1330,14 +1412,22 @@ priority:
   negative on TWO large datasets with opposite coupling** — the loop's synthetic coherence value does not
   cross to real multi-label tabular. **The `hidden=128` capacity probe is DONE and NEGATIVE on both datasets**
   (Δ(trm−ff) on F1 stays a tie; the M11 grows-with-size lever fails on real data), so the multi-label-
-  classification verdict is now FINAL across data, coupling regime, AND capacity. The only untested real-
-  tabular FORM is **multi-target REGRESSION with coupled targets** — the other natural shape for the joint-
-  state mechanism (the `trm_decoupled` ablation maps to independent-per-target heads); this is the one
-  remaining way the loop's value could conceivably cross to real tabular, and it needs a regression head +
-  loss + metrics (MSE/R², per-target vs joint), not yet built. If that too comes back null, the
-  loop-on-tabular question is closed as a clean negative. The classification eval machinery (`multilabel_f1`,
-  K-fold CV) is built/reusable; report EM **and** F1, use K-fold (never the legacy random-split mode) for
-  significance.
+  classification verdict is now FINAL across data, coupling regime, AND capacity. **And the M25 cross-cell
+  MIXER re-test (the M23/M24 architecture that overturned the synthetic negatives) is DONE and ALSO NEGATIVE
+  on real multi-label** — `trm_mixer` TIES `ff` on the primary metrics (micro-F1/accuracy) on BOTH yeast and
+  scene; no mixing-operator or mixing-architecture edge, and tying is a small rare-label macro-F1 DEFICIT on
+  yeast (an adversarial review caught+fixed a padding artifact that had inflated it) (§11(b) M25 bullet; LOG.md
+  M25). So the multi-label negative spans the FLAT loop AND the mixer. **The other real-tabular FORM —
+  multi-target REGRESSION with coupled targets — is now DONE (M26) and is a POSITIVE for the MIXER (not
+  the flat loop):** on multivariate time-series forecasting (`etth1`/`weather`) the cross-variable mixer
+  significantly beats the shallow MLP on MSE (−0.089/−0.188), because forecasting supplies the SHARED
+  input/output cell topology multi-label lacked (§11(b) M26 bullet; LOG.md M26). So "loop-on-tabular" is
+  NOT a blanket negative: a mixing ARCHITECTURE transfers where the task has cross-cell coupling + shared
+  topology; the flat loop and plain multi-label do not. Eval machinery reusable: classification
+  (`multilabel_f1`, K-fold CV, `pad_to_label_multiple`) and regression (`objective: regression`, MSE/MAE/R²,
+  expanding-window backtest). **Open forecasting threads (M26 scope limits):** a horizon sweep (96→
+  {96,192,336,720}), more datasets (ETTh2/ETTm/electricity/traffic), and benchmark-scale models where
+  channel-independence is known to win (the CD>CI finding may not survive) — none run yet.
 - **DO NOT build M19 (H/L) yet — the gate is unmet (M18g).** The §9.3 build-gate required the single-timescale
   loop to be insufficient on the nested target *in a timescale-specific way*. At equal compute (M18g, 400
   epochs, all train_acc≈1.0) the single loop is the best arm but stays far below target at every capacity

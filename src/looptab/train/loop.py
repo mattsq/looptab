@@ -36,8 +36,16 @@ class EMA:
                 p.copy_(self.shadow[n])
 
 
-def _loss_fn(logits: torch.Tensor, targets: torch.Tensor) -> torch.Tensor:
-    """Cross-entropy that handles both single-output (B,C) and multi-output (B,W,C)."""
+def _loss_fn(logits: torch.Tensor, targets: torch.Tensor, loss_type: str = "ce") -> torch.Tensor:
+    """Task loss over single-output (B,C) or multi-output (B,W,C) outputs.
+
+    ``loss_type="ce"`` (default) = cross-entropy for classification (bit-identical to before).
+    ``loss_type="mse"`` = mean-squared error for M26 forecasting REGRESSION: the readout
+    ``(B, M, H)`` is interpreted as raw forecast values (no softmax) against a same-shape float
+    target.
+    """
+    if loss_type == "mse":
+        return nn.functional.mse_loss(logits, targets.to(logits.dtype))
     if targets.ndim == 1:
         return nn.functional.cross_entropy(logits, targets)
     # multi-output: logits (B, W, C), targets (B, W). Use reshape (not view) because
@@ -55,6 +63,7 @@ def train(
     weight_decay: float = 1e-4,
     deep_supervision_weight: float = 1.0,
     ema_decay: float | None = None,
+    loss_type: str = "ce",
     device: str = "cpu",
     verbose: bool = False,
 ) -> list[float]:
@@ -62,7 +71,8 @@ def train(
 
     ``ema_decay`` (M18 ingredient 2): if set, maintain an EMA of the weights and fold it into
     the model at the end, so evaluation runs on the averaged weights. ``None`` = no EMA,
-    bit-identical to the pre-M18 routine.
+    bit-identical to the pre-M18 routine. ``loss_type`` ("ce" default / "mse" for M26 regression)
+    selects the task loss; "ce" is bit-identical to the pre-M26 routine.
     """
     model = model.to(device)
     opt = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=weight_decay)
@@ -77,11 +87,11 @@ def train(
             X, y = X.to(device), y.to(device)
             opt.zero_grad()
             logits, all_logits = model(X)
-            loss = _loss_fn(logits, y)
+            loss = _loss_fn(logits, y, loss_type)
             if all_logits is not None and deep_supervision_weight > 0:
-                ds_loss = sum(_loss_fn(step_logits, y) for step_logits in all_logits) / len(
-                    all_logits
-                )
+                ds_loss = sum(
+                    _loss_fn(sl, y, loss_type) for sl in all_logits
+                ) / len(all_logits)
                 loss = loss + deep_supervision_weight * ds_loss
             loss.backward()
             opt.step()

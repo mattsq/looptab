@@ -95,6 +95,17 @@ def make_splits(
             task_cfg=task_cfg, split_seed=task_seed, n_train=n_train, n_test=n_test, fold=seed
         )
 
+    # M26: multivariate-time-series forecasting (regression). Expanding-window backtest — the
+    # per-run `seed` selects the disjoint chronological test block (like multilabel's CV fold). The
+    # `dataset` param ("etth1"|"weather") picks the vendored series.
+    if task in ("etth1", "weather"):
+        from .real import make_forecast_splits
+
+        params = {**task_cfg, "dataset": task_cfg.get("dataset", task)}
+        return make_forecast_splits(
+            task_cfg=params, split_seed=task_seed, n_train=n_train, n_test=n_test, fold=seed
+        )
+
     def _build(sample_seed, n):
         if task == "linear":
             X, y = make_linear(n=n, task_seed=task_seed, sample_seed=sample_seed, **task_cfg)
