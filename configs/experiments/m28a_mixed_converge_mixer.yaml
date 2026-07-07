@@ -1,0 +1,97 @@
+# M28a — carry the cross-cell MIXER re-test to `mixed_converge` (the last MED-structure task,
+# flagged "STILL untested" in §11). MECHANISM ablation (M24b-style, budget_reference=trm_flat).
+#
+# `mixed_converge` is a per-position MIXED CA (each cell its own radius-1 rule from orbit1
+# {78,92,141,197}, iterated to a fixed point, rejection-filtered to the convergent basin): LOCAL +
+# DEEP + ff-HARD but spatially NON-UNIFORM. It was the M15 substrate that split the loop's value into
+# leg-1 (joint-state, transfers off-CA — CLEAN) and leg-2 (loop>MLP "needs a UNIFORM local rule").
+# leg-2 was measured on the FLAT loop. M24 showed the flat loop ≈ ff and the mixer SOLVES convergent
+# local-coupled rings; `mixed_converge` is convergent + local + cross-cell coupled, so this asks:
+#   - mixer SOLVES it (Δ(mixer−ff) large, growing with w) ⇒ leg-2's "needs uniform rule" was a
+#     FLAT-architecture artifact (the mixer handles NON-uniform local coupling; cross-cell dependency,
+#     not rule-uniformity, is the axis — tightening M24's reframe).
+#   - mixer TIES ff ⇒ a genuine uniform-rule requirement that survives the mixer — report plainly.
+# Pivot on the flat loop (it already carries the joint state ⇒ Δ(mixer−flat) isolates mixing):
+#   - Δ(trm_mixer − trm_flat)      = the MIXING operator's marginal on top of joint-state
+#   - Δ(trm_flat − trm_decoupled)  = leg-1 joint-state WITHOUT mixing (M10 ablation)
+#   - Δ(trm_flat − untied_matched) = P1 tying WITHOUT mixing
+#   - Δ(trm_flat − ff_matched)     = M24 replication sanity (flat loop ~ ff on structured tasks)
+# Recipe = M24 winner (standard train + deep supervision + RMSNorm on loop arms + full BPTT).
+# distractors=0 for EVERY arm (mixer needs in_features % out_features == 0) — this differs from M15's
+# distractors=8, so numbers are NOT directly comparable to the M15 flat runs; the within-config Δ is
+# the result (exactly as M24 did vs the earlier converge configs). num_threads=repo-default 1 (mixer
+# AND decoupled 3-D matmul ⇒ bit-repro only at pinned threads). Widths held to M15's rejection-verified
+# 24/32 (the mixed CA is not globally convergent; w=48 needs a separate convergence screen first).
+task:
+  name: mixed_converge
+  params:
+    rule_set: [78, 92, 141, 197]
+    distractors: 0
+    T: 6
+  n_train: 4000
+  n_test: 1000
+  task_seed: 42
+  train_sample_seed: 1
+  test_sample_seed: 2
+
+sweep:
+  param: w
+  values: [24, 32]
+
+arms:
+  - name: trm_mixer
+    label: trm_mixer
+    hidden_dim: 96
+    latent_dim: 64
+    token_hidden: 48
+    n_steps: 8
+    n_latent: 1
+    use_rmsnorm: true
+    deep_supervision: true
+  - name: trm
+    label: trm_flat
+    hidden_dim: 64
+    latent_dim: 64
+    n_steps: 8
+    n_latent: 1
+    use_rmsnorm: true
+    deep_supervision: true
+  - name: trm_decoupled
+    label: trm_decoupled     # leg-1 control: per-cell independent latents (no joint state, no mixing)
+    hidden_dim: 64
+    latent_dim: 64
+    n_steps: 8
+    deep_supervision: true
+  - name: untied_matched
+    label: untied_matched    # P1 control: untied stack at the loop's budget (no tying, no mixing)
+    hidden_dim: 64
+    latent_dim: 64
+    n_steps: 8
+    deep_supervision: true
+  - name: ff_matched
+    label: ff_matched
+    hidden_dim: 64
+    latent_dim: 64
+    n_steps: 8
+
+deltas:
+  - [trm_mixer, trm_flat]        # MIXING marginal on top of joint-state (trainability-clean)
+  - [trm_flat, trm_decoupled]    # leg-1 joint-state WITHOUT mixing
+  - [trm_mixer, trm_decoupled]   # total (joint + mixing) vs per-cell
+  - [trm_flat, untied_matched]   # P1 tying WITHOUT mixing
+  - [trm_mixer, ff_matched]      # HEADLINE: does the mixer beat the shallow MLP on the non-uniform task?
+  - [trm_flat, ff_matched]       # sanity: flat loop ~ ff (M24 replication)
+
+train:
+  epochs: 100
+  lr: 1e-3
+  weight_decay: 1e-4
+  batch_size: 256
+  device: cpu
+
+budget_reference: trm_flat
+budget_tol: 0.05
+
+seeds: [0, 1, 2, 3, 4, 5, 6, 7]
+parallel_workers: 4
+results_dir: results

@@ -1,0 +1,83 @@
+# M28b — TYING attribution for the mixer re-test on `nested_converge` (M24e-style,
+# budget_reference=trm_mixer, budget_ceiling=[untied_mixer]), at the 4k plateau regime.
+#
+# Companion to m28b_nested_converge_mixer. If the mixer changes the nested picture, this attributes
+# it: architecture vs recurrence. The DECISIVE arm for the §9.3 re-gate is untied_mixer — a
+# NON-recurrent mixer stack. If the mixer plateaus below target on nested but untied_mixer does NOT
+# share that ceiling, that is the only shape that could re-open Task C (a recurrence-specific / single-
+# timescale insufficiency the non-looped mixer escapes). If untied_mixer matches the tied mixer (the
+# expected M24e/M24f pattern), the mixer story is architecture+efficiency and Task C stays closed.
+#   - untied_mixer_matched (CLEAN §4b): untied mixer at the tied mixer's budget — isolates TYING.
+#   - untied_mixer (CEILING, ~7× params, full width): the capacity-unconstrained non-recurrent mixer.
+#   - ff_matched: continuity.
+# Same task/recipe/grid/seeds as the mixer config; distractors=0 all arms; num_threads=1.
+task:
+  name: nested_converge
+  params:
+    block_w: 8
+    inner_rule: 13
+    outer_rule: 79
+    T: 6
+    distractors: 0
+  n_train: 4000
+  n_test: 1000
+  task_seed: 42
+  train_sample_seed: 1
+  test_sample_seed: 2
+
+grid:
+  params:
+    n_blocks: [3, 4]   # w = 24, 32
+
+arms:
+  - name: trm_mixer
+    label: trm_mixer
+    hidden_dim: 96
+    latent_dim: 64
+    token_hidden: 48
+    n_steps: 8
+    n_latent: 1
+    use_rmsnorm: true
+    deep_supervision: true
+  - name: untied_mixer_matched
+    label: untied_mixer_matched   # CLEAN §4b: untied mixer stack, budget-matched (tying isolated)
+    hidden_dim: 96
+    latent_dim: 64
+    token_hidden: 48
+    n_steps: 8
+    use_rmsnorm: true
+    deep_supervision: true
+  - name: untied_mixer
+    label: untied_mixer           # CEILING (~7× params) — the decisive non-recurrent mixer for re-gate
+    hidden_dim: 96
+    latent_dim: 64
+    token_hidden: 48
+    n_steps: 8
+    use_rmsnorm: true
+    deep_supervision: true
+  - name: ff_matched
+    label: ff_matched
+    hidden_dim: 64
+    latent_dim: 64
+    n_steps: 8
+
+deltas:
+  - [trm_mixer, untied_mixer_matched]   # HEADLINE: does tying the mixer help at fixed budget?
+  - [trm_mixer, untied_mixer]           # tied vs the 7×-param non-recurrent ceiling (re-gate read)
+  - [trm_mixer, ff_matched]             # continuity (confounded loop+mixing vs flat MLP)
+  - [untied_mixer_matched, ff_matched]  # does an untied mixer (budget-matched) already beat the MLP?
+
+train:
+  epochs: 100
+  lr: 1e-3
+  weight_decay: 1e-4
+  batch_size: 256
+  device: cpu
+
+budget_reference: trm_mixer
+budget_ceiling: [untied_mixer]
+budget_tol: 0.05
+
+seeds: [0, 1, 2, 3, 4, 5, 6, 7]
+parallel_workers: 4
+results_dir: results

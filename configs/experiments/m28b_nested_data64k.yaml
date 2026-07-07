@@ -1,0 +1,68 @@
+# M28b — nested_converge mixer DATA SWEEP, point 3 of 3 (n_train=64000). LEAN triple only.
+# The EXPENSIVE cell (16× the 4k data, full-BPTT mixer arms) — run LAST / in the background.
+#
+# At 64k the FLAT single loop SOLVES the nested target (EM 0.99, M18j), triggering §9.3's null clause.
+# This point checks the mixer is at/above that (expected ~1.0) and completes the plateau curve
+# 4k→16k→64k. SEEDS reduced to 6 to bound wall-clock — 6/6 still clears §5's exact-binomial floor
+# (p=0.03125 < 0.05); if you drop below 6, flag the sign test as INDICATIVE. Same arm settings /
+# recipe as the other data points. distractors=0; num_threads=1; grid n_blocks [3,4] ⇒ w 24/32.
+task:
+  name: nested_converge
+  params:
+    block_w: 8
+    inner_rule: 13
+    outer_rule: 79
+    T: 6
+    distractors: 0
+  n_train: 64000
+  n_test: 1000
+  task_seed: 42
+  train_sample_seed: 1
+  test_sample_seed: 2
+
+grid:
+  params:
+    n_blocks: [3, 4]   # w = 24, 32
+
+arms:
+  - name: trm_mixer
+    label: trm_mixer
+    hidden_dim: 96
+    latent_dim: 64
+    token_hidden: 48
+    n_steps: 8
+    n_latent: 1
+    use_rmsnorm: true
+    deep_supervision: true
+  - name: trm
+    label: trm_flat
+    hidden_dim: 64
+    latent_dim: 64
+    n_steps: 8
+    n_latent: 1
+    use_rmsnorm: true
+    deep_supervision: true
+  - name: ff_matched
+    label: ff_matched
+    hidden_dim: 64
+    latent_dim: 64
+    n_steps: 8
+
+deltas:
+  - [trm_mixer, ff_matched]   # mixer vs shallow MLP at 64k data
+  - [trm_mixer, trm_flat]     # mixing marginal at 64k data
+  - [trm_flat, ff_matched]    # flat loop ~ ff sanity
+
+train:
+  epochs: 100
+  lr: 1e-3
+  weight_decay: 1e-4
+  batch_size: 256
+  device: cpu
+
+budget_reference: trm_flat
+budget_tol: 0.05
+
+seeds: [0, 1, 2, 3, 4, 5]
+parallel_workers: 4
+results_dir: results

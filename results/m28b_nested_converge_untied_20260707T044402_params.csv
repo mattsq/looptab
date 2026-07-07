@@ -1,0 +1,9 @@
+config,arm,n_params,ref_params,ratio,role,within_tol
+n_blocks=3,trm_mixer,16842,16842,1.0000,reference,True
+n_blocks=3,untied_mixer_matched,17344,16842,1.0298,matched,True
+n_blocks=3,untied_mixer,123984,16842,7.3616,ceiling,True
+n_blocks=3,ff_matched,16103,16842,0.9561,matched,True
+n_blocks=4,trm_mixer,18130,18130,1.0000,reference,True
+n_blocks=4,untied_mixer_matched,17752,18130,0.9792,matched,True
+n_blocks=4,untied_mixer,130704,18130,7.2093,ceiling,True
+n_blocks=4,ff_matched,18688,18130,1.0308,matched,True
