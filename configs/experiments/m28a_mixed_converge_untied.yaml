@@ -1,0 +1,84 @@
+# M28a — TYING attribution for the mixer re-test on `mixed_converge` (M24e-style,
+# budget_reference=trm_mixer, budget_ceiling=[untied_mixer]).
+#
+# If the mixer config (m28a_mixed_converge_mixer) shows the mixer solves the non-uniform task, this
+# asks the M24e question: is that a mixer ARCHITECTURE result, or does weight-tied RECURRENCE
+# contribute? The token-mix is all-to-all, so a single non-looped mixer block already couples every
+# cell; add the §4b mixing-matched controls:
+#   - untied_mixer_matched (CLEAN §4b): the SAME mixer block stacked n_steps× WITHOUT tying,
+#     width-shrunk to the tied mixer's budget. Δ(trm_mixer − untied_mixer_matched) isolates TYING.
+#   - untied_mixer (CEILING, ~7× params, full width): if even this fails to match the tied loop,
+#     tying genuinely helps; if it matches/beats, the win is architecture+depth, NOT recurrence.
+#   - ff_matched: continuity with the mixer config.
+# READING (M24e/M24f pattern): expect architecture-primary — untied_mixer_matched beats ff (the mixing
+# architecture does the work) with tying = parameter-EFFICIENCY, not a distinct capability. A width-
+# dependent tying edge (as M24f found at w32) is possible; report per-w.
+# Same task/recipe/widths/seeds as the mixer config; distractors=0 all arms; num_threads=1.
+task:
+  name: mixed_converge
+  params:
+    rule_set: [78, 92, 141, 197]
+    distractors: 0
+    T: 6
+  n_train: 4000
+  n_test: 1000
+  task_seed: 42
+  train_sample_seed: 1
+  test_sample_seed: 2
+
+sweep:
+  param: w
+  values: [24, 32]
+
+arms:
+  - name: trm_mixer
+    label: trm_mixer
+    hidden_dim: 96
+    latent_dim: 64
+    token_hidden: 48
+    n_steps: 8
+    n_latent: 1
+    use_rmsnorm: true
+    deep_supervision: true
+  - name: untied_mixer_matched
+    label: untied_mixer_matched   # CLEAN §4b: untied mixer stack, budget-matched (tying isolated)
+    hidden_dim: 96
+    latent_dim: 64
+    token_hidden: 48
+    n_steps: 8
+    use_rmsnorm: true
+    deep_supervision: true
+  - name: untied_mixer
+    label: untied_mixer           # CEILING (~7× params, full width) — capacity-unconstrained
+    hidden_dim: 96
+    latent_dim: 64
+    token_hidden: 48
+    n_steps: 8
+    use_rmsnorm: true
+    deep_supervision: true
+  - name: ff_matched
+    label: ff_matched
+    hidden_dim: 64
+    latent_dim: 64
+    n_steps: 8
+
+deltas:
+  - [trm_mixer, untied_mixer_matched]   # HEADLINE: does tying the mixer help at fixed budget?
+  - [trm_mixer, untied_mixer]           # does tying beat a 7×-param full-width untied mixer stack?
+  - [trm_mixer, ff_matched]             # continuity (confounded loop+mixing vs flat MLP)
+  - [untied_mixer_matched, ff_matched]  # does an untied mixer (budget-matched) already beat the MLP?
+
+train:
+  epochs: 100
+  lr: 1e-3
+  weight_decay: 1e-4
+  batch_size: 256
+  device: cpu
+
+budget_reference: trm_mixer
+budget_ceiling: [untied_mixer]
+budget_tol: 0.05
+
+seeds: [0, 1, 2, 3, 4, 5, 6, 7]
+parallel_workers: 4
+results_dir: results

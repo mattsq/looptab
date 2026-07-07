@@ -1236,9 +1236,44 @@ behaviour-changing conclusions, and the next pointer. Append detail to LOG.md, n
   `m24c_hopfield_mixer_20260703T150202_*`, `m24d_multiparity_mixer_20260703T150912_*`; full narrative LOG.md M24c+M24d.
   `disruption` (MED structure) since tested and is a mixer WIN too (M24f — the M22 leg-2 null was a
   flat-architecture artifact; Δ(mixer−ff) ACC +0.041/+0.034, 8/0 — EM +0.49/+0.48 is that edge amplified, NOT a
-  coherence win [coh_excess Δ ≤ 0]; architecture-not-recurrence per the M24e-style control). STILL untested (low
-  priority): `mixed_converge` (the last MED-structure task). Earlier bullets' claim
-  that these controls were "expected NULL" is superseded by M24c (hopfield is a mixer WIN).
+  coherence win [coh_excess Δ ≤ 0]; architecture-not-recurrence per the M24e-style control). Earlier bullets'
+  claim that these controls were "expected NULL" is superseded by M24c (hopfield is a mixer WIN). **`mixed_converge`
+  is now DONE too (M28): a mixer WIN** — the mixer (near-)SOLVES the per-position NON-uniform CA (EM 0.95/0.88 vs
+  ff 0.51/0.11, Δ(mixer−ff) EM +0.44/+0.77 8/0, growing with w — but on a small acc gain +0.03/+0.07, coh_excess
+  Δ≤0, an EM-floor amplification not a coherence win); architecture-not-recurrence (untied_mixer_matched beats ff,
+  ceiling ties the tied loop). **NB (adversarial-review walk-back):** M15's leg-2 "loop-beats-MLP needs a UNIFORM
+  rule" does NOT survive here — but at the mixer-required `distractors: 0` the FLAT loop also beats ff (EM
+  +0.16/+0.30, 8/0), so the requirement's dissolution is CONFOUNDED with the distractors=8→0 change (uncontrolled
+  vs M15) and is NOT cleanly a flat-architecture property; the clean result is the mixing marginal Δ(mixer−flat).
+  So EVERY cross-cell-coupled synthetic task is now mixer-tested.
+- **★ M28 — the mixer re-test carried to the last two untested tasks: `mixed_converge` is a mixer WIN,
+  `nested_converge` (Task C) is the informative EXCEPTION — the mixer improves but does NOT re-open the
+  hierarchy gate.** Audited the repo against M23–M26 and found exactly two cross-cell-coupled synthetic tasks
+  never run against `trm_mixer`: `mixed_converge` (M15) and `nested_converge` (M17, the Task C substrate).
+  Same M24 recipe (lean triple + M24b mechanism + M24e tying attribution; `distractors:0`, num_threads=1, 8
+  seeds; additive ⇒ all M0–M27 bit-identical; budget-clean ±5%). **(1) `mixed_converge` (w∈{24,32}) — the
+  mixer (near-)SOLVES the per-position NON-uniform CA:** EM 0.949/0.880 vs ff 0.510/0.105, Δ(mixer−ff) EM
+  +0.44/+0.77 (8/0, growing with w — small acc gain +0.03/+0.07, coh_excess Δ≤0 ⇒ EM-floor amplification, not a
+  coherence win); mixing marginal Δ(mixer−flat) EM +0.28/+0.48 (8/0). Architecture-not-recurrence
+  (untied_mixer_matched beats ff EM +0.39/+0.69; 7× ceiling ties/beats the tied loop; tying = small efficiency
+  EM +0.05/+0.09). **On M15's leg-2 (adversarial-review walk-back):** "loop-beats-MLP needs a UNIFORM rule" does
+  NOT survive here — BUT at the mixer-required `distractors:0` the FLAT loop also beats ff (EM +0.16/+0.30, 8/0),
+  so the dissolution is CONFOUNDED with the distractors=8→0 change (uncontrolled vs M15) and is NOT cleanly a
+  flat-architecture artifact (and no uniform arm was run at distractors=0 to re-test the contrast); the clean
+  architecture stat is the mixing marginal Δ(mixer−flat). **(2) `nested_converge` @4k (n_blocks 3/4) — the
+  mixer IMPROVES but does NOT solve, and the ceiling is SHARED by the non-recurrent mixer ⇒ Task C stays
+  CLOSED:** Δ(mixer−ff) EM +0.076/+0.130 (8/0) but trm_mixer EM 0.79/0.70 ≪ 1.0 (unlike converge/mixed where
+  the mixer solved). The §9.3 re-gate needs the loop to plateau below target AND the non-recurrent control to
+  NOT share the ceiling — it is NOT met: Δ(untied_mixer_matched−ff) captures the whole edge (EM +0.098/+0.095,
+  8/0), tying is NS (Δ(mixer−untied_mixer_matched) EM −0.022 1/7 @w24 / +0.035 7/1-ns @w32), and the 7× ceiling
+  matches/beats the tied mixer. So the nested 4k plateau is the same shared capacity/data wall M18g found for
+  the flat loop, now shown to hold for the MIXING architecture too — and the **data sweep 4k→16k→64k CONFIRMS
+  it: trm_mixer EM 0.79/0.70 → 0.93/0.90 → 0.99/0.985 (w24/w32), the mixer SOLVES the nested target at 64k**
+  (the M18j signature; data, not a second timescale, is the lever, triggering §9.3's null clause). **Do NOT
+  build M19.**
+  §9.2 legs (leg-1 joint-state, P1 tying) reproduce on both tasks. Canonical:
+  `m28a_mixed_converge_{mixer,untied}_20260706-07T*`, `m28b_nested_converge_{mixer,untied}_20260707T*`; full
+  narrative LOG.md M28.
 
 ### (c) Next milestone
 
@@ -1358,7 +1393,8 @@ priority:
   (MED structure: LOCAL rotation chains + NON-LOCAL bank cliques) joins the CROSS-CELL-COUPLED side alongside
   `converge`/`hopfield`.
   **STILL OPEN (low priority):** a stricter single-pass feedforward-mixer §4a (the untied stack already shows
-  non-recurrent mixing suffices, so it would only reinforce M24e); `mixed_converge` (the last MED-structure task).
+  non-recurrent mixing suffices, so it would only reinforce M24e). (`mixed_converge` is now DONE — M28, a mixer
+  WIN — so the mixer re-test covers every cross-cell-coupled synthetic task.)
   Canonical: `m24_mixer_{converge,iterated}_20260703T*`, `m24b_converge_ablation_20260703T102323_*`,
   `m24{c_hopfield,d_multiparity}_mixer_20260703T*`, `m24e_converge_mixer_untied_20260703T235935_*`,
   `m24f_disruption_{mixer_w24,mixer_w32,ablation_w24,ablation_w32,untied_w24,untied_w32}_20260704T*`; full narrative
@@ -1517,7 +1553,12 @@ priority:
   **Re-gate first:** find a nested instance (vary inner/outer rule, nesting depth, block size, n_train,
   model size) where the loop plateaus below target **and ff/untied do NOT share the ceiling at equal
   compute AND more data does NOT close it**; only then is M19 earned. On the current instance the lever is
-  simply data (M18h/M18j).
+  simply data (M18h/M18j). **M28b now also rules out the mixer ARCHITECTURE as a re-gate:** the cross-cell
+  `trm_mixer` improves the nested operator (Δ(mixer−ff) EM +0.076/+0.130 @4k, 8/0) but does NOT solve
+  (EM 0.79/0.70 ≪ 1.0), and its NON-recurrent control shares the ceiling (untied_mixer_matched gives the
+  whole ff edge; the 7× untied_mixer ceiling matches/beats the tied mixer; tying NS) — so even the mixing
+  architecture shows a shared capacity/data wall, not a recurrence/timescale-specific insufficiency. The
+  mixer does NOT re-open Task C.
 - **DONE — M17 built the Task C substrate + ran the gate (parallel branch, integrated here); the gate verdict
   was OVERTURNED by M18g.** `make_nested_converge` (two-timescale fixed point) is built, screened, tested —
   solid, reusable infrastructure. M17's "gate MET → M19 earned" conclusion does NOT hold: it compared a
