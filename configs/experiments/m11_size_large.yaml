@@ -1,7 +1,7 @@
 # M11 (large size) — Generalize the M8/M9/M10 coherence result across the MODEL-SIZE axis (upward).
 #
 # Companion to m11_size_base.yaml / m11_size_small.yaml. Grows the loop to hidden=latent=128 (~2× the
-# base width; ~50k params — still tiny by any standard, all arms scaled together per §11(c), NOT a
+# base width; ~50k params — still tiny by any standard, all arms scaled together per §11.3, NOT a
 # "large model"), at the 3 VERIFIED converging rules {13,78,92}. Controls are auto-rematched to the
 # larger loop budget by the runner's nearest-width search.
 #

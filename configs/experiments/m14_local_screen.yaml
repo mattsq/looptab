@@ -1,6 +1,6 @@
 # M14 screen — does a LOCAL-but-non-CA fixed-point map exist that is ff-HARD?
 #
-# M13 left one open scientific question (CLAUDE.md §11(c)): the joint-state coherence result
+# M13 left one open scientific question (CLAUDE.md §11.3): the joint-state coherence result
 # (M8-M12) holds on LOCAL-update CA hard-convergence targets but VANISHES on a DENSE (fully
 # coupled) Hopfield net — so the loop's edge may need *locality*, not just any hard-convergence
 # fixed point. M14 tests this with a single knob: `bandwidth` on the M13 threshold net. On a ring

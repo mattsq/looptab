@@ -5,7 +5,7 @@
 #   - ff_matched     (§4a): param-matched MLP — the paper's comparison; the headline control.
 #   - untied_matched (§4b): clean tying control — does recurrence beat matched depth+width?
 #   - trm_decoupled        : leg-1 joint-state ablation — does whole-grid coherence need the joint state?
-# COMPUTE CAVEAT (non-blocking, §8/§11(b)-M18): the paper knobs give the loop n_sup×n_steps forward
+# COMPUTE CAVEAT (non-blocking, §8/§11.2-M18): the paper knobs give the loop n_sup×n_steps forward
 # passes vs ff's one — NOT compute-matched. For replicating a KNOWN result the param-matched Δ is the
 # right headline (it matches the paper); if loop > ff, confirm with a longer-trained ff (secondary).
 # The screen (n_sup=1 loop) floored EM at ~0 for ALL arms at n_givens ∈ {12,16,20} and put ff AHEAD

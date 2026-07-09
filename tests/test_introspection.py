@@ -107,7 +107,7 @@ def test_run_introspection_deterministic():
 
 def test_run_introspection_decoupled_deterministic():
     """Same-process determinism on trm_decoupled too — it exercises the 3-D (B,w,m) state and the
-    flat-vs-3D readout reshape. NB CLAUDE.md §11(a): trm_decoupled's batched matmul is
+    flat-vs-3D readout reshape. NB CLAUDE.md §11.1: trm_decoupled's batched matmul is
     thread/BLAS-order-sensitive, so its diagnostics reproduce bit-for-bit only at a FIXED
     num_threads (as here), NOT across environments — same caveat as its accuracy."""
     torch.manual_seed(0)
