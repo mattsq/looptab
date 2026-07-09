@@ -53,6 +53,37 @@ def test_delta_report():
     assert r["sign_test"]["n_pos"] == 5  # all five seeds favour recurrent
 
 
+def test_sign_test_eps_reclassifies_near_ties():
+    """M29c guard: |Δ|<=eps is a practical tie. eps=0 (default) is the classic test (bit-identical);
+    a small eps drops one-cell ceiling differences so they stop counting as votes."""
+    from looptab.eval.metrics import sign_test
+
+    deltas = [0.2, 0.2, 4e-5, 4e-5, 4e-5, 4e-5, 0.009, 0.0007]  # the m29c carry−nocarry shape
+    raw = sign_test(deltas)  # eps=0.0
+    assert raw["n_pos"] == 8 and raw["n_zero"] == 0  # all 8 count → an impressive-looking 8/0
+    assert raw["p_value"] < 0.05
+    robust = sign_test(deltas, eps=1e-3)  # near-ties (the 4e-5s and 0.0007) dropped
+    assert robust["n_zero"] == 5 and robust["n_pos"] == 3  # only {0.2,0.2,0.009} remain
+    assert robust["p_value"] >= 0.05  # 3/3 → p=0.25, no longer significant
+
+
+def test_delta_report_reports_ceiling_tie_robustness():
+    """delta_report carries the ceiling-tie-robust companion so a reader can catch a raw sign count
+    that is riding near-saturation ties (the M29c pathology) without recomputing."""
+    rec = [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 0.99971, 1.0]
+    ctl = [0.79367, 0.78633, 0.99996, 0.99996, 0.99992, 0.99996, 0.99058, 0.99933]  # m29c nocarry
+    r = delta_report(rec, ctl)
+    assert r["sign_test"]["n_pos"] == 8 and r["sign_test"]["p_value"] < 0.05  # raw: 8/0
+    assert r["n_near_tie"] >= 4  # ~4 seeds are within one test-cell of a tie at ceiling
+    assert r["sign_test_robust"]["p_value"] >= 0.05  # collapses once ceiling-ties are dropped
+    # eps=0 must reproduce the classic sign test exactly (bit-identical default behaviour).
+    from looptab.eval.metrics import sign_test
+
+    assert delta_report(rec, ctl, near_tie_eps=0.0)["sign_test_robust"] == sign_test(
+        [a - b for a, b in zip(rec, ctl)]
+    )
+
+
 # --- M3b: curriculum + step-aligned deep supervision ---------------------------------------
 
 

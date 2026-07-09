@@ -1,0 +1,49 @@
+# M29c (4×-epoch control) — the "is N_sup just more epochs?" diagnostic for m29c, AND the check that the
+# regime is genuinely OPTIMIZATION-bound (not a data/capacity wall): if mixer_nods@400 raises TRAIN_acc
+# above the @100 value (screen 0.764), the under-fit is under-OPTIMIZATION (N_sup has something to match);
+# if train barely moves, it is a capacity/unlearnability wall (the M3a depth wall) and N_sup being inert
+# is by-construction. Read TRAIN_acc AND test token-acc here vs m29c base (same seeds/task, epochs the
+# only knob). 400 epochs, 2 arms (both architectures).
+task:
+  name: iterated
+  params:
+    w: 24
+    T: 6
+    rule: 110
+    distractors: 0
+  n_train: 8000
+  n_test: 1000
+  task_seed: 42
+  train_sample_seed: 1
+  test_sample_seed: 2
+
+arms:
+  - name: trm_mixer
+    label: mixer_nods_4xep
+    hidden_dim: 96
+    latent_dim: 64
+    token_hidden: 48
+    n_steps: 8
+    n_latent: 1
+    use_rmsnorm: true
+    deep_supervision: false
+  - name: trm
+    label: flat_nods_4xep
+    hidden_dim: 64
+    latent_dim: 64
+    n_steps: 8
+    n_latent: 1
+    use_rmsnorm: true
+    deep_supervision: false
+
+train:
+  epochs: 400
+  lr: 1e-3
+  weight_decay: 1e-4
+  batch_size: 256
+  device: cpu
+  num_threads: 1
+
+seeds: [0, 1, 2, 3, 4, 5, 6, 7]
+parallel_workers: 4
+results_dir: results

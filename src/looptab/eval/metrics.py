@@ -327,19 +327,26 @@ def _binom_two_sided_p(k: int, n: int) -> float:
     return float(min(1.0, sum(p for p in pmf if p <= obs + 1e-12)))
 
 
-def sign_test(delta_per_seed: list[float]) -> dict:
+def sign_test(delta_per_seed: list[float], eps: float = 0.0) -> dict:
     """Paired sign test on per-seed Δs (CLAUDE.md §2/§5.2 — a Δ needs a significance call).
 
-    Counts how many seeds favour the recurrent arm (Δ>0) vs the control (Δ<0); ties
-    (Δ==0) are dropped, as the sign test prescribes. Reports an exact two-sided binomial
+    Counts how many seeds favour the recurrent arm (Δ>eps) vs the control (Δ<-eps); ties
+    (|Δ|<=eps) are dropped, as the sign test prescribes. Reports an exact two-sided binomial
     p-value under H0: P(Δ>0)=0.5. Distribution-free — appropriate for small-sample seeds where
     normality is dubious. NOTE: with < 6 non-tied seeds the test cannot reach p<0.05 (a perfect
     5/5 split gives p=0.0625); use >= 8 seeds when significance is the point (CLAUDE.md §5.2).
+
+    ``eps`` (default 0.0 ⇒ ties are only exact Δ==0, the classic sign test — bit-identical to the
+    pre-M29 behaviour) treats any |Δ|<=eps as a PRACTICAL tie and drops it. This is the ceiling-tie
+    guard the M29c post-mortem motivated: on near-saturated arms a Δ of one flipped test cell
+    (e.g. 1/24000 ≈ 4e-5) is not evidence, yet the eps=0 test counts it as a full "positive vote"
+    and can manufacture an 8/0, p<.05 out of a handful of ceiling ties. Pass a small eps (see
+    ``delta_report``'s ``near_tie_eps``) to get the robust count.
     """
     d = np.asarray(delta_per_seed, dtype=float)
-    n_pos = int((d > 0).sum())
-    n_neg = int((d < 0).sum())
-    n_zero = int((d == 0).sum())
+    n_pos = int((d > eps).sum())
+    n_neg = int((d < -eps).sum())
+    n_zero = int((np.abs(d) <= eps).sum())
     n_eff = n_pos + n_neg
     k = max(n_pos, n_neg)
     p = _binom_two_sided_p(k, n_eff)
@@ -352,10 +359,20 @@ def delta_report(
     label: str = "accuracy",
     *,
     paired_sign_test: bool = True,
+    near_tie_eps: float = 1e-3,
 ) -> dict:
     """
     Compute Δ = recurrent − control over multiple seeds.
     Returns mean, sample std (ddof=1), per-seed values, and optionally a paired sign test.
+
+    Besides the classic ``sign_test`` (exact ties only — the headline number, unchanged), the
+    record also carries a CEILING-TIE-ROBUST companion (the M29c post-mortem lesson): ``n_near_tie``
+    counts seeds whose |Δ| <= ``near_tie_eps`` (a difference below ~one flipped cell / 0.1pp is
+    not evidence on near-saturated arms), and ``sign_test_robust`` re-runs the sign test treating
+    those as ties. When ``n_near_tie`` is a large fraction of seeds, an impressive raw sign count
+    (e.g. 8/0, p<.05) can collapse under the robust test (e.g. 3/3, ns) — read both before claiming
+    significance on arms near the accuracy ceiling. ``near_tie_eps`` is on the metric's own scale
+    (accuracy/EM in [0,1]); default 1e-3.
     """
     r = np.array(recurrent_scores)
     c = np.array(control_scores)
@@ -376,10 +393,14 @@ def delta_report(
         "delta_per_seed": delta.tolist(),
         "label": label,
         "n_seeds": len(r),
+        "n_near_tie": int((np.abs(delta) <= near_tie_eps).sum()),
+        "near_tie_eps": near_tie_eps,
     }
     if paired_sign_test:
         out["sign_test"] = sign_test(delta.tolist())
+        out["sign_test_robust"] = sign_test(delta.tolist(), eps=near_tie_eps)
     else:
         out["sign_test"] = None
+        out["sign_test_robust"] = None
         out["sign_test_note"] = "not_run_non_independent_splits"
     return out

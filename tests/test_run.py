@@ -231,6 +231,20 @@ def test_run_point_multi_output():
     assert 0.0 <= baselines["exact_match"] <= 1.0
 
 
+def test_aggregate_persists_per_seed_exact_match():
+    """M29c audit-gap fix: EM (the headline metric on multi-output tasks) must be persisted per-seed
+    so its sign-counts are re-derivable from the committed record, like accuracy already is."""
+    from looptab.run import _aggregate
+
+    per_seed = [
+        {"m": {"accuracy": 0.9, "exact_match": 0.8, "n_params": 10}},
+        {"m": {"accuracy": 0.92, "exact_match": 0.85, "n_params": 10}},
+    ]
+    agg = _aggregate(per_seed, ["m"])
+    assert agg["m"]["accuracy_per_seed"] == [0.9, 0.92]
+    assert agg["m"]["exact_match_per_seed"] == [0.8, 0.85]  # newly persisted
+
+
 def test_delta_report_can_skip_sign_test_for_non_independent_splits():
     rep = delta_report(
         [0.2, 0.3, 0.4],
