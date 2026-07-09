@@ -4,7 +4,7 @@
 #
 # M11 found the loop's joint-state coherence edge appears ONLY where a shallow per-cell MLP fails on
 # coherence (ff EM ~0.31 on {13,78,92}); the two M11 new families (140 deep/unbalanced/ff-easy, 232
-# shallow/balanced/ff-easy) were ff-EASY (ff EM 0.82-0.83) and showed NO mechanism. §11(c) follow-up:
+# shallow/balanced/ff-easy) were ff-EASY (ff EM 0.82-0.83) and showed NO mechanism. §11.3 follow-up:
 # find a NEW balanced+deep+ff-hard converging rule and confirm the mechanism reproduces.
 #
 # Structural screen over ALL 256 ECA rules (convergence at w=24/32 + balanced maj≈0.56 + deep spread

@@ -1,6 +1,6 @@
 # M14 — Does the loop's joint-state coherence edge need LOCALITY? (local-but-non-CA ladder)
 #
-# THE open scientific question after M13 (CLAUDE.md §11(c)): the joint-state coherence result
+# THE open scientific question after M13 (CLAUDE.md §11.3): the joint-state coherence result
 # (M8-M12) holds on LOCAL-update CA hard-convergence targets but VANISHES on a DENSE Hopfield net
 # (M13) — so the loop's edge may require a *local, spatially-structured* per-cell map, not just any
 # hard-convergence fixed point. M14 tests it with ONE knob on the M13 threshold net: `bandwidth` b

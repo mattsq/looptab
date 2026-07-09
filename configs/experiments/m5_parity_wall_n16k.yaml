@@ -4,7 +4,7 @@
 #
 # M4 found d≥40,k≥4 collapses to test-chance for EVERY arm — a wall, not a separation —
 # diagnosed as sample-complexity-bound (deep arms fit train 0.90–1.00 but score chance on
-# test). §11(c) lever (ii): "lift the M4 sample-complexity wall (larger n_train) to test
+# test). §11.3 lever (ii): "lift the M4 sample-complexity wall (larger n_train) to test
 # whether the d=80/k=3 depth hints are real near the wall." We re-run ONLY M4's d≥40
 # sub-block (the 6 wall cells); d=20 already separates cleanly and is NOT re-run.
 #
