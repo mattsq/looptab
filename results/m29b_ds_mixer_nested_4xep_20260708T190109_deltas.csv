@@ -1,0 +1,4 @@
+config,delta,metric,delta_mean,delta_std,n_seeds,sign_pos,sign_neg,sign_p
+single,mixer_nods_4xep-flat_nods_4xep,accuracy,0.039104166666666676,0.007996496008421365,8,8,0,0.0078125
+single,mixer_nods_4xep-flat_nods_4xep,exact_match,0.06687500000000003,0.030661457890974447,8,8,0,0.0078125
+single,mixer_nods_4xep-flat_nods_4xep,coherence_excess,-0.0667695678799589,0.022790351512008963,8,0,8,0.0078125

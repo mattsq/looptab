@@ -548,7 +548,8 @@ behaviour-changing conclusions, and the next pointer. Append detail to LOG.md, n
   loss: detach `(T−k)` steps, gradient on `k`, modes `progressive_final`/`progressive_step`),
   `train_deep_supervision` (M18 — canonical TRM/HRM deep supervision: `n_sup` supervised passes
   carrying `(z,a)` across them with the carry **detached** between passes; the autopsy's active
-  ingredient, distinct from the per-step-readout DS above), and `train_act` (**M23 — ACT adaptive
+  ingredient, distinct from the per-step-readout DS above; runs on `trm`/`trm_decoupled` AND — since
+  M29 — `trm_mixer`, all of which expose the init_state/return_state API), and `train_act` (**M23 — ACT adaptive
   computation, the §4/§12 unbuilt TRM ingredient, now BUILT**: `train_deep_supervision` + a learned
   halt head trained by BCE to predict per-example exact-match; `evaluate_act`/`act_predict` do
   per-example adaptive-segment inference and report `avg_segments`. Enabled per-arm via `use_act`
@@ -592,7 +593,8 @@ behaviour-changing conclusions, and the next pointer. Append detail to LOG.md, n
   mixer_sweep,mixer_lean}, m24_mixer_{converge,iterated}, m24b_converge_ablation,
   m24c_hopfield_mixer, m24d_multiparity_mixer, m24e_converge_mixer_untied,
   m24f_disruption_{mixer_w24,mixer_w32,ablation_w24,ablation_w32,untied_w24,untied_w32},
-  m25_mixer_multilabel_{yeast,scene,emotions}, m26_{etth1,weather}_forecast, m26_etth1_smoke).
+  m25_mixer_multilabel_{yeast,scene,emotions}, m26_{etth1,weather}_forecast, m26_etth1_smoke,
+  m29a_ds_mixer_converge{,_4xep}, m29b_ds_mixer_nested{,_4xep}, m29c_ds_mixer_iterated{,_4xep}).
 - **`hopfield` `bandwidth` regime (M14) — locked setting:** the local ladder needs **w=48** (w≤32 has
   no clean local regime — convergence-vs-triviality tension); b∈{2,4,8} at `γ=10` all 10/10
   convergent, balanced, non-trivial (triv ≤5%), settle ≤6 steps; the dense end (b=24) needs `γ=16`
@@ -607,7 +609,14 @@ behaviour-changing conclusions, and the next pointer. Append detail to LOG.md, n
 - **Metrics:** `accuracy` / `exact_match` / `majority_baseline`, the single-pass `evaluate`, and
   (M9) `coherence_excess = EM − token_acc**w` (whole-row coherence beyond what independent per-cell
   errors would give; >0 = errors clustered) with a `mean_wrong_per_row` companion — all in
-  `src/looptab/eval/metrics.py`; paired Δ with variance + sign test is `delta_report`. **Regression
+  `src/looptab/eval/metrics.py`; paired Δ with variance + sign test is `delta_report`. **CEILING-TIE
+  GUARD (M29c):** `sign_test` takes an `eps` (default 0 ⇒ bit-identical classic test) that treats
+  |Δ|≤eps as a practical tie; `delta_report` additionally emits `n_near_tie` + a `sign_test_robust`
+  at `near_tie_eps=1e-3` (and a `sign_p_robust` CSV column + a `⚠ near-ties` console flag when a
+  raw-significant sign test collapses under it) — so an 8/0 riding one-flipped-cell ties on
+  near-saturated arms is caught (the M29c over-claim: raw 8/0 p=.008 → robust 3/0 p=.25). Per-seed
+  EM/coherence are now persisted (`exact_match_per_seed` etc.) so those sign-counts are re-derivable
+  from the record, like accuracy. **Regression
   (M26):** `evaluate_regression` (MSE/MAE/R² on standardized targets; no argmax) + `persistence_baseline_mse`
   (naive last-value forecast) — gated by `objective: regression`, and MSE the honest headline (lower is
   better ⇒ a NEGATIVE Δ favours the first arm, opposite of accuracy).
@@ -634,7 +643,11 @@ behaviour-changing conclusions, and the next pointer. Append detail to LOG.md, n
   the introspection layer (`test_introspection.py`: spectral-radius / effective-rank known-answer
   sanity, same-seed determinism incl. `trm_decoupled`, F(z) n_latent faithfulness, right families per
   arm), and (M27) the contractive `train_stable` arm (`test_stable.py`: penalty-lowers-ρ, determinism,
-  accuracy-preserved). Run `uv run --extra dev pytest -q` (270 tests); lint `uv run ruff check`.
+  accuracy-preserved), and (M29) the detached-carry DS routine on the mixer (`test_ds_mixer.py`:
+  `train_deep_supervision` runs on `trm_mixer`, determinism at pinned threads, carry-flag wired,
+  run_point dispatch, non-loop guard), and (M29c) the ceiling-tie sign-test guard + per-seed-EM
+  persistence (`test_training.py`/`test_run.py`: eps reclassifies near-ties, robust sign test collapses
+  the m29c 8/0, `exact_match_per_seed` persisted). Run `uv run --extra dev pytest -q` (278 tests); lint `uv run ruff check`.
 - **`hopfield` regime (M13) — locked setting:** `weights=hebbian, n_patterns=12, γ=16, distractors=8`,
   w∈{24,32}. Screened multi-seed over the real task_seeds 42..51: **0/10 non-convergence raises**,
   balanced (majority ~0.50), per-row convergence depth typical **median ~2–3** (batch-max ~10 ≪ the
@@ -972,7 +985,12 @@ behaviour-changing conclusions, and the next pointer. Append detail to LOG.md, n
   Going forward: **train loops longer on local-update fixed-point tasks; do NOT reach for the faithful
   bundle as a "mechanism."** All M18 knobs are additive/off-by-default → every committed M0–M15c result is
   bit-identical and intact. (This bullet is a walk-back of the pre-review M18 headline; the adversarial
-  PR review's B1 caught the compute confound — see LOG.md M18e/M18f.)
+  PR review's B1 caught the compute confound — see LOG.md M18e/M18f.) **This "DS mechanism inert /
+  just more optimization" verdict HOLDS on the cross-cell mixer too (M29, after two adversarial reviews): the
+  detached-carry MECHANISM is inert on `trm_mixer` (harmful −0.112 on the convergent regime where it is motivated;
+  a non-robust 2-seed ceiling rescue [p=0.125] in the one under-fit regime), while the COMPUTE carries any gain —
+  exactly M18. An intermediate "m29c reversal" was a ceiling-saturation artifact and is retracted. See the M29
+  bullet + LOG.md M29 (both review blocks).**
 - **The §9.2 loop finding does NOT transfer to real multi-label tabular under honest evaluation — M20 is a
   NEGATIVE for the loop thesis, with one non-loop positive; CONFIRMED on TWO large datasets (M20, §9.4 bridge;
   verdict after 2 review passes + a proper-eval redo + a replication).** Built a `multilabel` task (vendored,
@@ -1274,6 +1292,66 @@ behaviour-changing conclusions, and the next pointer. Append detail to LOG.md, n
   §9.2 legs (leg-1 joint-state, P1 tying) reproduce on both tasks. Canonical:
   `m28a_mixed_converge_{mixer,untied}_20260706-07T*`, `m28b_nested_converge_{mixer,untied}_20260707T*`; full
   narrative LOG.md M28.
+- **★ M29 — the DEEP-SUPERVISION MECHANISM re-tested on the mixer. FINAL verdict (after TWO adversarial reviews;
+  an intermediate "m29c reversal" was itself over-claimed and RETRACTED): M18's "the detached-carry deep-supervision
+  MECHANISM is inert; the N_sup gain is just more optimization" verdict HOLDS on `trm_mixer` — and M29c, correctly
+  analyzed, STRENGTHENS it (the carry mechanism is inert even given optimization headroom), it does NOT reverse it.**
+  Trail: m29a/m29b found the carry inert-to-harmful on the mixer but with NO optimization headroom (review-1 MAJOR 1:
+  inconclusive — can't separate "mechanism inert" from "nothing helps a model that already fits train"). M29c found
+  the one headroom regime (`iterated` rule 110 T=6, non-convergent, mixer train 0.80) and I FIRST read it as a
+  reversal ("carry +0.054, 8/0"). Review-2 DISMANTLED that: the +0.054 is a non-robust **2-seed ceiling rescue**
+  (seeds 1,3 = +0.21; the other 6 within one test-cell of a tie at ceiling; median ≈ 0.0004; drop ceiling-ties →
+  4/4 → **p=0.125, BELOW §5's floor**), i.e. the SAME saturation trap review-1 flagged (its MAJOR 3), now reversed.
+  The robust gain is the compute-matched **no-carry** arm (+0.185) = 4 consecutive steps/batch = *batch-repetition
+  COMPUTE* — which by M18's own "nocarry = compute, carry = mechanism" decomposition UPHOLDS M18. On the convergent
+  target where the carry is motivated (m29a converge) it is −0.112 (HARMFUL). The only non-M18 wrinkle is narrow and
+  not the mechanism: on that one non-convergent operator the compute is not deliverable as reshuffled 4× epochs (a
+  batch-ORDERING effect, no isolating control, bimodal training — a solved seed *regresses* under 4× epochs). Every DS finding (M18 included) had been measured on the flat `trm` (≈ ff); since the mixer
+  landed DS was only ever HELD FIXED in the M24 recipe, never ablated — so by the M23/M24 logic it needed a mixer
+  re-test. Ran the M18 decomposition on `trm_mixer` (+ flat `trm` replicated IN-RUN) on two regimes (the M27
+  saturation trap: a DS null is vacuous without headroom) — undertrained `converge` (w24, distractors=0,
+  epochs=25, `mixer_nods` EM 0.86 ≪ the 0.97 ceiling but token-acc 0.99) and hard `nested_converge` @4k (mixer
+  EM 0.78 at full training — but **train_acc 0.994, so this is DATA/EM headroom, NOT optimization headroom**). 8
+  seeds, exact sign test, budget-clean, num_threads=1. **One additive code change:** widened run.py's `n_sup>1`
+  gate to admit `trm_mixer` (its `forward` already exposes the init_state/return_state API; the per-cell `(z,a)`
+  detaches element-wise) — off-by-default ⇒ M0–M28 bit-identical; 5 tests (`tests/test_ds_mixer.py`). **(1) The
+  detached-carry N_sup MECHANISM is INERT on the mixer, both regimes:** pivot `mixer_nods`, raw 4× compute helps
+  (Δ(nocarry−nods) EM +0.107 converge / +0.0415 nested, 8/0) but the CARRY adds nothing (Δ(nsup−nocarry) EM
+  −0.112 converge [1/7 ns, DESTABILIZING] / −0.009 nested [3/5 ns]); and plain 4×-EPOCH matches-or-beats N_sup
+  (mixer_nods@100 EM 0.974 ≥ no-carry@25 0.965 ≫ carry@25 0.853 on converge; @400 EM 0.801 ≈ N_sup@100 0.81–0.82
+  on the shared ~0.80 nested plateau). So the N_sup gain that exists is raw compute (matched by plain epochs), and
+  the carry is null-to-harmful — CONSISTENT with M18 but NOT decisive (MAJOR 1: raw compute barely helps the mixer
+  either — +0.0415 nested — because the mixer has no optimization headroom, so a carry-null there is nearly
+  by-construction, not a clean "DS mechanism inert"). **(2) Per-step-READOUT DS is NOT robustly load-bearing either:** Δ(mixer_ds−
+  mixer_nods) EM +0.075 8/0 on converge but at the token-acc ceiling (coh_excess≤0, a raw near-ceiling effect)
+  and +0.010 5/3 NS on nested (genuine headroom) — inert where it counts. **(3) The one NEW finding — an
+  ARCHITECTURE CONTRAST:** the carry is NOT universally inert — on the weak FLAT loop (≈ ff) it HELPS
+  (Δ(flat_nsup−flat_nsup_nocarry) EM +0.129 converge 8/0 / +0.038 nested 7/0, sig) and BEATS plain 4×-epoch
+  (flat carry-N_sup 0.624 vs 0.485 converge; 0.805 vs 0.734 nested) — a real effect that DEPARTS from M18's own
+  flat null (+0.012 ns, which was distractors=8 / 100-epoch base = LESS undertrained). The carry adds effective
+  depth the weak flat operator benefits from, but the mixer is nearer its ceiling in both regimes — **this split
+  is CONFOUNDED with operating point (MAJOR 2): "carry helps whoever is further from ceiling" is not excluded, and
+  the "mixer converges in one pass" reading is itself an operating-point argument, not a clean architecture
+  dissociation** (it is *consistent with* the mixer's IN-OPERATOR work, M23/M24 vs M21, not proof of it).
+  **Net (FINAL, post-review-2):** M29c does NOT reverse M18/m29a-b — it STRENGTHENS them. Even in the one mixer
+  optimization-headroom regime, the detached-carry MECHANISM is inert (2-seed ceiling rescue, p=0.125 once
+  ceiling-ties removed), while the COMPUTE (no-carry batch-repetition, +0.185) carries the gain — exactly M18. So
+  on the mixer: the DS *mechanism* is inert (now shown WITH headroom, not just where the mixer fits); the gain from
+  N_sup is more optimization. **Meta-fact:** the mixer FITS TRAIN on every convergent cross-cell task screened
+  (converge/mixed/nested at 8k–16k), so optimization-headroom regimes for it are rare (only the non-convergent M3a
+  depth-wall edge) — the mechanism has essentially no task on which to help the mixer. NO BLOCKER anywhere (code
+  faithful, bit-identity TRUE, all numbers re-derived from the JSON/CSVs, 5 tests + 275 total pass, ruff clean);
+  both the reversal AND this retraction are interpretation corrections, not code bugs. Caveats: m29c is ONE regime,
+  NON-CONVERGENT (moving CA, not the fixed-point regime the carry is motivated on), EM-floored (token-acc),
+  high-variance/bimodal pivot; the only non-M18 wrinkle (compute ≠ reshuffled epochs) is an uncontrolled
+  batch-ordering effect. Per-step DS not robustly load-bearing for the mixer. Residual m29a/m29b caveats: the flat
+  "carry helps" result contradicts M18's flat null but is not one-knob-isolated (distractors 8→0 + epochs + n_train
+  all changed); the "just more epochs" comparison is cross-run/unpaired (indicative, M18f precedent);
+  per-seed EM not persisted (audit gap — only `accuracy_per_seed` is); budget tol ±5% (mixer +4.1%); single-width
+  (w24), one rule pair. Canonical: `m29a_ds_mixer_converge_20260708T095050_*` (+ `_4xep_20260708T162954`),
+  `m29b_ds_mixer_nested_20260708T155324_*` (+ `_4xep_20260708T190109`), `m29c_ds_mixer_iterated_20260709T133451_*`
+  (+ `_4xep_20260709T184421`) — the headroom test (its "reversal" retracted by review-2; it UPHOLDS M18); LOG.md
+  M29 + its two ADVERSARIAL REVIEW blocks + M29c.
 
 ### (c) Next milestone
 
@@ -1619,6 +1697,14 @@ priority:
   depth [ff-easy]. Only the definitional uniformity↔rule-cardinality entanglement is un-removable. Do not
   re-conflate the two legs).**
   A bigger-model probe of d=80,k=5 must scale the budget for *all* arms (M5).
+  **The DEEP-SUPERVISION MECHANISM on the mixer (M29 — SETTLED after two adversarial reviews: M18's "the
+  detached-carry MECHANISM is inert; the gain is just more optimization" HOLDS on the mixer. Inert where the mixer
+  FITS train [all convergent cross-cell tasks]; and where it UNDER-FITS [`iterated` T6, the only such regime], the
+  carry is STILL inert [a 2-seed ceiling rescue, p=0.125] while the compute [no-carry batch-repetition] carries the
+  gain — exactly M18. The intermediate "m29c reversal" was a ceiling-saturation artifact, retracted by review-2.]
+  Do not re-run the m29a/m29b/m29c decomposition. Genuinely OPEN [low priority]: a CONVERGENT fixed-point task the
+  mixer under-fits [none found — the mixer fits them all], to test the carry in its motivated regime rather than
+  the non-convergent T6 proxy.**
 
 ## 12. Key references (for grounding a cold agent)
 

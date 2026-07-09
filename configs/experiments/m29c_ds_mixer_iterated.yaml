@@ -1,0 +1,126 @@
+# M29c — the ADVERSARIAL-REVIEW follow-up (MAJOR 1): re-run the M18 carry decomposition on a mixer
+# regime with genuine OPTIMIZATION headroom (mixer UNDER-FITS TRAIN), the test m29a/m29b could not
+# provide (converge near-solved; nested train-fit + data-bound).
+#
+# SCREEN FINDING (the reason this task): across every CONVERGENT cross-cell task the mixer FITS TRAIN
+# (train_acc ≥ 0.99 on converge w24–48 / rule 13 / n_steps 3–8, mixed_converge w32, nested n_blocks5
+# w40 at 8k AND 16k) — so a "mixer optimization-headroom" regime does NOT exist on the fixed-point
+# tasks where DS is relevant; the mixer simply solves them, which is itself WHY N_sup (more optimization)
+# is inert. The ONLY regime where mixer_nods genuinely under-fits TRAIN is the NON-CONVERGENT moving CA
+# `iterated` rule 110 at T=6 (screen: mixer_nods TRAIN_acc 0.764, test_tok 0.722 — above baseline 0.5,
+# so it is a PARTIALLY-learnable operator with real optimization headroom, NOT the fully-unlearnable
+# T≥8 wall). This is the honest place to ask: WHEN the mixer cannot already fit train, does the detached
+# CARRY help it optimize/fit better than the compute-matched no-carry control and than plain 4× epochs?
+#
+# METRIC = TOKEN-ACCURACY. EM is floored (token 0.72 over w=24 ⇒ EM≈0), so read `accuracy`, not EM —
+# a deliberate departure from the EM-centric m29a/m29b (noted in the writeup). n_steps=8 FIXED (> T=6),
+# so depth is NOT the constraint — the under-fit is operator-LEARNING, i.e. genuine optimization headroom
+# (N_sup = more optimization passes). NON-CONVERGENT caveat: the M18 carry is motivated on FIXED-POINT
+# targets; iterated is a moving target, so this tests "more optimization on a hard-to-learn operator,"
+# the closest available proxy. distractors=0 (mixer divisibility), w24, 8 seeds, budget-clean, num_threads=1.
+# Same 7-arm structure + deltas as m29a/m29b; 4×-epoch control is m29c_..._4xep.yaml.
+task:
+  name: iterated
+  params:
+    w: 24
+    T: 6
+    rule: 110
+    distractors: 0
+  n_train: 8000
+  n_test: 1000
+  task_seed: 42
+  train_sample_seed: 1
+  test_sample_seed: 2
+
+arms:
+  - name: trm_mixer
+    label: mixer_ds
+    hidden_dim: 96
+    latent_dim: 64
+    token_hidden: 48
+    n_steps: 8
+    n_latent: 1
+    use_rmsnorm: true
+    deep_supervision: true
+  - name: trm_mixer
+    label: mixer_nods               # PIVOT: per-step DS OFF, n_sup=1
+    hidden_dim: 96
+    latent_dim: 64
+    token_hidden: 48
+    n_steps: 8
+    n_latent: 1
+    use_rmsnorm: true
+    deep_supervision: false
+  - name: trm_mixer
+    label: mixer_nsup               # detached-carry N_sup mechanism (carry ON)
+    hidden_dim: 96
+    latent_dim: 64
+    token_hidden: 48
+    n_steps: 8
+    n_latent: 1
+    use_rmsnorm: true
+    deep_supervision: false
+    n_sup: 4
+    n_sup_carry: true
+  - name: trm_mixer
+    label: mixer_nsup_nocarry       # compute-matched control (carry OFF)
+    hidden_dim: 96
+    latent_dim: 64
+    token_hidden: 48
+    n_steps: 8
+    n_latent: 1
+    use_rmsnorm: true
+    deep_supervision: false
+    n_sup: 4
+    n_sup_carry: false
+  - name: trm
+    label: flat_nods                # flat reference (budget anchor)
+    hidden_dim: 64
+    latent_dim: 64
+    n_steps: 8
+    n_latent: 1
+    use_rmsnorm: true
+    deep_supervision: false
+  - name: trm
+    label: flat_nsup                # M18 replication on the flat loop (carry ON)
+    hidden_dim: 64
+    latent_dim: 64
+    n_steps: 8
+    n_latent: 1
+    use_rmsnorm: true
+    deep_supervision: false
+    n_sup: 4
+    n_sup_carry: true
+  - name: trm
+    label: flat_nsup_nocarry        # M18e replication (carry OFF)
+    hidden_dim: 64
+    latent_dim: 64
+    n_steps: 8
+    n_latent: 1
+    use_rmsnorm: true
+    deep_supervision: false
+    n_sup: 4
+    n_sup_carry: false
+
+deltas:
+  - [mixer_ds, mixer_nods]              # Part A: per-step-readout DS load-bearing for the under-fit mixer?
+  - [mixer_nsup, mixer_nsup_nocarry]    # Part B: the detached CARRY mechanism (mixer) — the decisive read
+  - [mixer_nsup_nocarry, mixer_nods]    # raw 4× compute (mixer)
+  - [mixer_nsup, mixer_nods]            # full N_sup "win" (mixer)
+  - [flat_nsup, flat_nsup_nocarry]      # flat carry, for contrast
+  - [flat_nsup, flat_nods]              # flat N_sup total
+
+budget_reference: flat_nods
+budget_tol: 0.05
+
+train:
+  epochs: 100
+  lr: 1e-3
+  weight_decay: 1e-4
+  batch_size: 256
+  device: cpu
+  num_threads: 1
+
+seeds: [0, 1, 2, 3, 4, 5, 6, 7]
+parallel_workers: 4
+results_dir: results

@@ -269,13 +269,16 @@ def run_point(cfg: ExperimentConfig, task_params: dict, seed: int) -> tuple[dict
         elif arm.n_sup > 1:
             # M18 ingredient 1: canonical TRM deep supervision (N_sup detached-carry passes).
             # Coupled depth (if any) flows in as n_steps so each pass unrolls to the task T.
-            if arm.name not in ("trm", "trm_decoupled"):
-                # train_deep_supervision needs init_state/return_state (TRM, TRMDecoupled only);
-                # the feedforward/untied controls would crash on those kwargs. Fail loudly with a
-                # clear message rather than an opaque TypeError (review fix S3).
+            if arm.name not in ("trm", "trm_decoupled", "trm_mixer"):
+                # train_deep_supervision needs the init_state/return_state/n_steps forward API;
+                # TRM, TRMDecoupled AND TRMMixer all expose it (the mixer carries a per-cell (z,a)
+                # state that detaches element-wise exactly like the flat loop's — M29 re-test of the
+                # DS mechanism on the cross-cell architecture). The feedforward/untied controls lack
+                # the API and would crash on those kwargs — fail loudly with a clear message rather
+                # than an opaque TypeError (review fix S3).
                 raise ValueError(
                     f"arm '{arm.resolved_label()}' (name '{arm.name}') sets n_sup>1, but only "
-                    "'trm'/'trm_decoupled' support the detached-carry routine "
+                    "'trm'/'trm_decoupled'/'trm_mixer' support the detached-carry routine "
                     "(init_state/return_state)."
                 )
             train_deep_supervision(
@@ -442,10 +445,12 @@ def _aggregate(per_seed: list[dict], labels: list[str]) -> dict:
             ems = [s[lbl]["exact_match"] for s in per_seed]
             stats["exact_match_mean"] = float(np.mean(ems))
             stats["exact_match_std"] = _std(ems)
+            stats["exact_match_per_seed"] = ems  # M29c audit-gap fix: EM sign-counts re-derivable
         if "coherence_excess" in per_seed[0][lbl]:
             ces = [s[lbl]["coherence_excess"] for s in per_seed]
             stats["coherence_excess_mean"] = float(np.mean(ces))
             stats["coherence_excess_std"] = _std(ces)
+            stats["coherence_excess_per_seed"] = ces
             mwr = [s[lbl]["mean_wrong_per_row"] for s in per_seed]
             stats["mean_wrong_per_row_mean"] = float(np.mean(mwr))
             stats["mean_wrong_per_row_std"] = _std(mwr)
@@ -870,6 +875,16 @@ def main():
                     )
                     deltas[f"{a}-{b}"][rk] = r_rep
                     line += f"  [{tag} {r_rep['delta_mean']:+.4f} ± {r_rep['delta_std']:.4f}]"
+            # M29c ceiling-tie guard: flag any metric whose SIGNIFICANT raw sign test (p<.05)
+            # collapses under the near-tie-robust test — a warning that the sign count is riding
+            # near-saturation ties (read sign_p_robust in the deltas CSV before claiming the win).
+            for m_rep in deltas[f"{a}-{b}"].values():
+                st, st_rob = m_rep.get("sign_test"), m_rep.get("sign_test_robust")
+                if st and st_rob and st["p_value"] < 0.05 <= st_rob["p_value"]:
+                    line += (
+                        f"  ⚠ {m_rep['label']}: {m_rep['n_near_tie']}/{m_rep['n_seeds']} near-ties"
+                        f" ⇒ robust p={st_rob['p_value']:.3f} (raw p={st['p_value']:.3f})"
+                    )
             print(line)
 
         # Aggregate extrapolation results across seeds
@@ -1075,12 +1090,15 @@ def main():
                 "sign_pos",
                 "sign_neg",
                 "sign_p",
+                "n_near_tie",  # M29c: seeds within near_tie_eps of a tie (ceiling-tie guard)
+                "sign_p_robust",  # sign p with near-ties dropped — read WITH sign_p, not instead
             ]
         )
         for p in points:
             for pair, reps in p["deltas"].items():
                 for metric, rep in reps.items():
                     st = rep.get("sign_test") or {}
+                    st_rob = rep.get("sign_test_robust") or {}
                     w.writerow(
                         [
                             p["label"],
@@ -1092,6 +1110,8 @@ def main():
                             st.get("n_pos", ""),
                             st.get("n_neg", ""),
                             st.get("p_value", ""),
+                            rep.get("n_near_tie", ""),
+                            st_rob.get("p_value", ""),
                         ]
                     )
 

@@ -1,0 +1,129 @@
+# M29a — re-test the deep-supervision MECHANISM on the cross-cell mixer (`trm_mixer`), on an
+# UNDERTRAINED `converge` regime (the direct mirror of M18's own "undertrained convergent target").
+#
+# M18 concluded (ON THE FLAT `trm`) that canonical detached-carry N_sup deep supervision is
+# essentially INERT — the +0.295 EM "win" was just 4× more optimization (no-carry control got +0.282,
+# carry added +0.012 ns; a plain 4×-epoch loop matched it, M18e/M18f). But the flat loop is ≈ a
+# feedforward (M23/M24); the mixer is the architecture where recurrence does real algorithmic work,
+# and DS has only ever been HELD FIXED in its recipe, never ablated. This runs the M18 decomposition
+# on the mixer AND replicates it on the flat loop IN THE SAME RUN (matched task/epochs), so the
+# flat-vs-mixer contrast comes from one experiment.
+#
+# TWO DS senses:
+#   Part A (per-step-readout DS): Δ(mixer_ds − mixer_nods) — is the `deep_supervision` flag baked into
+#     the M24 recipe load-bearing for the mixer, or incidental?
+#   Part B (detached-carry N_sup, the M18 mechanism): pivot = mixer_nods (DS off, n_sup=1), exactly as
+#     M18e pivoted on trm_nods. Δ(nsup − nocarry) = the CARRY; Δ(nocarry − nods) = raw 4× compute;
+#     Δ(nsup − nods) = the full N_sup win. The 4×-EPOCH control is m29a_..._4xep.yaml (epochs is global,
+#     so it must be a separate config — same split as M18e/M18f); compare its absolute EM cross-run.
+#
+# SATURATION is the interpretive risk (the M27 trap): a null is only meaningful if mixer_nods has
+# HEADROOM. On plain converge the mixer SOLVES at 100 epochs (M24), so we UNDERTRAIN — `epochs: 25`
+# is the screened value where the mixer baseline is clearly unsaturated (EM well < 1); read train_acc
+# and the mixer_nods EM in the JSON next to any null. distractors=0 (mixer divisibility), w=24, the
+# M18/M24 converge cell. num_threads=1 (mixer 3-D matmul). Budget ref = flat_nods (mixer ~+0.3%, M24b).
+task:
+  name: converge
+  params:
+    rule: 78
+    w: 24
+    T: 6
+    distractors: 0
+  n_train: 4000
+  n_test: 1000
+  task_seed: 42
+  train_sample_seed: 1
+  test_sample_seed: 2
+
+arms:
+  - name: trm_mixer
+    label: mixer_ds                 # M24 recipe baseline: per-step-readout DS ON
+    hidden_dim: 96
+    latent_dim: 64
+    token_hidden: 48
+    n_steps: 8
+    n_latent: 1
+    use_rmsnorm: true
+    deep_supervision: true
+  - name: trm_mixer
+    label: mixer_nods               # PIVOT: per-step DS OFF, n_sup=1 (the N_sup reference)
+    hidden_dim: 96
+    latent_dim: 64
+    token_hidden: 48
+    n_steps: 8
+    n_latent: 1
+    use_rmsnorm: true
+    deep_supervision: false
+  - name: trm_mixer
+    label: mixer_nsup               # detached-carry N_sup mechanism (4 passes, carry ON)
+    hidden_dim: 96
+    latent_dim: 64
+    token_hidden: 48
+    n_steps: 8
+    n_latent: 1
+    use_rmsnorm: true
+    deep_supervision: false
+    n_sup: 4
+    n_sup_carry: true
+  - name: trm_mixer
+    label: mixer_nsup_nocarry       # compute-matched control: 4 passes, NO carry (fresh z0 each)
+    hidden_dim: 96
+    latent_dim: 64
+    token_hidden: 48
+    n_steps: 8
+    n_latent: 1
+    use_rmsnorm: true
+    deep_supervision: false
+    n_sup: 4
+    n_sup_carry: false
+  - name: trm
+    label: flat_nods                # flat reference (budget anchor); per-step DS OFF, n_sup=1
+    hidden_dim: 64
+    latent_dim: 64
+    n_steps: 8
+    n_latent: 1
+    use_rmsnorm: true
+    deep_supervision: false
+  - name: trm
+    label: flat_nsup                # M18 replication: N_sup mechanism on the FLAT loop (carry ON)
+    hidden_dim: 64
+    latent_dim: 64
+    n_steps: 8
+    n_latent: 1
+    use_rmsnorm: true
+    deep_supervision: false
+    n_sup: 4
+    n_sup_carry: true
+  - name: trm
+    label: flat_nsup_nocarry        # M18e replication: flat, 4 passes, NO carry
+    hidden_dim: 64
+    latent_dim: 64
+    n_steps: 8
+    n_latent: 1
+    use_rmsnorm: true
+    deep_supervision: false
+    n_sup: 4
+    n_sup_carry: false
+
+deltas:
+  - [mixer_ds, mixer_nods]              # Part A: is per-step-readout DS load-bearing for the mixer?
+  - [mixer_nsup, mixer_nsup_nocarry]    # Part B: the detached CARRY mechanism (mixer) — the M18 read
+  - [mixer_nsup_nocarry, mixer_nods]    # raw 4× compute (mixer)
+  - [mixer_nsup, mixer_nods]            # full N_sup "win" (mixer) — compare to the flat one below
+  - [flat_nsup, flat_nsup_nocarry]      # M18e replication: is the carry inert on the flat loop in-run?
+  - [flat_nsup, flat_nods]              # M18c replication: the flat N_sup "win"
+
+budget_reference: flat_nods
+budget_tol: 0.05
+
+train:
+  epochs: 25            # screened UNDERTRAINED budget (mixer_nods EM < 1 ⇒ DS has headroom)
+  lr: 1e-3
+  weight_decay: 1e-4
+  batch_size: 256
+  device: cpu
+  num_threads: 1
+
+seeds: [0, 1, 2, 3, 4, 5, 6, 7]
+parallel_workers: 4
+results_dir: results

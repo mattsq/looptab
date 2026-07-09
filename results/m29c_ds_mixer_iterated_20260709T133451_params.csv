@@ -1,0 +1,8 @@
+config,arm,n_params,ref_params,ratio,role,within_tol
+single,mixer_ds,16842,16176,1.0412,matched,True
+single,mixer_nods,16842,16176,1.0412,matched,True
+single,mixer_nsup,16842,16176,1.0412,matched,True
+single,mixer_nsup_nocarry,16842,16176,1.0412,matched,True
+single,flat_nods,16176,16176,1.0000,reference,True
+single,flat_nsup,16176,16176,1.0000,matched,True
+single,flat_nsup_nocarry,16176,16176,1.0000,matched,True

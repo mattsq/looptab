@@ -1,0 +1,50 @@
+# M29a (4×-epoch control) — the "is N_sup just more training?" diagnostic for m29a, mirroring M18f.
+# `epochs` is a global TrainConfig field (no per-arm epochs), so the 4×-epoch control must be its own
+# config, exactly as M18f split from M18e. Same task / seeds / arms as m29a but at 4× the base epochs
+# (25 → 100): if mixer_nods@100 ≈ mixer_nsup@25 (from m29a), the N_sup pass-structure buys nothing a
+# plain longer run doesn't — the M18 "just more optimization" verdict carries to the mixer. Read the
+# absolute EM here against the m29a base numbers (same seeds/task, epochs the only knob). Both
+# architectures get the epoch-matched control (mixer_nods, flat_nods).
+task:
+  name: converge
+  params:
+    rule: 78
+    w: 24
+    T: 6
+    distractors: 0
+  n_train: 4000
+  n_test: 1000
+  task_seed: 42
+  train_sample_seed: 1
+  test_sample_seed: 2
+
+arms:
+  - name: trm_mixer
+    label: mixer_nods_4xep          # mixer, per-step DS OFF, n_sup=1, 4× epochs
+    hidden_dim: 96
+    latent_dim: 64
+    token_hidden: 48
+    n_steps: 8
+    n_latent: 1
+    use_rmsnorm: true
+    deep_supervision: false
+  - name: trm
+    label: flat_nods_4xep           # flat, per-step DS OFF, n_sup=1, 4× epochs (M18f replication)
+    hidden_dim: 64
+    latent_dim: 64
+    n_steps: 8
+    n_latent: 1
+    use_rmsnorm: true
+    deep_supervision: false
+
+train:
+  epochs: 100           # 4× the m29a base (25)
+  lr: 1e-3
+  weight_decay: 1e-4
+  batch_size: 256
+  device: cpu
+  num_threads: 1
+
+seeds: [0, 1, 2, 3, 4, 5, 6, 7]
+parallel_workers: 4
+results_dir: results
