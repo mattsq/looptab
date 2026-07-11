@@ -131,6 +131,15 @@
   :root[data-theme="dark"] .caveat, @media (prefers-color-scheme: dark) { }
   .caveat b { color: var(--text-primary); }
 
+  .hero-stat {
+    display:flex; align-items:baseline; gap:18px; flex-wrap:wrap;
+    margin: 24px 0 4px;
+  }
+  .hero-stat .from { font-size: 28px; font-weight: 600; color: var(--text-muted); }
+  .hero-stat .arrow { font-size: 22px; color: var(--text-muted); }
+  .hero-stat .to { font-size: 56px; font-weight: 700; letter-spacing: -0.02em; color: var(--mixer); }
+  .hero-stat .label { font-size: 14px; color: var(--text-secondary); flex-basis: 100%; }
+
   .grid5 { display:grid; grid-template-columns: repeat(auto-fit,minmax(120px,1fr)); gap:14px; margin-top: 20px; }
   .panel {
     background: var(--surface-1); border:1px solid var(--border); border-radius:10px;
@@ -146,6 +155,13 @@
   ul.summary { padding-left: 20px; font-size: 16px; color: var(--text-secondary); }
   ul.summary li { margin-bottom: 10px; }
   ul.summary b { color: var(--text-primary); }
+
+  .checklist-wrap { overflow-x:auto; margin-top: 28px; }
+  table.checklist { width:100%; border-collapse: collapse; font-size: 14.5px; min-width: 480px; }
+  table.checklist th { text-align:left; font-size:12px; text-transform:uppercase; letter-spacing:.04em;
+    color: var(--text-muted); font-weight:600; padding: 8px 14px 8px 0; border-bottom: 1px solid var(--axis); }
+  table.checklist td { padding: 12px 14px 12px 0; border-bottom: 1px solid var(--grid); color: var(--text-secondary); vertical-align:top; }
+  table.checklist td:first-child { color: var(--text-primary); font-weight:600; white-space:nowrap; }
 
   .two-col { display:grid; grid-template-columns: 1fr 1fr; gap:16px; }
   @media (max-width: 640px) { .two-col { grid-template-columns: 1fr; } }
@@ -206,6 +222,16 @@
         is never the loop's raw accuracy — it's the gap (Δ) between the loop and its matched
         control, with enough seeds (≥5, usually 8&ndash;10) to run a paired sign test on that gap.
       </p>
+    </div>
+    <div class="rigor">
+      <b>Why 8&ndash;10 seeds, not 5?</b> Five seeds is a variance floor, not a significance
+      floor: the exact two-sided binomial sign test can't reach p&lt;.05 with fewer than 6 seeds
+      (a unanimous 5/5 split still only gets p=.0625). Every "beats its control" claim on this
+      page needing a real significance call uses 8 or 10 seeds specifically so a unanimous
+      result can clear that bar — the same spirit as the NLP-reporting literature's warning that
+      a conclusion can flip depending on how much search/compute went into reaching it.
+    </div>
+    <div class="body-text">
       <p>
         The testbed is a small synthetic suite with a difficulty knob and a known ground-truth
         algorithm — <code>parity</code> (an irregular target buried in noise bits), an
@@ -296,6 +322,10 @@
         for this whole model family, the flat loop and the matched feedforward net both fail
         outright on hard puzzles. The mixing loop solves the majority of them.
       </p>
+    </div>
+    <div class="hero-stat">
+      <span class="from">0%</span><span class="arrow">&rarr;</span><span class="to">89.3%</span>
+      <span class="label">Hard Sudoku (14 givens), whole-puzzle exact match: feedforward and flat loop both fail outright; the cross-cell mixer solves it.</span>
     </div>
     <div class="chart-card">
       <p class="chart-title">Sudoku (14 givens — the hardest tested difficulty) — whole-puzzle exact match</p>
@@ -442,6 +472,24 @@
         large, and unrolling past training length makes it worse, not better. It behaves like
         a deep network computing in stages, not like an algorithm converging to an answer.
       </p>
+    </div>
+    <div class="chart-card">
+      <p class="chart-title">Iterated-CA task — accuracy vs. test-time loop count, trained at 4 steps</p>
+      <p class="chart-sub">The same shape of chart that motivated this whole research program — run on our own task, it goes the other way</p>
+      <div id="chart-ch7-unroll"></div>
+    </div>
+    <div class="rigor">
+      <b>Rigor.</b> The ARC-Prize HRM autopsy — the paper that set this whole program's "test the
+      loop before the hierarchy" approach — found that giving HRM one extra refinement loop
+      nearly <b>doubled</b> its accuracy (18.6%&rarr;35.5%), with further loops adding
+      diminishing-but-positive returns (8 loops: 38.1%; 16 loops: 39.0%). Asking the identical
+      question here — same model, same task, only the number of test-time loops changes — gives
+      the opposite shape: accuracy peaks exactly at the trained loop count (97.2%) and collapses
+      toward chance the moment test-time loops exceed it, then never recovers. (Deeper training
+      depths don't even reach a peak to collapse from — they hit a separate learnability wall
+      first, unrelated to this effect.) Canonical: <code>m1_iterated_extrapolation_20260620T023255</code>.
+    </div>
+    <div class="body-text" style="margin-top:20px;">
       <p>
         Second, the <b>hierarchy question</b> — the "high-level slow / low-level fast" split
         that HRM introduced. The instinct to build a two-timescale version of this loop was
@@ -501,6 +549,17 @@
           <li>Justification for a hierarchical (two-timescale) extension — the one instance tested was a data wall, not a case for a hierarchy.</li>
         </ul>
       </div>
+    </div>
+    <div class="checklist-wrap">
+      <table class="checklist">
+        <tr><th>Reporting practice</th><th>What this program actually did</th></tr>
+        <tr><td>Seeds</td><td>≥5 for variance bands; 8&ndash;10 wherever a significance call is the point (5/5 unanimous still can't clear p&lt;.05 on the exact sign test).</td></tr>
+        <tr><td>Controls</td><td>Every recurrent number ships against a parameter-matched feedforward and, where relevant, a depth-matched untied stack — never a lone recurrent score.</td></tr>
+        <tr><td>Budget matching</td><td>Parameter counts matched within a declared tolerance (typically &plusmn;5%); exceptions are labeled explicitly as ceilings, not silently absorbed.</td></tr>
+        <tr><td>Determinism</td><td>Data and training are a pure function of (config, seed); single-thread pinned for the 3-D matmul (mixer) arms so results are bit-reproducible.</td></tr>
+        <tr><td>Self-correction</td><td>Overclaims found by later or adversarial review stay visible as corrections in <code>results/log/*.md</code> rather than being quietly edited away — five of this page's own claims were corrected this way.</td></tr>
+        <tr><td>Traceability</td><td>Every number on this page cites the exact dated run file it was read from.</td></tr>
+      </table>
     </div>
   </div>
 </section>
@@ -786,6 +845,16 @@
       ],
       yMin: 0, yMax: 0.55, height: 300, yFmt: v => (v*100).toFixed(0)+'%', valueFmt: v => '−'+(v*100).toFixed(0)+'%',
       showValues: true, legendId: 'legend-ch6b'
+    });
+
+    // ---- Chapter 7: accuracy vs test-time loop count, trained at R=4 ----
+    lineChart('chart-ch7-unroll', {
+      categories: [{label:'R=4 (trained)'}, {label:'R=6'}, {label:'R=8'}, {label:'R=10'}, {label:'R=12'}],
+      series: [
+        { key:'loop', label:'Weight-tied loop (trm_nods)', color: V('--flat'), values: [0.972, 0.549, 0.525, 0.514, 0.517] },
+      ],
+      yMin: 0.4, yMax: 1.0, yTicks: 4, yFmt: v => (v*100).toFixed(0)+'%',
+      valueFmt: v => fmtPct(v)
     });
 
     // ---- Chapter 7: nested_converge EM vs data size, loop vs ff ----
