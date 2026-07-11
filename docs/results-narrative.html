@@ -228,10 +228,12 @@
       <p>
         The simplest recurrent design updates one flat MLP over the <em>entire</em> row at once
         — every step sees the whole table row as a single flattened vector. That design does
-        edge out a matched feedforward net on fixed-point targets (a real, modest effect —
-        see Chapter 3), but the edge is small and shrinks as the row gets wider, exactly what
-        you'd expect from a network that's fundamentally still just "deeper," not doing
-        anything structurally new.
+        edge out a matched feedforward net on fixed-point targets (a real effect — see Chapter
+        3): it's measurably more accurate cell-by-cell, and that per-cell edge holds steady to
+        growing as the row widens. On <em>whole-row</em> exact match specifically the edge
+        looks like it shrinks — that's an artifact of how exact match compounds per-cell
+        accuracy across more cells, not a sign the underlying edge is disappearing. Either way,
+        it's dwarfed by what actually turns out to matter (Chapter 4).
       </p>
     </div>
     <div class="chart-card">
@@ -242,7 +244,11 @@
     </div>
     <div class="rigor">
       <b>Rigor.</b> Params matched within budget contract at all three widths · exact two-sided
-      binomial sign test · canonical run <code>m24_mixer_converge_20260703T012300</code>.
+      binomial sign test · the flat loop's edge over feedforward actually <b>grows</b> on
+      per-cell token accuracy (+0.5&thinsp;pt &rarr; +1.2&thinsp;pt &rarr; +4.5&thinsp;pt across
+      w=24/32/48) even as it shrinks on this whole-row EM view — an EM-floor compounding effect
+      flagged by this program's own adversarial review of an identical case, not evidence the
+      edge itself is vanishing · canonical run <code>m24_mixer_converge_20260703T012300</code>.
     </div>
   </div>
 </section>
@@ -267,9 +273,12 @@
       <div id="chart-ch3"></div>
     </div>
     <div class="rigor">
-      <b>Rigor.</b> Needs a target that is both <i>deep</i> (many refinement steps) and
-      <i>local</i> (a cellular-automaton-style update) — the effect is absent on a shallow or
-      fully-dense task. Canonical: <code>m11_size_{small,base,large}</code>.
+      <b>Rigor.</b> "Deep + local" is necessary but not sufficient — the effect is absent on a
+      shallow or fully-dense task, but even within the deep+local CA family it only reproduces
+      on a specific hard-convergence subfamily. Other deep+local rules tested in this same
+      sweep are null (rule 140: Δ +0.01&thinsp;EM, a tie) or reversed (rule 232: Δ
+      &minus;0.11&thinsp;EM, favoring the decoupled arm) at the identical width. Canonical:
+      <code>m11_size_{small,base,large}</code>.
     </div>
   </div>
 </section>
@@ -294,12 +303,19 @@
       <div id="chart-ch4a"></div>
       <div class="legend" id="legend-ch4a"></div>
     </div>
+    <div class="rigor">
+      <b>Rigor.</b> No untied-mixer control has been run on Sudoku itself, so this number alone
+      doesn't yet separate <em>recurrence</em> from the <em>mixing architecture</em> — that
+      isolation (below) was only built on <code>converge</code>. Treat "solves hard Sudoku" as
+      a mixer-architecture result pending the same control on Sudoku.
+    </div>
     <div class="body-text" style="margin-top:8px;">
       <p>
         The obvious next question: is that a win for <b>recurrence</b>, or just for the
         <b>mixing architecture</b>? Build the honest control — a mixing block stacked
         <var>N</var> times <em>without</em> sharing weights, at the same parameter budget — and
-        run it against the weight-tied loop on the fixed-point CA task from Chapter 2.
+        run it against the weight-tied loop on the fixed-point CA task from Chapter 2 (the
+        cleanest task where that control exists).
       </p>
       <p>
         The untied stack, at matched budget, already captures almost the entire win over
@@ -345,7 +361,12 @@
       </p>
     </div>
     <div class="grid5" id="ch5-panels"></div>
-    <div class="rigor" style="margin-top:20px;">
+    <p style="font-size:13px;color:var(--text-muted);margin:14px 2px 0;">
+      Note: the first four panels are percentage-point differences in EM or F1; the forecasting
+      panel is a relative reduction in mean-squared error — different units, comparable in
+      direction and significance but not in raw magnitude.
+    </p>
+    <div class="rigor" style="margin-top:14px;">
       <b>Rigor.</b> One changed variable (the mixing operator) per comparison, 8&ndash;10 seeds
       each, exact sign test. Sources: <code>m24_mixer_converge</code>,
       <code>m24c_hopfield_mixer</code>, <code>m24d_multiparity_mixer</code>,
@@ -375,7 +396,7 @@
       </div>
       <div class="chart-card" style="margin-top:0;">
         <p class="chart-title">Real multivariate forecasting</p>
-        <p class="chart-sub">MSE reduction, mixer vs. matched feedforward &middot; 10 seeds, both p&lt;.03</p>
+        <p class="chart-sub">MSE reduction, mixer vs. matched feedforward &middot; 10 backtest blocks, both p&lt;.03*</p>
         <div id="chart-ch6b"></div>
         <div class="legend" id="legend-ch6b"></div>
       </div>
@@ -399,7 +420,11 @@
     <div class="rigor">
       <b>Rigor.</b> Multi-label: 10-fold CV, micro+macro F1, 2 datasets (<code>yeast</code>,
       <code>scene</code>), both ties. Forecasting: 2 datasets (<code>ETTh1</code>,
-      <code>Weather</code>), MSE/MAE/R&sup2;, both significant.
+      <code>Weather</code>), MSE/MAE/R&sup2;, both significant. <b>*</b>The forecasting sign
+      test is indicative, not clean: the 10 backtest blocks have disjoint test windows but
+      <em>nested/overlapping training windows</em>, so the per-block deltas are correlated
+      rather than independent — the exact binomial p-value is anti-conservative. The effect is
+      consistent across easy and hard blocks (real), but treat the p-value as suggestive.
     </div>
   </div>
 </section>
@@ -716,19 +741,28 @@
     });
 
     // ---- Chapter 5: 5-task dividing line panels ----
+    // `value` is always signed so positive = favors the mixer; `unit` picks how it's displayed
+    // (fmt is always derived from value, never hardcoded separately, so the two can't drift apart).
     const ch5 = [
-      { task: 'Ring CA (converge)', value: 0.676, fmt: '+67.6 pts EM', win: true, note: 'local coupling' },
-      { task: 'Dense Hopfield net', value: 0.454, fmt: '+45.4 pts EM', win: true, note: 'dense coupling' },
-      { task: 'Independent parities', value: -0.508, fmt: '−50.8 pts EM', win: false, note: 'exchangeable — no advantage' },
-      { task: 'Real multi-label (yeast)', value: -0.005, fmt: '−0.5 pts F1', win: false, note: 'no shared topology — tie' },
-      { task: 'Real forecasting (weather)', value: 0.188, fmt: '−48% MSE', win: true, note: 'shared topology' },
+      { task: 'Ring CA (converge)', value: 0.676, unit: 'em', win: true, note: 'local coupling' },
+      { task: 'Dense Hopfield net', value: 0.454, unit: 'em', win: true, note: 'dense coupling' },
+      { task: 'Independent parities', value: -0.508, unit: 'em', win: false, note: 'exchangeable — no advantage' },
+      { task: 'Real multi-label (yeast)', value: -0.005, unit: 'f1', win: false, note: 'no shared topology — tie' },
+      { task: 'Real forecasting (weather)', value: 0.483, unit: 'mse_reduction', win: true, note: 'shared topology' },
     ];
+    function fmtCh5(d) {
+      if (d.unit === 'mse_reduction') return '−' + (d.value * 100).toFixed(0) + '% MSE';
+      const pts = Math.abs(d.value * 100).toFixed(1);
+      const label = d.unit === 'em' ? 'pts EM' : 'pts F1';
+      return (d.value >= 0 ? '+' : '−') + pts + ' ' + label;
+    }
     const panelsEl = document.getElementById('ch5-panels');
     ch5.forEach(d => {
+      const fmt = fmtCh5(d);
       const p = document.createElement('div');
       p.className = 'panel';
       p.innerHTML = `<div class="task">${d.task}</div>
-        <div class="figure" style="color:${d.win ? V('--good') : V('--text-muted')}">${d.fmt}</div>
+        <div class="figure" style="color:${d.win ? V('--good') : V('--text-muted')}">${fmt}</div>
         <div class="status ${d.win ? 'win' : 'tie'}">${d.win ? '▲ mixer wins' : (d.value < -0.05 ? 'no advantage' : 'statistical tie')}</div>
         <div style="font-size:11.5px;color:${V('--text-muted')};margin-top:4px;">${d.note}</div>`;
       panelsEl.appendChild(p);
