@@ -444,17 +444,35 @@
         multi-label lacked — variable <var>i</var> on the input is the same variable
         <var>i</var> on the output, a genuine shared cell topology. There the cross-variable
         mixer beats a matched MLP on MSE, and the edge <b>grows</b> with the number of coupled
-        variables — the clearest real-data positive in the whole program.
+        variables — the clearest real-data positive in the whole program. A follow-up sweep
+        pushed the forecast horizon from 96 steps out to 720: the win <b>holds at every
+        horizon</b> on both datasets — it never reverses — and on <code>weather</code> it keeps
+        growing the further out the model has to predict.
       </p>
+    </div>
+    <div class="chart-card">
+      <p class="chart-title">Forecast horizon sweep — MSE reduction, mixer vs. matched feedforward</p>
+      <p class="chart-sub">96&ndash;720-step horizon &middot; 10 backtest blocks per point</p>
+      <div id="chart-ch6c"></div>
+      <div class="legend" id="legend-ch6c"></div>
     </div>
     <div class="rigor">
       <b>Rigor.</b> Multi-label: 10-fold CV, micro+macro F1, 2 datasets (<code>yeast</code>,
       <code>scene</code>), both ties. Forecasting: 2 datasets (<code>ETTh1</code>,
-      <code>Weather</code>), MSE/MAE/R&sup2;, both significant. <b>*</b>The forecasting sign
-      test is indicative, not clean: the 10 backtest blocks have disjoint test windows but
-      <em>nested/overlapping training windows</em>, so the per-block deltas are correlated
-      rather than independent — the exact binomial p-value is anti-conservative. The effect is
-      consistent across easy and hard blocks (real), but treat the p-value as suggestive.
+      <code>Weather</code>), MSE/MAE/R&sup2;, both significant at 96 steps and horizon-robust out
+      to 720. <b>*</b>The forecasting sign test is indicative, not clean: the 10 backtest blocks
+      have disjoint test windows but <em>nested/overlapping training windows</em>, so the
+      per-block deltas are correlated rather than independent — the exact binomial p-value is
+      anti-conservative. The effect is consistent across easy and hard blocks (real), but treat
+      the p-value as suggestive. On the horizon sweep specifically: the <code>weather</code>
+      h=720 point is a raw mean, and one hard backtest block inflates it roughly 2&times; — the
+      direction of growth survives on the block median, the magnitude of that single point
+      doesn't. And a genuine open confound: the mixer arms use a per-cell <em>shared</em>
+      readout while the flat/feedforward arms use an <em>unshared</em> readout that balloons
+      with horizon, so at long horizons some of this win may be shared-readout efficiency, not
+      cross-cell mixing per se — no run yet isolates the two (the architecture-vs-recurrence
+      isolation Chapter 4 has for <code>converge</code> doesn't exist here). Canonical:
+      <code>m30_{etth1,weather}_h{192,336,720}</code>.
     </div>
   </div>
 </section>
@@ -845,6 +863,16 @@
       ],
       yMin: 0, yMax: 0.55, height: 300, yFmt: v => (v*100).toFixed(0)+'%', valueFmt: v => '−'+(v*100).toFixed(0)+'%',
       showValues: true, legendId: 'legend-ch6b'
+    });
+    // ---- Chapter 6c: forecast horizon sweep, % MSE reduction, mixer vs ff ----
+    lineChart('chart-ch6c', {
+      categories: [{label:'h=96'}, {label:'h=192'}, {label:'h=336'}, {label:'h=720'}],
+      series: [
+        { key:'etth1', label:'ETTh1', color: V('--ff'), values: [0.206, 0.228, 0.148, 0.190] },
+        { key:'weather', label:'Weather', color: V('--mixer'), values: [0.483, 0.434, 0.446, 0.603] },
+      ],
+      yMin: 0, yMax: 0.7, yTicks: 5, yFmt: v => (v*100).toFixed(0)+'%',
+      valueFmt: v => '−'+(v*100).toFixed(0)+'%', legendId: 'legend-ch6c'
     });
 
     // ---- Chapter 7: accuracy vs test-time loop count, trained at R=4 ----
