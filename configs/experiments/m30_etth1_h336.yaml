@@ -1,0 +1,97 @@
+# M30 — the M26 forecasting re-test at horizon=336 on `etth1` (7 vars). One knob vs M26: HORIZON.
+#
+# M26 established the mixer forecasting positive at a SINGLE horizon (96->24); its scope limit (i)
+# and CLAUDE.md §11.3 flag the horizon axis untested, and scope limit (iii) warns channel-
+# INDEPENDENCE (DLinear/PatchTST) is known to WIN at longer horizons. M30 sweeps horizon in
+# {192, 336, 720} as SEPARATE per-horizon configs (a grid CANNOT hold budget parity: the flat
+# arm's unshared MxH readout balloons with H while the mixer's shared per-cell readout does not,
+# so trm_mixer must be RE-WIDENED per horizon to re-match trm_flat's budget — hidden_dim=512
+# here gives ratio~1.0, verified by scratchpad probe). Everything else IDENTICAL to
+# m26_etth1_forecast.yaml.
+#
+# Two headline reads across horizon (NEGATIVE Δ favours the first arm — lower MSE is better):
+#   Δ(trm_mixer − ff_matched)        — does the cross-variable mixer's MSE win survive long horizons?
+#   Δ(trm_flat − trm_decoupled)      — does CD>CI survive, or does channel-independence take over?
+
+task:
+  name: etth1
+  objective: regression
+  params:
+    dataset: etth1
+    lookback: 96
+    horizon: 336
+    n_folds: 10                 # seeds 0..9 = the 10 DISJOINT chronological backtest blocks
+    test_frac: 0.3
+  n_train: 6000                 # cap: most-recent 6000 windows before each block (recency)
+  n_test: 1000
+  task_seed: 0
+
+arms:
+  - name: trm_mixer
+    label: trm_mixer            # cross-VARIABLE mixing loop (RE-WIDENED to match trm_flat at H=336)
+    hidden_dim: 512
+    latent_dim: 96
+    token_hidden: 8
+    n_steps: 8
+    n_latent: 1
+    use_rmsnorm: true
+    deep_supervision: true
+  - name: trm
+    label: trm_flat            # flat loop (channel-dependent, no mixing) — budget reference
+    hidden_dim: 64
+    latent_dim: 64
+    n_steps: 8
+    n_latent: 1
+    use_rmsnorm: true
+    deep_supervision: true
+  - name: ff_matched
+    label: ff_matched         # §4a param-matched shallow joint MLP — the external control
+    hidden_dim: 64
+    latent_dim: 64
+    n_steps: 8
+  - name: untied_mixer_matched
+    label: untied_mixer_matched  # §4b CLEAN tying control: budget-matched untied mixer (auto-matches trm_mixer)
+    hidden_dim: 512
+    latent_dim: 96
+    token_hidden: 8
+    n_steps: 8
+    use_rmsnorm: true
+    deep_supervision: true
+  - name: untied_mixer
+    label: untied_mixer       # CEILING (~7.9x params, full width) — capacity-unconstrained, exempt
+    hidden_dim: 512
+    latent_dim: 96
+    token_hidden: 8
+    n_steps: 8
+    use_rmsnorm: true
+    deep_supervision: true
+  - name: trm_decoupled
+    label: trm_decoupled      # channel-INDEPENDENT (per-variable latents) — leg-1 / the CI baseline
+    hidden_dim: 64
+    latent_dim: 64
+    n_steps: 8
+    deep_supervision: true
+
+deltas:
+  - [trm_mixer, ff_matched]
+  - [trm_mixer, trm_flat]
+  - [trm_mixer, untied_mixer_matched]
+  - [trm_mixer, untied_mixer]
+  - [untied_mixer_matched, ff_matched]
+  - [trm_flat, ff_matched]
+  - [trm_flat, trm_decoupled]
+
+budget_reference: trm_flat
+budget_ceiling: [untied_mixer]
+budget_tol: 0.05
+
+train:
+  epochs: 25
+  lr: 1e-3
+  weight_decay: 1e-4
+  batch_size: 128
+  device: cpu
+
+seeds: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
+parallel_workers: 4
+results_dir: results

@@ -1,0 +1,7 @@
+config,arm,n_params,ref_params,ratio,role,within_tol
+single,trm_mixer,655613,657600,0.9970,matched,True
+single,trm_flat,657600,657600,1.0000,reference,True
+single,ff_matched,656568,657600,0.9984,matched,True
+single,untied_mixer_matched,652761,657600,0.9926,matched,True
+single,untied_mixer,5216680,657600,7.9329,ceiling,True
+single,trm_decoupled,656604,657600,0.9985,matched,True

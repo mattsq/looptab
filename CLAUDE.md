@@ -543,13 +543,29 @@ file and one index row, not here.
    feature→label reshape has no shared input/output cell topology, so token-mixing is just a
    reparameterized MLP. Capacity (hidden=128) does not rescue it (falsifies the M11 lever on
    real data).
-10. **Real coupled multi-target REGRESSION (forecasting) is POSITIVE for the mixer** (M26) —
-    the bookend to M25. On `etth1`/`weather` the cross-variable mixer beats a param-matched MLP
-    on MSE (−0.089 / −0.188, edge grows with #vars), because forecasting supplies the shared
-    cell topology (cell i = variable i on input AND output). Again primarily ARCHITECTURE not
-    recurrence (untied mixer captures most of it; tying is a small width-dependent edge). It is
-    a GENERALIZATION win (mixer fits train worse, tests better; the MLP overfits). Scope: 2
-    datasets, one lookback/horizon, tiny CPU models; sign-test p indicative (nested train sets).
+10. **Real coupled multi-target REGRESSION (forecasting) is POSITIVE for the mixer, and it is
+    HORIZON-ROBUST** (M26 + M30; M30 adversarial-review-hardened). On `etth1`/`weather` the
+    cross-variable mixer beats a param-matched MLP on MSE in the mean at every horizon, because
+    forecasting supplies the shared cell topology (cell i = variable i on input AND output). **M30
+    swept horizon {192,336,720} (budget-clean, mixer re-widened per horizon since the flat M×H
+    readout balloons with H but the mixer's shared readout doesn't).** The win does NOT decay; on
+    **weather it also grows** with horizon (direction-robust by median, Δ(mixer−ff) median
+    −0.19→−0.31→−0.47), **but read the growth carefully:** the raw-mean progression (−0.99 at h720)
+    is ~2× inflated by ONE hard backtest block, and on **etth1 the mean is non-monotonic** — so
+    "amplifies" is weather-only, not both-dataset. Primarily ARCHITECTURE not recurrence (untied
+    mixer carries it; tying is a variance-swamped TIE, **not** a significant reversal — the etth1-h720
+    +0.074 is 7/3 ns) — **BUT this is CONFOUNDED with shared-readout parameter-efficiency: both mixer
+    arms also have a shared `Linear(latent,H)` readout while the flat/ff arms carry an unshared M×H
+    readout that horizon inflates; no M30 arm separates mixing from shared-readout** (a shared-readout
+    non-mixing MLP is the needed control). Most robust finding = GENERALIZATION: the shallow joint MLP
+    overfits worse than persistence on 10/10 weather-h720 blocks, while every cross-variable arm holds.
+    **CD>CI persists in DIRECTION but LOSES M26's significance** (weather 9/1 p=.021 at h24 → 2/8 ns);
+    the one CI "divergence" (weather-h720 train mse ~91000 on 1 block) is a plausible optimization/seed
+    artifact, NOT demonstrated CI instability — so DLinear/PatchTST "CI-wins-at-long-horizon" is
+    neither reproduced nor refuted here (tiny CPU models; the scale where CI wins is larger). Scope: 2
+    datasets, one lookback (96), tiny CPU models; sign-test p indicative (nested train sets) — the
+    story is sign-consistency + median/trimmed growth, not a single p or a single hard-block mean.
+    **Still open: the shared-readout control, more datasets, + benchmark-scale (§11.3).**
 11. **The trained loop does NOT settle a latent fixed point even where it WINS** (M21): latent
     residual ~1.2, ρ>1, over-unroll collapses — "dressed-up depth" MEASURED. The win-vs-fail
     contrast is path-independence (za 0.97 vs 0.43, `trm` only), not contraction. **Making it
@@ -570,9 +586,17 @@ file and one index row, not here.
   where the single-timescale loop plateaus below target **and** ff/untied/untied-mixer do NOT
   share the ceiling at equal compute **and** more data does not close it. The current instance
   fails all three (data is the lever, M18j/M28).
-- **Forecasting frontier (M26 scope limits):** a horizon sweep (96→{192,336,720}), more
-  datasets (ETTh2/ETTm/electricity/traffic), and benchmark-scale models where
-  channel-independence is known to win (the CD>CI finding may not survive scale).
+- **Forecasting frontier (M26 scope limits):** the horizon sweep (96→{192,336,720}) is **DONE
+  (M30) — the mixer win is horizon-robust (grows on weather, direction-robust by median; etth1
+  flat/non-monotonic)**. Still open, in priority order: (1) **the shared-readout non-mixing MLP
+  control** — M30's "it's the mixing ARCHITECTURE" attribution is confounded with shared-readout
+  parameter-efficiency (both mixer arms have a shared `Linear(latent,H)` readout; the flat/ff arms
+  carry an unshared M×H readout that horizon inflates), and no M30 arm separates them; this control
+  isolates token-mixing from readout-sharing and is load-bearing for the horizon-amplification claim.
+  (2) more datasets (ETTh2/ETTm/electricity/traffic — needs a one-time out-of-band fetch + hash +
+  determinism test per §9.4, then replicate the M30 recipe). (3) **benchmark-scale models** where
+  channel-independence is known to win (M30's CD>CI held only at tiny CPU scale and already lost
+  M26's significance — the CD>CI finding may not survive scale).
 - **Low-priority:** a stricter single-pass feedforward-mixer §4a control (the untied mixer
   already shows non-recurrent mixing suffices); a convergent fixed-point task the mixer
   under-fits, to test the DS carry in its motivated regime (none found — the mixer fits them
