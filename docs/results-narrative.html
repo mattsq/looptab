@@ -181,11 +181,11 @@
     <p class="eyebrow">looptab &middot; results narrative</p>
     <h1 class="title">Does "thinking longer" help a model that just fills in a table?</h1>
     <p class="dek">
-      A research program tested whether <b>iterative latent refinement</b> — the loop at the
-      heart of recent reasoning models like TRM and HRM — gives a small tabular model an edge
-      over a parameter-matched feedforward network with no loop at all. Thirty milestones of
-      synthetic and real experiments later, the answer is a specific, evidence-backed <em>it
-      depends</em> — not a vague one. This page walks through the seven findings that hold up.
+      A research program spent thirty milestones testing whether <b>iterative latent
+      refinement</b> (the loop inside reasoning models like TRM and HRM) gives a small tabular
+      model an edge over a parameter-matched feedforward network with no loop at all. The
+      answer is a specific, evidence-backed <em>it depends</em>. This page covers the seven
+      findings that hold up.
     </p>
     <div class="meta-row">
       <span><span class="dot"></span>29 milestones, ~2,000+ trained model runs</span>
@@ -202,24 +202,24 @@
     <h2 class="claim">The question, and the rule that makes the answer trustworthy</h2>
     <div class="body-text">
       <p>
-        Models like TRM and HRM don't just do one forward pass — they maintain a hidden
+        Models like TRM and HRM don't stop after one forward pass. They keep a hidden
         "scratchpad" state and <b>refine it in a loop</b>: update the scratchpad, re-read an
-        answer from it, repeat, for a fixed number of steps. The idea is that more refinement
-        steps let the model do something closer to reasoning than a single-shot guess.
+        answer from it, repeat, for a fixed number of steps. More refinement steps, the idea
+        goes, should get the model closer to reasoning than a single-shot guess.
       </p>
       <p>
-        That loop is also exactly the kind of thing that's easy to fool yourself about. A loop
-        with <var>N</var> steps and a hidden state of size <var>h</var> has, roughly, the same
-        capacity as a plain feedforward network that is <var>N</var> layers deep — so any
-        accuracy gain the loop shows could just be "it's secretly a deeper, wider network,"
-        not "the loop is doing something a non-recurrent network structurally can't."
+        That loop is also easy to fool yourself about. A loop with <var>N</var> steps and a
+        hidden state of size <var>h</var> has, roughly, the same capacity as a plain
+        feedforward network that is <var>N</var> layers deep. Any accuracy gain it shows could
+        just mean "it's secretly a deeper, wider network." Not "the loop does something a
+        non-recurrent network structurally can't."
       </p>
       <p>
         So every experiment in this program follows one rule: <b>a recurrent result never ships
         alone.</b> It always ships next to a <b>parameter-matched feedforward network</b> (same
         weight budget, one forward pass, no loop) and, where relevant, a <b>depth-matched
         stack</b> of the same block repeated without sharing weights. The number that matters
-        is never the loop's raw accuracy — it's the gap (Δ) between the loop and its matched
+        is never the loop's raw accuracy. It's the gap (Δ) between the loop and its matched
         control, with enough seeds (≥5, usually 8&ndash;10) to run a paired sign test on that gap.
       </p>
     </div>
@@ -227,19 +227,18 @@
       <b>Why 8&ndash;10 seeds, not 5?</b> Five seeds is a variance floor, not a significance
       floor: the exact two-sided binomial sign test can't reach p&lt;.05 with fewer than 6 seeds
       (a unanimous 5/5 split still only gets p=.0625). Every "beats its control" claim on this
-      page needing a real significance call uses 8 or 10 seeds specifically so a unanimous
-      result can clear that bar — the same spirit as the NLP-reporting literature's warning that
-      a conclusion can flip depending on how much search/compute went into reaching it.
+      page that needs a real significance call uses 8 or 10 seeds so a unanimous result can
+      clear that bar. It's the same caution the NLP-reporting literature raises: a conclusion
+      can flip depending on how much search/compute went into reaching it.
     </div>
     <div class="body-text">
       <p>
         The testbed is a small synthetic suite with a difficulty knob and a known ground-truth
-        algorithm — <code>parity</code> (an irregular target buried in noise bits), an
-        elementary cellular automaton run for <var>T</var> steps (<code>iterated</code>, a target
-        that <em>is</em> an explicit multi-step algorithm), and CA variants that are run to a
-        <b>fixed point</b> (<code>converge</code>) — plus, later, real tabular datasets. Two real
-        bridges close out the story: real multi-label classification and real multivariate
-        forecasting.
+        algorithm: <code>parity</code> (an irregular target buried in noise bits), an elementary
+        cellular automaton run for <var>T</var> steps (<code>iterated</code>, a target that
+        <em>is</em> an explicit multi-step algorithm), and CA variants run to a
+        <b>fixed point</b> (<code>converge</code>). Real tabular data comes later, through two
+        bridges: multi-label classification and multivariate forecasting.
       </p>
     </div>
   </div>
@@ -252,14 +251,14 @@
     <h2 class="claim">A loop built the obvious way is close to a deep net in disguise</h2>
     <div class="body-text">
       <p>
-        The simplest recurrent design updates one flat MLP over the <em>entire</em> row at once
-        — every step sees the whole table row as a single flattened vector. That design does
-        edge out a matched feedforward net on fixed-point targets (a real effect — see Chapter
-        3): it's measurably more accurate cell-by-cell, and that per-cell edge holds steady to
-        growing as the row widens. On <em>whole-row</em> exact match specifically the edge
-        looks like it shrinks — that's an artifact of how exact match compounds per-cell
-        accuracy across more cells, not a sign the underlying edge is disappearing. Either way,
-        it's dwarfed by what actually turns out to matter (Chapter 4).
+        The simplest recurrent design updates one flat MLP over the <em>entire</em> row at
+        once: every step sees the whole table row as a single flattened vector. That design
+        does edge out a matched feedforward net on fixed-point targets (a real effect, see
+        Chapter 3). It's measurably more accurate cell-by-cell, and that per-cell edge holds
+        steady to growing as the row widens. On <em>whole-row</em> exact match specifically,
+        the edge looks like it shrinks. That's an artifact of how exact match compounds
+        per-cell accuracy across more cells, not a sign the underlying edge is disappearing.
+        Either way, it's dwarfed by what matters more (Chapter 4).
       </p>
     </div>
     <div class="chart-card">
@@ -270,10 +269,10 @@
     </div>
     <div class="rigor">
       <b>Rigor.</b> Params matched within budget contract at all three widths · exact two-sided
-      binomial sign test · the flat loop's edge over feedforward actually <b>grows</b> on
-      per-cell token accuracy (+0.5&thinsp;pt &rarr; +1.2&thinsp;pt &rarr; +4.5&thinsp;pt across
-      w=24/32/48) even as it shrinks on this whole-row EM view — an EM-floor compounding effect
-      flagged by this program's own adversarial review of an identical case, not evidence the
+      binomial sign test · the flat loop's edge over feedforward <b>grows</b> on per-cell token
+      accuracy (+0.5&thinsp;pt &rarr; +1.2&thinsp;pt &rarr; +4.5&thinsp;pt across w=24/32/48)
+      even as it shrinks on this whole-row EM view. That's an EM-floor compounding effect this
+      program's own adversarial review already flagged on an identical case, not evidence the
       edge itself is vanishing · canonical run <code>m24_mixer_converge_20260703T012300</code>.
     </div>
   </div>
@@ -289,8 +288,8 @@
         Isolate one design choice: does the loop refine <b>all output cells inside one shared
         latent</b>, or does each cell get its <b>own independent latent</b> that never talks to
         the others? On local fixed-point targets, the shared-latent version wins decisively on
-        whole-row exact match — and, unusually for this program, the edge <b>grows</b> with
-        model size instead of shrinking or staying flat.
+        whole-row exact match. Unusually for this program, the edge <b>grows</b> with model
+        size instead of shrinking or staying flat.
       </p>
     </div>
     <div class="chart-card">
@@ -299,8 +298,8 @@
       <div id="chart-ch3"></div>
     </div>
     <div class="rigor">
-      <b>Rigor.</b> "Deep + local" is necessary but not sufficient — the effect is absent on a
-      shallow or fully-dense task, but even within the deep+local CA family it only reproduces
+      <b>Rigor.</b> "Deep + local" is necessary but not sufficient. The effect is absent on a
+      shallow or fully-dense task, and even within the deep+local CA family it only reproduces
       on a specific hard-convergence subfamily. Other deep+local rules tested in this same
       sweep are null (rule 140: Δ +0.01&thinsp;EM, a tie) or reversed (rule 232: Δ
       &minus;0.11&thinsp;EM, favoring the decoupled arm) at the identical width. Canonical:
@@ -313,14 +312,14 @@
 <section class="chapter">
   <div class="wrap">
     <p class="chapter-num">Chapter 4</p>
-    <h2 class="claim">The pivot: what actually solves hard puzzles is letting cells talk to each other — not the loop</h2>
+    <h2 class="claim">The pivot: what solves hard puzzles is cells talking to each other, not the loop</h2>
     <div class="body-text">
       <p>
         Every result up to here used the flat, whole-row update. Swap it for an update that
-        lets each table cell attend to every other cell — a <b>cross-cell mixing</b> operator —
+        lets each table cell attend to every other cell, a <b>cross-cell mixing</b> operator,
         and the picture changes completely. On Sudoku, the canonical hard-reasoning benchmark
         for this whole model family, the flat loop and the matched feedforward net both fail
-        outright on hard puzzles. The mixing loop solves the majority of them.
+        outright on hard puzzles. The mixing loop solves most of them.
       </p>
     </div>
     <div class="hero-stat">
@@ -335,21 +334,21 @@
     </div>
     <div class="rigor">
       <b>Rigor.</b> No untied-mixer control has been run on Sudoku itself, so this number alone
-      doesn't yet separate <em>recurrence</em> from the <em>mixing architecture</em> — that
+      doesn't yet separate <em>recurrence</em> from the <em>mixing architecture</em>. That
       isolation (below) was only built on <code>converge</code>. Treat "solves hard Sudoku" as
       a mixer-architecture result pending the same control on Sudoku.
     </div>
     <div class="body-text" style="margin-top:8px;">
       <p>
         The obvious next question: is that a win for <b>recurrence</b>, or just for the
-        <b>mixing architecture</b>? Build the honest control — a mixing block stacked
-        <var>N</var> times <em>without</em> sharing weights, at the same parameter budget — and
-        run it against the weight-tied loop on the fixed-point CA task from Chapter 2 (the
-        cleanest task where that control exists).
+        <b>mixing architecture</b>? The honest control is a mixing block stacked <var>N</var>
+        times <em>without</em> sharing weights, at the same parameter budget, run against the
+        weight-tied loop on the fixed-point CA task from Chapter 2 (the cleanest task where
+        that control exists).
       </p>
       <p>
         The untied stack, at matched budget, already captures almost the entire win over
-        feedforward. The weight-tied loop keeps a real, budget-clean edge over it — but that
+        feedforward. The weight-tied loop keeps a real, budget-clean edge over it, but that
         edge is the ordinary parameter-efficiency benefit of weight sharing, not a new
         capability: give the untied stack ~7&times; the parameters and it fully closes the gap.
       </p>
@@ -361,12 +360,12 @@
       <div class="legend" id="legend-ch4b"></div>
     </div>
     <div class="caveat">
-      <b>Corrected finding, kept honest.</b> An earlier pass of this same experiment credited
-      the win to "the loop doing algorithmic hard-solving." An adversarial re-check of the
-      controls overturned that: the defensible claim is narrower — a cross-cell
+      <b>Corrected finding, kept honest.</b> An earlier pass of this experiment credited the
+      win to "the loop doing algorithmic hard-solving." An adversarial re-check of the
+      controls overturned that: the defensible claim is narrower. A cross-cell
       <b>mixing architecture</b> does the hard-solving; weight-tying only makes it cheaper to
-      deploy at a given accuracy. This walk-back is treated as a first-class result, not a
-      footnote — see <code>results/log/m24.md</code> for the full correction trail.
+      deploy at a given accuracy. This walk-back counts as a first-class result, not a
+      footnote; see <code>results/log/m24.md</code> for the full correction trail.
     </div>
     <div class="rigor">
       <b>Rigor.</b> Untied-matched control within ±5% of the tied loop's budget; the 7&times;
@@ -380,21 +379,21 @@
 <section class="chapter">
   <div class="wrap-wide">
     <p class="chapter-num">Chapter 5</p>
-    <h2 class="claim">Where mixing helps: table cells that are genuinely coupled to each other</h2>
+    <h2 class="claim">Where mixing helps: table cells that are coupled to each other</h2>
     <div class="body-text">
       <p>
-        Cross-cell mixing isn't a free lunch. It helps exactly when the output cells depend on
-        each other — whether that coupling is <b>local</b> (a ring of neighbors) or
-        <b>dense</b> (every cell coupled to every other cell, as in a Hopfield-style attractor
-        network) — and does nothing or actively hurts when the outputs are <b>exchangeable</b>,
-        independent quantities with no structure to propagate.
+        Cross-cell mixing isn't a free lunch. It helps when the output cells depend on each
+        other, whether that coupling is <b>local</b> (a ring of neighbors) or <b>dense</b>
+        (every cell coupled to every other cell, as in a Hopfield-style attractor network). It
+        does nothing, or actively hurts, when the outputs are <b>exchangeable</b>: independent
+        quantities with no structure to propagate.
       </p>
     </div>
     <div class="grid5" id="ch5-panels"></div>
     <p style="font-size:13px;color:var(--text-muted);margin:14px 2px 0;">
-      Note: the first four panels are percentage-point differences in EM or F1; the forecasting
-      panel is a relative reduction in mean-squared error — different units, comparable in
-      direction and significance but not in raw magnitude.
+      Note: the first four panels are percentage-point differences in EM or F1. The forecasting
+      panel is a relative reduction in mean-squared error. Different units, comparable in
+      direction and significance, not in raw magnitude.
     </p>
     <div class="rigor" style="margin-top:14px;">
       <b>Rigor.</b> One changed variable (the mixing operator) per comparison, 8&ndash;10 seeds
@@ -413,8 +412,7 @@
     <div class="body-text">
       <p>
         Synthetic findings are only useful if they survive contact with real tabular data. Two
-        real bridges were run, chosen specifically to fall on either side of the Chapter 5
-        divide.
+        real bridges were run, chosen to fall on either side of the Chapter 5 divide.
       </p>
     </div>
     <div class="two-col">
@@ -434,19 +432,19 @@
     <div class="body-text" style="margin-top:20px;">
       <p>
         <b>Negative on multi-label:</b> a naive feature-to-label reshape has no shared
-        input/output structure for cells to propagate across — labels are just a flat output
+        input/output structure for cells to propagate across. Labels are just a flat output
         vector, not cells on a shared grid. The mixer ties a plain joint MLP on micro-F1 and
         accuracy on two datasets; every mixer-specific edge that looked real was an
-        exact-match artifact of the label-combination distribution, and disappeared under F1.
+        exact-match artifact of the label-combination distribution, and it disappeared under F1.
       </p>
       <p>
-        <b>Positive on forecasting:</b> multivariate time series supply exactly the structure
-        multi-label lacked — variable <var>i</var> on the input is the same variable
-        <var>i</var> on the output, a genuine shared cell topology. There the cross-variable
-        mixer beats a matched MLP on MSE, and the edge <b>grows</b> with the number of coupled
-        variables — the clearest real-data positive in the whole program. A follow-up sweep
-        pushed the forecast horizon from 96 steps out to 720: the win <b>holds at every
-        horizon</b> on both datasets — it never reverses — and on <code>weather</code> it keeps
+        <b>Positive on forecasting:</b> multivariate time series supply the structure
+        multi-label lacked: variable <var>i</var> on the input is the same variable
+        <var>i</var> on the output, a shared cell topology. There the cross-variable mixer
+        beats a matched MLP on MSE, and the edge <b>grows</b> with the number of coupled
+        variables, the clearest real-data positive in the whole program. A follow-up sweep
+        pushed the forecast horizon from 96 steps out to 720. The win <b>holds at every
+        horizon</b> on both datasets, never reversing, and on <code>weather</code> it keeps
         growing the further out the model has to predict.
       </p>
     </div>
@@ -462,16 +460,16 @@
       <code>Weather</code>), MSE/MAE/R&sup2;, both significant at 96 steps and horizon-robust out
       to 720. <b>*</b>The forecasting sign test is indicative, not clean: the 10 backtest blocks
       have disjoint test windows but <em>nested/overlapping training windows</em>, so the
-      per-block deltas are correlated rather than independent — the exact binomial p-value is
-      anti-conservative. The effect is consistent across easy and hard blocks (real), but treat
-      the p-value as suggestive. On the horizon sweep specifically: the <code>weather</code>
-      h=720 point is a raw mean, and one hard backtest block inflates it roughly 2&times; — the
-      direction of growth survives on the block median, the magnitude of that single point
-      doesn't. And a genuine open confound: the mixer arms use a per-cell <em>shared</em>
-      readout while the flat/feedforward arms use an <em>unshared</em> readout that balloons
-      with horizon, so at long horizons some of this win may be shared-readout efficiency, not
-      cross-cell mixing per se — no run yet isolates the two (the architecture-vs-recurrence
-      isolation Chapter 4 has for <code>converge</code> doesn't exist here). Canonical:
+      per-block deltas are correlated rather than independent. The exact binomial p-value is
+      anti-conservative. The effect is consistent across easy and hard blocks, but treat the
+      p-value as suggestive. On the horizon sweep, the <code>weather</code> h=720 point is a
+      raw mean, and one hard backtest block inflates it roughly 2&times;: the direction of
+      growth survives on the block median, the magnitude of that single point doesn't. There's
+      also an open confound: the mixer arms use a per-cell <em>shared</em> readout, while the
+      flat/feedforward arms use an <em>unshared</em> readout that balloons with horizon. At
+      long horizons some of this win may be shared-readout efficiency rather than cross-cell
+      mixing, and no run yet isolates the two (the architecture-vs-recurrence isolation
+      Chapter 4 has for <code>converge</code> doesn't exist here). Canonical:
       <code>m30_{etth1,weather}_h{192,336,720}</code>.
     </div>
   </div>
@@ -485,10 +483,10 @@
     <div class="body-text">
       <p>
         Two findings bound how far to trust the loop, even in its winning regime. First,
-        <b>introspection</b>: even where the loop wins, its latent state doesn't actually
-        settle into a fixed point across refinement steps — the residual between steps stays
-        large, and unrolling past training length makes it worse, not better. It behaves like
-        a deep network computing in stages, not like an algorithm converging to an answer.
+        <b>introspection</b>: even where the loop wins, its latent state doesn't settle into a
+        fixed point across refinement steps. The residual between steps stays large, and
+        unrolling past training length makes it worse, not better. It behaves like a deep
+        network computing in stages, not an algorithm converging to an answer.
       </p>
     </div>
     <div class="chart-card">
@@ -497,25 +495,25 @@
       <div id="chart-ch7-unroll"></div>
     </div>
     <div class="rigor">
-      <b>Rigor.</b> The ARC-Prize HRM autopsy — the paper that set this whole program's "test the
-      loop before the hierarchy" approach — found that giving HRM one extra refinement loop
+      <b>Rigor.</b> The ARC-Prize HRM autopsy, the paper that set this whole program's "test the
+      loop before the hierarchy" approach, found that giving HRM one extra refinement loop
       nearly <b>doubled</b> its accuracy (18.6%&rarr;35.5%), with further loops adding
-      diminishing-but-positive returns (8 loops: 38.1%; 16 loops: 39.0%). Asking the identical
-      question here — same model, same task, only the number of test-time loops changes — gives
-      the opposite shape: accuracy peaks exactly at the trained loop count (97.2%) and collapses
-      toward chance the moment test-time loops exceed it, then never recovers. (Deeper training
-      depths don't even reach a peak to collapse from — they hit a separate learnability wall
-      first, unrelated to this effect.) Canonical: <code>m1_iterated_extrapolation_20260620T023255</code>.
+      diminishing-but-positive returns (8 loops: 38.1%; 16 loops: 39.0%). The identical question
+      asked here (same model, same task, only the number of test-time loops changes) gives the
+      opposite shape: accuracy peaks at the trained loop count (97.2%) and collapses toward
+      chance the moment test-time loops exceed it, then never recovers. Deeper training depths
+      don't even reach a peak to collapse from; they hit a separate learnability wall first,
+      unrelated to this effect. Canonical: <code>m1_iterated_extrapolation_20260620T023255</code>.
     </div>
     <div class="body-text" style="margin-top:20px;">
       <p>
-        Second, the <b>hierarchy question</b> — the "high-level slow / low-level fast" split
+        Second, the <b>hierarchy question</b>: the "high-level slow / low-level fast" split
         that HRM introduced. The instinct to build a two-timescale version of this loop was
         tested against its own falsification criterion first, the way the original ARC-Prize
         post-mortem on HRM recommended: only add the second timescale if the single loop
         provably plateaus below the target <em>at equal training compute</em>, in a way a
-        feedforward control doesn't share. It did plateau — but adding more training data,
-        not a second timescale, closed the gap:
+        feedforward control doesn't share. It did plateau. But adding more training data, not
+        a second timescale, closed the gap:
       </p>
     </div>
     <div class="chart-card">
@@ -528,8 +526,8 @@
       <p>
         At 64k training rows the single-timescale loop <b>solves</b> the task outright (99.0%
         exact match). The apparent need for a hierarchy was a sample-size wall shared by the
-        feedforward control, not a timescale-specific deficit only a hierarchy could fix —
-        so the hierarchical architecture was <b>not built</b>. Building it anyway would have
+        feedforward control, not a timescale-specific deficit only a hierarchy could fix, so
+        the hierarchical architecture was <b>not built</b>. Building it anyway would have
         repeated the exact mistake the HRM autopsy diagnosed: adding structure before proving
         the simpler model can't already do the job.
       </p>
@@ -552,19 +550,19 @@
         <p style="color:var(--text-primary); font-weight:600; margin-bottom:12px;">It buys</p>
         <ul class="summary">
           <li><b>Whole-row coherence</b> from refining all outputs in one shared latent state, growing with model size, on local fixed-point targets.</li>
-          <li><b>Hard constraint-satisfaction solving</b> (Sudoku, ring/fixed-point CA) once the update lets cells mix — a real, large, growing-with-difficulty win over a matched MLP.</li>
-          <li><b>A generalization win on real multivariate forecasting</b> — the mixer fits training data worse but tests better, the signature of a genuinely better inductive bias, not overfitting.</li>
-          <li><b>Parameter efficiency from weight-tying</b> — a real, if modest, edge over an untied stack at matched budget.</li>
+          <li><b>Hard constraint-satisfaction solving</b> (Sudoku, ring/fixed-point CA) once the update lets cells mix: a real, large, growing-with-difficulty win over a matched MLP.</li>
+          <li><b>A generalization win on real multivariate forecasting</b>: the mixer fits training data worse but tests better, the signature of a better inductive bias, not overfitting.</li>
+          <li><b>Parameter efficiency from weight-tying</b>: a real, if modest, edge over an untied stack at matched budget.</li>
         </ul>
       </div>
       <div class="body-text">
         <p style="color:var(--text-primary); font-weight:600; margin-bottom:12px;">It doesn't buy</p>
         <ul class="summary">
-          <li>A capability an <b>untied</b> version of the same mixing architecture lacks, once capacity is matched — the win is the architecture, not the recurrence.</li>
-          <li>A literal converging fixed point — the trained loop's latent state doesn't contract, even where it wins outright.</li>
-          <li><b>Depth-extrapolation</b> — more test-time refinement steps do not recover longer computations than it was trained on.</li>
-          <li>Any edge on <b>exchangeable features</b> or real multi-label classification — tasks with no shared input/output cell structure for cells to propagate across.</li>
-          <li>Justification for a hierarchical (two-timescale) extension — the one instance tested was a data wall, not a case for a hierarchy.</li>
+          <li>A capability an <b>untied</b> version of the same mixing architecture lacks, once capacity is matched. The win is the architecture, not the recurrence.</li>
+          <li>A literal converging fixed point: the trained loop's latent state doesn't contract, even where it wins outright.</li>
+          <li><b>Depth-extrapolation</b>: more test-time refinement steps do not recover longer computations than it was trained on.</li>
+          <li>Any edge on <b>exchangeable features</b> or real multi-label classification: tasks with no shared input/output cell structure for cells to propagate across.</li>
+          <li>Justification for a hierarchical (two-timescale) extension. The one instance tested was a data wall, not a case for a hierarchy.</li>
         </ul>
       </div>
     </div>
@@ -572,10 +570,10 @@
       <table class="checklist">
         <tr><th>Reporting practice</th><th>What this program actually did</th></tr>
         <tr><td>Seeds</td><td>≥5 for variance bands; 8&ndash;10 wherever a significance call is the point (5/5 unanimous still can't clear p&lt;.05 on the exact sign test).</td></tr>
-        <tr><td>Controls</td><td>Every recurrent number ships against a parameter-matched feedforward and, where relevant, a depth-matched untied stack — never a lone recurrent score.</td></tr>
+        <tr><td>Controls</td><td>Every recurrent number ships against a parameter-matched feedforward and, where relevant, a depth-matched untied stack. Never a lone recurrent score.</td></tr>
         <tr><td>Budget matching</td><td>Parameter counts matched within a declared tolerance (typically &plusmn;5%); exceptions are labeled explicitly as ceilings, not silently absorbed.</td></tr>
         <tr><td>Determinism</td><td>Data and training are a pure function of (config, seed); single-thread pinned for the 3-D matmul (mixer) arms so results are bit-reproducible.</td></tr>
-        <tr><td>Self-correction</td><td>Overclaims found by later or adversarial review stay visible as corrections in <code>results/log/*.md</code> rather than being quietly edited away — five of this page's own claims were corrected this way.</td></tr>
+        <tr><td>Self-correction</td><td>Overclaims found by later or adversarial review stay visible as corrections in <code>results/log/*.md</code> rather than being quietly edited away. Five of this page's own claims were corrected this way.</td></tr>
         <tr><td>Traceability</td><td>Every number on this page cites the exact dated run file it was read from.</td></tr>
       </table>
     </div>
@@ -811,7 +809,7 @@
         { key:'ff', label:'Feedforward (matched)', color: V('--ff'), values: [0.643, 0.300, 0.0225] },
         { key:'untiedm', label:'Mixer, untied (budget-matched)', color: V('--untiedm'), values: [0.955, 0.902, 0.676] },
         { key:'mixer', label:'Mixer, tied (weight-shared loop)', color: V('--mixer'), values: [0.988, 0.976, 0.964] },
-        { key:'untiedc', label:'Mixer, untied (7× params — reference ceiling)', color: V('--untiedc'), values: [0.979, 0.965, 0.917] },
+        { key:'untiedc', label:'Mixer, untied (7× params, reference ceiling)', color: V('--untiedc'), values: [0.979, 0.965, 0.917] },
       ],
       yMin: 0, yMax: 1, yFmt: v => (v*100).toFixed(0)+'%', valueFmt: v => fmtPct(v),
       legendId: 'legend-ch4b'
@@ -823,8 +821,8 @@
     const ch5 = [
       { task: 'Ring CA (converge)', value: 0.676, unit: 'em', win: true, note: 'local coupling' },
       { task: 'Dense Hopfield net', value: 0.454, unit: 'em', win: true, note: 'dense coupling' },
-      { task: 'Independent parities', value: -0.508, unit: 'em', win: false, note: 'exchangeable — no advantage' },
-      { task: 'Real multi-label (yeast)', value: -0.005, unit: 'f1', win: false, note: 'no shared topology — tie' },
+      { task: 'Independent parities', value: -0.508, unit: 'em', win: false, note: 'exchangeable, no advantage' },
+      { task: 'Real multi-label (yeast)', value: -0.005, unit: 'f1', win: false, note: 'no shared topology, tie' },
       { task: 'Real forecasting (weather)', value: 0.483, unit: 'mse_reduction', win: true, note: 'shared topology' },
     ];
     function fmtCh5(d) {
