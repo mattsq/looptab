@@ -16,12 +16,28 @@ Like `trm_decoupled`, the 3-D batched matmuls are BLAS-order sensitive, so it is
 only at a fixed ``num_threads`` (committed runs pin 1).
 """
 
+import math
 from typing import Optional
 
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 
 from .trm import RMSNorm
+
+
+def _init_per_cell_linear(n_cells: int, fan_in: int, fan_out: int):
+    """A per-cell (block-diagonal) linear as raw ``(n_cells, fan_in, fan_out)`` weight + bias.
+
+    Init matches ``nn.Linear``'s effective spread — U(-1/√fan_in, 1/√fan_in) for both weight and
+    bias (kaiming_uniform with a=√5 reduces to that bound) — but applied slice-wise so each cell
+    gets its OWN independent weights. Used by the M32 shared-readout / weight-sharing controls,
+    whose per-cell parameters cannot be expressed as a single ``nn.Linear``.
+    """
+    bound = 1.0 / math.sqrt(fan_in)
+    w = nn.Parameter(torch.empty(n_cells, fan_in, fan_out).uniform_(-bound, bound))
+    b = nn.Parameter(torch.empty(n_cells, fan_out).uniform_(-bound, bound))
+    return w, b
 
 
 class TRMMixer(nn.Module):
@@ -38,6 +54,8 @@ class TRMMixer(nn.Module):
         n_latent: int = 1,
         token_hidden: Optional[int] = None,
         disable_token_mix: bool = False,
+        shared_readout: bool = True,
+        distinct_cell_weights: bool = False,
     ):
         super().__init__()
         if out_features is None:
@@ -69,6 +87,18 @@ class TRMMixer(nn.Module):
         # which M30 flagged as an unseparated confound: Δ(trm_mixer − this) isolates token-mixing at
         # a held shared readout. Registered as `trm_mixer_nomix` via the `TRMMixerNoMix` subclass.
         self.disable_token_mix = disable_token_mix
+        # `shared_readout` / `distinct_cell_weights` (M32 ingredient-decomposition controls): both
+        # OFF by default ⇒ the channel MLP + readout are built EXACTLY as before (parameter order +
+        # forward path bit-identical to the committed mixer, unit-guarded). Each flag turns ONE of
+        # the three things `trm_mixer_nomix` has and `ff` lacks — the shared readout, channel-
+        # independence (=`disable_token_mix`), per-variable weight-sharing — from a bundle into a
+        # single-flag flip, so M31's Δ(nomix − ff) "shared-readout / channel-independent
+        # parameterization" can be split into readout vs channel-independence vs weight-sharing
+        # (registered as the `*_unsharedro` / `*_distinctw` subclasses). Both alternate paths stay
+        # channel-INDEPENDENT (each cell's output depends only on its own latent), so they vary
+        # ONLY the named axis.
+        self.shared_readout = shared_readout
+        self.distinct_cell_weights = distinct_cell_weights
         # Token-mixing MLP over the CELL axis (applied per feature channel) — the cross-cell
         # propagation operator the flat TRM lacks. Residual, so it preserves the per-cell in_dim.
         self.token_mix = (
@@ -80,13 +110,26 @@ class TRMMixer(nn.Module):
                 nn.Linear(token_hidden, self.n_cells),
             )
         )
-        # Channel MLP: per-cell [x_cell, z, a] -> new latent.
-        self.channel = nn.Sequential(
-            nn.Linear(in_dim, hidden_dim),
-            nn.GELU(),
-            nn.Linear(hidden_dim, latent_dim),
-        )
-        self.readout = nn.Linear(latent_dim, num_classes)  # shared across cells
+        # Channel MLP: per-cell [x_cell, z, a] -> new latent. Default = ONE MLP shared across cells;
+        # `distinct_cell_weights` gives each cell its OWN weights (isolates per-variable sharing).
+        if distinct_cell_weights:
+            self.channel = None
+            self.cw1, self.cb1 = _init_per_cell_linear(self.n_cells, in_dim, hidden_dim)
+            self.cw2, self.cb2 = _init_per_cell_linear(self.n_cells, hidden_dim, latent_dim)
+        else:
+            self.channel = nn.Sequential(
+                nn.Linear(in_dim, hidden_dim),
+                nn.GELU(),
+                nn.Linear(hidden_dim, latent_dim),
+            )
+        # Readout: default = ONE Linear(latent, num_classes) shared across cells; `shared_readout`
+        # =False gives each cell its own block-diagonal readout (unshared, but still channel-
+        # independent — cell i's output uses only z_i), isolating the shared readout.
+        if shared_readout:
+            self.readout = nn.Linear(latent_dim, num_classes)  # shared across cells
+        else:
+            self.readout = None
+            self.rw, self.rb = _init_per_cell_linear(self.n_cells, latent_dim, num_classes)
         self.norm = RMSNorm(latent_dim) if use_rmsnorm else nn.Identity()
         # Per-cell learned initial latent (doubles as a positional embedding — the structure the
         # flat TRM's single shared z0 lacks). Small init to break cell symmetry from step 0.
@@ -120,8 +163,20 @@ class TRMMixer(nn.Module):
                 mixed = inp if self.token_mix is None else (
                     inp + self.token_mix(inp.transpose(1, 2)).transpose(1, 2)
                 )
-                z = self.norm(self.channel(mixed))
-            a = self.readout(z)  # (B, n_cells, num_classes)
+                # Channel MLP → latent. `distinct_cell_weights` applies a per-cell weight set via
+                # batched (block-diagonal) matmul instead of one shared nn.Sequential.
+                if self.channel is None:
+                    h = F.gelu(torch.einsum("bmi,mij->bmj", mixed, self.cw1) + self.cb1)
+                    z = torch.einsum("bmj,mjl->bml", h, self.cw2) + self.cb2
+                else:
+                    z = self.channel(mixed)
+                z = self.norm(z)
+            # Readout → per-cell answer. `shared_readout=False` uses a per-cell block-diagonal
+            # readout (still channel-independent: a_i depends only on z_i).
+            if self.readout is None:
+                a = torch.einsum("bml,mlh->bmh", z, self.rw) + self.rb  # (B, n_cells, num_classes)
+            else:
+                a = self.readout(z)  # (B, n_cells, num_classes)
             if self.deep_supervision:
                 all_logits.append(a)
 
@@ -156,6 +211,50 @@ class TRMMixerNoMix(TRMMixer):
     def __init__(self, *args, disable_token_mix: bool = True, **kwargs):
         # Force the mixing off regardless of what the caller passes; everything else is inherited.
         super().__init__(*args, disable_token_mix=True, **kwargs)
+
+
+class TRMMixerUnsharedRO(TRMMixer):
+    """`trm_mixer` (token-mixing ON) but the SHARED readout is replaced by a per-cell UNSHARED one.
+
+    The M32 readout-isolation control on the channel-DEPENDENT body: identical to ``TRMMixer`` in
+    every axis except the readout is per-cell block-diagonal (unshared). Paired with ``TRMMixer``,
+    ``Δ(trm_mixer − this)`` isolates the shared readout's contribution at a HELD mixing body — the
+    channel-dependent cross-check for the CI estimate ``Δ(nomix − nomix_unsharedro)``.
+    """
+
+    def __init__(self, *args, shared_readout: bool = False, **kwargs):
+        super().__init__(*args, shared_readout=False, **kwargs)
+
+
+class TRMMixerNoMixUnsharedRO(TRMMixer):
+    """`trm_mixer_nomix` (channel-independent) but with an UNSHARED per-cell readout.
+
+    The M32 readout-isolation control on the channel-INDEPENDENT body: identical to
+    ``TRMMixerNoMix`` (no token-mix, shared channel weights) except the readout is per-cell
+    block-diagonal (unshared). ``Δ(trm_mixer_nomix − this)`` isolates the shared readout's
+    contribution at a held CI body — the clean single-flag flip that M31's Δ(nomix − ff) confounded
+    with channel-independence and weight-sharing. Budget re-solved per config (the unshared M×H
+    readout forces a narrower body — that IS the mechanism M31 posits).
+    """
+
+    def __init__(self, *args, disable_token_mix: bool = True, shared_readout: bool = False,
+                 **kwargs):
+        super().__init__(*args, disable_token_mix=True, shared_readout=False, **kwargs)
+
+
+class TRMMixerNoMixDistinctW(TRMMixer):
+    """`trm_mixer_nomix` (channel-independent, shared readout) but per-cell DISTINCT channel MLPs.
+
+    The M32 weight-sharing-isolation control: identical to ``TRMMixerNoMix`` except each cell's
+    channel MLP has its OWN weights (no per-variable weight-sharing). ``Δ(trm_mixer_nomix − this)``
+    isolates per-variable weight-sharing at a held CI body + shared readout — the third ingredient
+    M31 bundled into "channel-independent parameterization." Budget re-solved per config (distinct
+    weights cost M× the channel MLP, forcing a narrower body — the mechanism under test).
+    """
+
+    def __init__(self, *args, disable_token_mix: bool = True, distinct_cell_weights: bool = True,
+                 **kwargs):
+        super().__init__(*args, disable_token_mix=True, distinct_cell_weights=True, **kwargs)
 
 
 class _MixerBlock(nn.Module):
