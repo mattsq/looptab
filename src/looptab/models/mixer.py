@@ -37,6 +37,7 @@ class TRMMixer(nn.Module):
         use_rmsnorm: bool = False,
         n_latent: int = 1,
         token_hidden: Optional[int] = None,
+        disable_token_mix: bool = False,
     ):
         super().__init__()
         if out_features is None:
@@ -59,12 +60,25 @@ class TRMMixer(nn.Module):
 
         in_dim = self.cell_dim + latent_dim + num_classes  # per-cell input: [x_cell, z, a]
         token_hidden = token_hidden if token_hidden is not None else self.n_cells
+        # `disable_token_mix` (M31 shared-readout control): OFF by default ⇒ the token-mix block is
+        # built exactly as before (parameter order + forward path bit-identical to the committed
+        # mixer). When ON, the cross-cell propagation operator is REMOVED (no token_mix params,
+        # forward skips it) so each cell sees only its OWN input/state — a channel-independent loop
+        # that KEEPS the mixer's shared per-cell readout. It exists to separate the mixer's two
+        # advantages over the flat/ff arms (token-mixing vs shared-readout parameter-efficiency),
+        # which M30 flagged as an unseparated confound: Δ(trm_mixer − this) isolates token-mixing at
+        # a held shared readout. Registered as `trm_mixer_nomix` via the `TRMMixerNoMix` subclass.
+        self.disable_token_mix = disable_token_mix
         # Token-mixing MLP over the CELL axis (applied per feature channel) — the cross-cell
         # propagation operator the flat TRM lacks. Residual, so it preserves the per-cell in_dim.
-        self.token_mix = nn.Sequential(
-            nn.Linear(self.n_cells, token_hidden),
-            nn.GELU(),
-            nn.Linear(token_hidden, self.n_cells),
+        self.token_mix = (
+            None
+            if disable_token_mix
+            else nn.Sequential(
+                nn.Linear(self.n_cells, token_hidden),
+                nn.GELU(),
+                nn.Linear(token_hidden, self.n_cells),
+            )
         )
         # Channel MLP: per-cell [x_cell, z, a] -> new latent.
         self.channel = nn.Sequential(
@@ -101,7 +115,11 @@ class TRMMixer(nn.Module):
             for _ in range(self.n_latent):
                 inp = torch.cat([x_cells, z, a], dim=-1)  # (B, n_cells, in_dim)
                 # Token mixing across cells (residual, preserves in_dim), then channel MLP → latent.
-                mixed = inp + self.token_mix(inp.transpose(1, 2)).transpose(1, 2)
+                # `disable_token_mix` drops the cross-cell step (cells never communicate) — the M31
+                # shared-readout control — while everything else stays identical.
+                mixed = inp if self.token_mix is None else (
+                    inp + self.token_mix(inp.transpose(1, 2)).transpose(1, 2)
+                )
                 z = self.norm(self.channel(mixed))
             a = self.readout(z)  # (B, n_cells, num_classes)
             if self.deep_supervision:
@@ -113,6 +131,31 @@ class TRMMixer(nn.Module):
 
     def count_params(self) -> int:
         return sum(p.numel() for p in self.parameters() if p.requires_grad)
+
+
+class TRMMixerNoMix(TRMMixer):
+    """`trm_mixer` with the cross-cell token-mixing REMOVED — the M31 shared-readout control.
+
+    Identical to ``TRMMixer`` in EVERY axis (per-cell tokens, per-cell channel MLP, the **shared**
+    per-cell readout ``Linear(latent, num_classes)``, the weight-tied loop, RMSNorm, deep
+    supervision, ``n_latent``) except that no cell ever sees another cell — the token-mix step is a
+    no-op. So it is a channel-INDEPENDENT looped MLP that still carries the mixer's shared readout.
+
+    Why it exists (M30 confound, promoted from §11.3): both mixer arms beat ``trm_flat``/``ff`` on
+    forecasting with TWO advantages at once — (i) cross-cell token-mixing and (ii) a shared
+    ``Linear(latent, H)`` readout (vs the flat arms' unshared ``M×H`` readout that horizon
+    inflates). No M30 arm separated them. This one holds the shared readout fixed and removes ONLY
+    mixing, so ``Δ(trm_mixer − trm_mixer_nomix)`` is the token-mixing operator's contribution at a
+    held readout, and ``Δ(trm_mixer_nomix − ff_matched)`` is what the shared-readout /
+    channel-independent parameterization buys on its own. Budget-matched to ``trm_flat`` exactly as
+    ``trm_mixer`` is (the channel width is re-widened per config to re-hit the budget the removed
+    token-mix params freed). ``token_hidden`` is accepted for interface parity with ``trm_mixer``
+    and ignored (no token-mix). 3-D matmul ⇒ pin ``num_threads=1``.
+    """
+
+    def __init__(self, *args, disable_token_mix: bool = True, **kwargs):
+        # Force the mixing off regardless of what the caller passes; everything else is inherited.
+        super().__init__(*args, disable_token_mix=True, **kwargs)
 
 
 class _MixerBlock(nn.Module):
