@@ -542,6 +542,78 @@ def test_mixer_cells_communicate():
     assert changed[1:].any().item()        # AND some OTHER cell changed => cross-cell mixing
 
 
+# --- M31: TRMMixerNoMix (shared-readout, non-mixing control for the M30 confound) ----------------
+from looptab.models.mixer import TRMMixerNoMix  # noqa: E402
+
+
+def test_mixer_disable_flag_default_off_is_bit_identical():
+    """`disable_token_mix=False` (the default) must leave TRMMixer byte-identical to before — same
+    parameter set (token_mix present) and same forward output. Guards the committed mixer runs."""
+    torch.set_num_threads(1)
+
+    def build_and_run(**kw):
+        torch.manual_seed(0)
+        m = _mixer(**kw)
+        torch.manual_seed(1)
+        return m, m(torch.randn(6, 27))[0]
+
+    m_default, out_default = build_and_run()
+    m_explicit, out_explicit = build_and_run(disable_token_mix=False)
+    assert m_default.token_mix is not None
+    assert torch.equal(out_default, out_explicit)
+    assert sum(p.numel() for p in m_default.parameters()) == \
+        sum(p.numel() for p in m_explicit.parameters())
+
+
+def test_mixer_nomix_drops_only_the_token_mix():
+    """The no-mix arm removes the token-mix params and NOTHING else: it has strictly fewer params
+    than the tied mixer at the same width, and keeps the mixer's SHARED per-cell readout."""
+    torch.manual_seed(0)
+    mix = _mixer()
+    torch.manual_seed(0)
+    nomix = TRMMixerNoMix(in_features=27, num_classes=4, out_features=9, hidden_dim=16,
+                          latent_dim=16, n_steps=3)
+    assert nomix.token_mix is None
+    assert nomix.disable_token_mix is True
+    # shared readout: one Linear(latent -> num_classes) applied per cell (NOT an unshared M*C map).
+    assert nomix.readout.weight.shape == (4, 16)
+    token_mix_params = sum(p.numel() for p in mix.token_mix.parameters())
+    assert nomix.count_params() == mix.count_params() - token_mix_params
+
+
+def test_mixer_nomix_cells_do_not_communicate():
+    """Counterpart to test_mixer_cells_communicate: with token-mixing removed, perturbing one
+    input cell changes ONLY that cell's logits — no cross-cell leakage (channel-independent)."""
+    torch.set_num_threads(1)
+    torch.manual_seed(0)
+    m = TRMMixerNoMix(in_features=27, num_classes=4, out_features=9, hidden_dim=16,
+                      latent_dim=16, n_steps=3, deep_supervision=False)
+    X = torch.randn(1, 27)
+    base = m(X)[0]
+    Xp = X.clone().view(1, 9, 3)
+    Xp[0, 0, :] += 5.0                     # perturb cell 0's input only
+    pert = m(Xp.view(1, 27))[0]
+    changed = (~torch.isclose(base, pert, atol=1e-6)).any(dim=-1).squeeze(0)
+    assert changed[0].item()               # cell 0 changed
+    assert not changed[1:].any().item()    # NO other cell changed => no cross-cell communication
+
+
+def test_mixer_nomix_via_registry_and_deterministic():
+    """Resolves through the registry and is bit-reproducible at fixed threads (3-D matmul)."""
+    from looptab.registry import get_model
+    torch.set_num_threads(1)
+
+    def run():
+        torch.manual_seed(0)
+        m = get_model("trm_mixer_nomix", in_features=27, num_classes=4, out_features=9,
+                      hidden_dim=16, latent_dim=16, n_steps=3)
+        assert isinstance(m, TRMMixerNoMix)
+        torch.manual_seed(1)
+        return m(torch.randn(6, 27))[0]
+
+    assert torch.equal(run(), run())
+
+
 # --- M24e: mixing-matched untied controls (§4b for trm_mixer — the B1 isolation) -----------------
 from looptab.models.mixer import UntiedMixerStack, UntiedMixerStackMatched  # noqa: E402
 

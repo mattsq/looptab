@@ -1,0 +1,79 @@
+# M31 — the M30 shared-readout confound control on `weather` (H=720). One knob vs M30: it ADDS the
+# `trm_mixer_nomix` arm (a shared-readout, NON-mixing loop) and drops M30's two untied-mixer arms.
+#
+# M30 flagged that both mixer arms beat trm_flat/ff with TWO advantages at once — (i) cross-cell
+# token-MIXING and (ii) a per-cell SHARED readout Linear(latent,H), vs the flat/ff arms' UNSHARED
+# M*H readout that horizon inflates — and no M30 arm separated them. `trm_mixer_nomix` holds the
+# shared readout and removes ONLY the mixing (re-widened to re-match trm_flat's budget: hidden=1620).
+# The decomposition (NEGATIVE Δ favours the first arm — lower MSE is better):
+#   Δ(trm_mixer − trm_mixer_nomix)  = token-mixing contribution at a HELD shared readout
+#   Δ(trm_mixer_nomix − ff_matched) = what the shared-readout / channel-independent param buys alone
+#   Δ(trm_mixer − ff_matched)       = M30 headline (reproduced; = sum of the two above as a check)
+# trm_mixer/trm_flat/ff_matched keep the EXACT M30 widths so those arms reproduce M30 bit-identically.
+
+task:
+  name: weather
+  objective: regression
+  params:
+    dataset: weather
+    lookback: 96
+    horizon: 720
+    n_folds: 10                 # seeds 0..9 = the 10 DISJOINT chronological backtest blocks
+    test_frac: 0.3
+  n_train: 6000
+  n_test: 1000
+  task_seed: 0
+
+arms:
+  - name: trm_mixer
+    label: trm_mixer            # cross-VARIABLE mixing loop (M30 width, matches trm_flat)
+    hidden_dim: 1592
+    latent_dim: 192
+    token_hidden: 8
+    n_steps: 8
+    n_latent: 1
+    use_rmsnorm: true
+    deep_supervision: true
+  - name: trm_mixer_nomix
+    label: trm_mixer_nomix     # M31 control: SHARED readout, token-mixing REMOVED (re-widened to budget)
+    hidden_dim: 1620
+    latent_dim: 192
+    token_hidden: 8            # accepted + ignored (no token-mix built)
+    n_steps: 8
+    n_latent: 1
+    use_rmsnorm: true
+    deep_supervision: true
+  - name: trm
+    label: trm_flat            # flat loop (channel-dependent, no mixing, UNSHARED M*H readout) — budget ref
+    hidden_dim: 64
+    latent_dim: 64
+    n_steps: 8
+    n_latent: 1
+    use_rmsnorm: true
+    deep_supervision: true
+  - name: ff_matched
+    label: ff_matched         # §4a param-matched shallow joint MLP (UNSHARED M*H readout) — external control
+    hidden_dim: 64
+    latent_dim: 64
+    n_steps: 8
+
+deltas:
+  - [trm_mixer, trm_mixer_nomix]
+  - [trm_mixer_nomix, ff_matched]
+  - [trm_mixer, ff_matched]
+  - [trm_flat, ff_matched]
+  - [trm_mixer, trm_flat]
+
+budget_reference: trm_flat
+budget_tol: 0.05
+
+train:
+  epochs: 25
+  lr: 1e-3
+  weight_decay: 1e-4
+  batch_size: 128
+  device: cpu
+
+seeds: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
+parallel_workers: 4
+results_dir: results
