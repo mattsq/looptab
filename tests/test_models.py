@@ -665,3 +665,108 @@ def test_untied_mixer_deterministic_same_seed():
                                        use_rmsnorm=True)
     a, b = build(), build()
     assert all(torch.equal(p, q) for p, q in zip(a.parameters(), b.parameters()))
+
+
+# --- M32: ingredient-decomposition controls (split M31's Δ(nomix−ff): readout/CI/weight-share) ---
+from looptab.models.mixer import (  # noqa: E402
+    TRMMixerNoMixDistinctW,
+    TRMMixerNoMixUnsharedRO,
+    TRMMixerUnsharedRO,
+)
+
+
+def test_mixer_new_flags_default_off_bit_identical():
+    """`shared_readout=True` + `distinct_cell_weights=False` (the defaults) must leave TRMMixer
+    byte-identical to the committed mixer — same parameter set (channel.* + readout.*, no rw/rb/cw*)
+    and same forward output. Guards every committed M23/M30/M31 mixer run."""
+    torch.set_num_threads(1)
+
+    def build_and_run(**kw):
+        torch.manual_seed(0)
+        m = _mixer(**kw)
+        torch.manual_seed(1)
+        return m, m(torch.randn(6, 27))[0]
+
+    m_default, out_default = build_and_run()
+    m_explicit, out_explicit = build_and_run(shared_readout=True, distinct_cell_weights=False)
+    keys = set(m_default.state_dict())
+    assert "readout.weight" in keys and "channel.0.weight" in keys
+    assert not any(k in keys for k in ("rw", "rb", "cw1", "cw2"))
+    assert torch.equal(out_default, out_explicit)
+    assert m_default.count_params() == m_explicit.count_params()
+
+
+def test_unsharedro_replaces_shared_readout_and_counts():
+    """`shared_readout=False` drops the shared Linear(latent,C) for a per-cell block-diagonal
+    readout (rw:(cells,latent,C), rb:(cells,C)); everything else is unchanged, so param count =
+    base minus the shared readout plus the per-cell one."""
+    torch.manual_seed(0)
+    base = _mixer()                                            # shared readout, 9 cells, latent 16
+    torch.manual_seed(0)
+    uns = TRMMixerUnsharedRO(in_features=27, num_classes=4, out_features=9, hidden_dim=16,
+                             latent_dim=16, n_steps=3)  # token_hidden default = n_cells (as _mixer)
+    assert uns.readout is None
+    assert uns.rw.shape == (9, 16, 4) and uns.rb.shape == (9, 4)
+    shared_ro = 16 * 4 + 4                                     # Linear(16->4)
+    unshared_ro = 9 * (16 * 4) + 9 * 4                         # per-cell block-diagonal
+    assert uns.count_params() == base.count_params() - shared_ro + unshared_ro
+    assert uns.token_mix is not None                          # mixing still ON for this arm
+
+
+def test_distinctw_replaces_channel_and_counts():
+    """`distinct_cell_weights=True` gives each cell its own channel MLP (cw1/cb1/cw2/cb2); the
+    shared nn.Sequential channel is gone and the per-cell weights cost n_cells× the channel MLP."""
+    torch.manual_seed(0)
+    nomix = TRMMixerNoMix(in_features=27, num_classes=4, out_features=9, hidden_dim=16,
+                          latent_dim=16, n_steps=3)
+    torch.manual_seed(0)
+    dw = TRMMixerNoMixDistinctW(in_features=27, num_classes=4, out_features=9, hidden_dim=16,
+                                latent_dim=16, n_steps=3)
+    assert dw.channel is None
+    in_dim = 3 + 16 + 4                                        # cell_dim + latent + num_classes
+    assert dw.cw1.shape == (9, in_dim, 16) and dw.cw2.shape == (9, 16, 16)
+    shared_channel = (in_dim * 16 + 16) + (16 * 16 + 16)      # one shared MLP
+    distinct_channel = 9 * shared_channel                     # per-cell
+    assert dw.count_params() == nomix.count_params() - shared_channel + distinct_channel
+    assert dw.readout is not None                             # shared readout KEPT
+
+
+@pytest.mark.parametrize("name,cls", [
+    ("trm_mixer_nomix_unsharedro", TRMMixerNoMixUnsharedRO),
+    ("trm_mixer_nomix_distinctw", TRMMixerNoMixDistinctW),
+])
+def test_m32_ci_arms_no_cross_cell_leakage(name, cls):
+    """Both channel-independent M32 controls must stay CI: perturbing one input cell changes ONLY
+    that cell's output (the block-diagonal readout / per-cell weights add no cross-cell path)."""
+    torch.set_num_threads(1)
+    torch.manual_seed(0)
+    m = cls(in_features=27, num_classes=4, out_features=9, hidden_dim=16, latent_dim=16, n_steps=3,
+            deep_supervision=False)
+    X = torch.randn(1, 27)
+    base = m(X)[0]
+    Xp = X.clone().view(1, 9, 3)
+    Xp[0, 0, :] += 5.0
+    pert = m(Xp.view(1, 27))[0]
+    changed = (~torch.isclose(base, pert, atol=1e-6)).any(dim=-1).squeeze(0)
+    assert changed[0].item()                                  # perturbed cell changed
+    assert not changed[1:].any().item()                       # NO other cell changed => CI
+
+
+@pytest.mark.parametrize("name", [
+    "trm_mixer_unsharedro", "trm_mixer_nomix_unsharedro", "trm_mixer_nomix_distinctw",
+])
+def test_m32_arms_via_registry_and_deterministic(name):
+    """Each M32 arm resolves through the registry and is bit-reproducible at fixed threads."""
+    from looptab.registry import get_model
+    torch.set_num_threads(1)
+
+    def run():
+        torch.manual_seed(0)
+        m = get_model(name, in_features=27, num_classes=4, out_features=9, hidden_dim=16,
+                      latent_dim=16, n_steps=3, use_rmsnorm=True, token_hidden=8)
+        torch.manual_seed(1)
+        out = m(torch.randn(6, 27))[0]
+        assert out.shape == (6, 9, 4)
+        return out
+
+    assert torch.equal(run(), run())

@@ -1,0 +1,113 @@
+# M32 — decompose M31's shared-readout attribution on `etth1` (H=192). One axis vs M31: it ADDS three
+# controls that split M31's Δ(trm_mixer_nomix − ff_matched) — the "shared-readout / channel-independent
+# parameterization" win — into its THREE bundled ingredients, each a clean single-flag flip from nomix,
+# all budget-matched to trm_flat (widths from scratchpad/m32/probe_budget.py). NEGATIVE Δ favours the
+# first arm (lower forecast MSE is better).
+#   Δ(trm_mixer_nomix − trm_mixer_nomix_unsharedro) = the SHARED READOUT (CI body, clean flip)
+#   Δ(trm_mixer      − trm_mixer_unsharedro)         = the shared readout (CD body, cross-check)
+#   Δ(trm_mixer      − trm_mixer_nomix)              = channel-independence / mixing (= M31 mixing leg)
+#   Δ(trm_mixer_nomix − trm_mixer_nomix_distinctw)   = per-variable WEIGHT-SHARING (CI+shared-RO held)
+#   Δ(trm_mixer_nomix − ff_matched)                  = M31 headline (reproduced) = the sum to decompose
+# The four M31 arms keep their EXACT M30/M31 widths so those Δ reproduce M31 to within rounding.
+
+task:
+  name: etth1
+  objective: regression
+  params:
+    dataset: etth1
+    lookback: 96
+    horizon: 192
+    n_folds: 10                 # seeds 0..9 = the 10 DISJOINT chronological backtest blocks
+    test_frac: 0.3
+  n_train: 6000
+  n_test: 1000
+  task_seed: 0
+
+arms:
+  - name: trm_mixer
+    label: trm_mixer            # cross-VARIABLE mixing loop (M30/M31 width, matches trm_flat)
+    hidden_dim: 424
+    latent_dim: 96
+    token_hidden: 8
+    n_steps: 8
+    n_latent: 1
+    use_rmsnorm: true
+    deep_supervision: true
+  - name: trm_mixer_nomix
+    label: trm_mixer_nomix      # M31 control: SHARED readout, token-mixing REMOVED (M31 width)
+    hidden_dim: 428
+    latent_dim: 96
+    token_hidden: 8
+    n_steps: 8
+    n_latent: 1
+    use_rmsnorm: true
+    deep_supervision: true
+  - name: trm_mixer_unsharedro
+    label: trm_mixer_unsharedro  # M32: mix ON, UNSHARED per-cell readout (readout isolation, CD body)
+    hidden_dim: 118
+    latent_dim: 118
+    token_hidden: 8
+    n_steps: 8
+    n_latent: 1
+    use_rmsnorm: true
+    deep_supervision: true
+  - name: trm_mixer_nomix_unsharedro
+    label: trm_mixer_nomix_unsharedro  # M32: mix OFF, UNSHARED readout (readout isolation, CI body)
+    hidden_dim: 118
+    latent_dim: 118
+    token_hidden: 8
+    n_steps: 8
+    n_latent: 1
+    use_rmsnorm: true
+    deep_supervision: true
+  - name: trm_mixer_nomix_distinctw
+    label: trm_mixer_nomix_distinctw   # M32: mix OFF, per-cell DISTINCT channel weights (weight-share)
+    hidden_dim: 70
+    latent_dim: 70
+    token_hidden: 8
+    n_steps: 8
+    n_latent: 1
+    use_rmsnorm: true
+    deep_supervision: true
+  - name: trm
+    label: trm_flat             # flat loop (channel-dependent, UNSHARED M*H readout) — budget ref
+    hidden_dim: 64
+    latent_dim: 64
+    n_steps: 8
+    n_latent: 1
+    use_rmsnorm: true
+    deep_supervision: true
+  - name: ff_matched
+    label: ff_matched           # §4a param-matched shallow joint MLP (UNSHARED M*H readout) — anchor
+    hidden_dim: 64
+    latent_dim: 64
+    n_steps: 8
+
+deltas:
+  # ingredient i — shared readout (clean single-flag flip; NEG Δ favours the shared-readout arm)
+  - [trm_mixer_nomix, trm_mixer_nomix_unsharedro]        # CI body (the clean estimate)
+  - [trm_mixer, trm_mixer_unsharedro]                    # CD body (cross-check)
+  # ingredient ii — channel-independence / mixing (readout held)
+  - [trm_mixer, trm_mixer_nomix]                         # shared-RO (= M31 mixing leg)
+  - [trm_mixer_unsharedro, trm_mixer_nomix_unsharedro]   # unshared-RO cross-check
+  # ingredient iii — per-variable weight-sharing (CI + shared-RO held)
+  - [trm_mixer_nomix, trm_mixer_nomix_distinctw]
+  # anchors: reproduce the M31 headline + expose the residual the ingredients must explain
+  - [trm_mixer_nomix, ff_matched]                        # M31 headline Δ(nomix−ff)
+  - [trm_mixer_nomix_unsharedro, ff_matched]             # per-cell CI vs joint MLP at unshared RO
+  - [trm_mixer, ff_matched]                              # M30 headline (context)
+  - [trm_flat, ff_matched]                               # context
+
+budget_reference: trm_flat
+budget_tol: 0.05
+
+train:
+  epochs: 25
+  lr: 1e-3
+  weight_decay: 1e-4
+  batch_size: 128
+  device: cpu
+
+seeds: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
+parallel_workers: 4
+results_dir: results

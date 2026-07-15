@@ -69,10 +69,17 @@ def _build_model(
         n_steps=arm.n_steps if n_steps is None else n_steps,
         out_features=out_features,
     )
+    # The M31 shared-readout control + the M32 ingredient-decomposition controls are all TRMMixer
+    # variants that take the SAME knobs (rmsnorm/n_latent/token_hidden) and stay byte-identical to
+    # `trm_mixer` at their default flags — only their hardwired flag (readout/weight-share) differs.
+    mixer_family = (
+        "trm_mixer", "trm_mixer_nomix",
+        "trm_mixer_unsharedro", "trm_mixer_nomix_unsharedro", "trm_mixer_nomix_distinctw",
+    )
     # The TRM loop and both untied-stack controls (§4b) emit per-step readouts, so deep
     # supervision can be ablated on the same axis for each.
     if arm.name in (
-        "trm", "trm_decoupled", "trm_mixer", "trm_mixer_nomix", "untied_stack", "untied_matched",
+        "trm", "trm_decoupled", *mixer_family, "untied_stack", "untied_matched",
         "untied_mixer", "untied_mixer_matched",
     ):
         kwargs["deep_supervision"] = arm.deep_supervision
@@ -85,7 +92,7 @@ def _build_model(
     # M23 re-test: cell-mixing loop shares the rmsnorm/n_latent knobs. M31 `trm_mixer_nomix`
     # (shared-readout control) takes the SAME knobs so it stays identical to `trm_mixer` bar the
     # removed token-mix (token_hidden is accepted + ignored by the no-mix subclass).
-    if arm.name in ("trm_mixer", "trm_mixer_nomix"):
+    if arm.name in mixer_family:
         kwargs["use_rmsnorm"] = arm.use_rmsnorm
         kwargs["n_latent"] = arm.n_latent
         kwargs["token_hidden"] = arm.token_hidden

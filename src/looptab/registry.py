@@ -2,7 +2,15 @@
 
 from .models.controls import FFMatched, UntiedStack, UntiedStackMatched
 from .models.decoupled import TRMDecoupled
-from .models.mixer import TRMMixer, TRMMixerNoMix, UntiedMixerStack, UntiedMixerStackMatched
+from .models.mixer import (
+    TRMMixer,
+    TRMMixerNoMix,
+    TRMMixerNoMixDistinctW,
+    TRMMixerNoMixUnsharedRO,
+    TRMMixerUnsharedRO,
+    UntiedMixerStack,
+    UntiedMixerStackMatched,
+)
 from .models.trm import TRM
 
 MODEL_REGISTRY = {
@@ -10,6 +18,10 @@ MODEL_REGISTRY = {
     "trm_decoupled": TRMDecoupled,
     "trm_mixer": TRMMixer,
     "trm_mixer_nomix": TRMMixerNoMix,  # M31: shared-readout, non-mixing control
+    # M32 controls: split M31's Δ(nomix−ff) into readout / channel-independence / weight-sharing.
+    "trm_mixer_unsharedro": TRMMixerUnsharedRO,  # mix ON, UNSHARED readout (CD readout cross-check)
+    "trm_mixer_nomix_unsharedro": TRMMixerNoMixUnsharedRO,  # CI, UNSHARED readout (readout isolate)
+    "trm_mixer_nomix_distinctw": TRMMixerNoMixDistinctW,  # CI, per-cell DISTINCT weights
     "untied_mixer": UntiedMixerStack,
     "untied_mixer_matched": UntiedMixerStackMatched,
     "ff_matched": FFMatched,
