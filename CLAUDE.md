@@ -623,28 +623,34 @@ file and one index row, not here.
     **M32 (#14) SPLITS that bundle and CORRECTS the emphasis: it is channel-INDEPENDENCE first, the
     shared readout a modest second — "it's the shared readout" (part b, readout named first) is too
     specific; and mixing is not merely "weakly harmful" but net HARMFUL in all 6 cells.**
-14. **★ Decomposing #13: channel-INDEPENDENCE ≥ shared readout > weight-sharing ≫ mixing (NEGATIVE)**
-    (M32 — three off-by-default `TRMMixer` controls split the #13 bundle; all 6 cells reproduce M31 to
-    rounding). Isolating each of the three things `nomix` has and `ff` lacks, plus mixing, each a clean
-    single-flag flip budget-matched to `trm_flat`: **(a) token-mixing is net HARMFUL, not inert** —
-    Δ(mixer−nomix) MSE is POSITIVE in all 6 cells (+0.03→+0.16), decisive on weather (10/0, 9/1, 10/0)
-    and worsening with horizon; strengthens #13's "not mixing" to "affirmatively anti-mixing." **(b) the
-    shared readout is a REAL but MODEST helper** — Δ(nomix−nomix_unsharedro) negative in all 6
-    (−0.03→−0.10), sign-consistent, decisive on weather — NOT the majority ingredient #13's naming
-    implied. **(c) channel-INDEPENDENCE (per-cell own-variable processing) is the LARGER structural
-    ingredient, and dominates when channels are many:** vs the fair `trm_flat` baseline, the CI-structure
-    term carries **76–84% on weather (M=21 vars) but 15–44% on etth1 (M=7)** — the more weakly-coupled
-    channels, the more a CI bias avoids fitting cross-channel noise (every channel-DEPENDENT arm —
-    mixing loop, flat loop, joint MLP — is worse than CI). **(d) weight-sharing a modest third**
-    (Δ(nomix−distinctw) −0.03→−0.09, all 6). **(e) the #13 `nomix−ff` headline magnitude is an ff-OVERFIT
-    artifact** — `trm_flat−ff` supplies most of it (ff over-fits, worst on weather-h720, the ±1.8 outlier
-    block); `trm_flat` (recurrent, narrow, channel-DEPENDENT) is the honest CD baseline, and the
-    architecture ingredients are the small robust Δ's above, not the big number. Net: #13's compound name
-    ("shared-readout / channel-independent parameterization") is a real COMPOUND (both parts contribute,
-    same sign in every cell) but its ORDER was backwards — channel-independence leads. FORECASTING ONLY;
-    synthetic mixing wins (#7–8) untouched — this is the channel-independent side of #8's line. Caveats:
-    the CI-structure term (`nomix_unsharedro − trm_flat`) bundles CI + per-cell tokenization + recurrence
-    (recurrence read as inert per M24e/M30, not re-proven); the readout/CI split is dataset-dependent
+14. **★ Decomposing #13 (adversarial-review-hardened): on the MANY-CHANNEL dataset channel-INDEPENDENCE
+    is the larger slice, the shared readout a modest second; token-mixing is NOT the mechanism (net
+    harmful on weather); the split is DATASET-dependent, not universal** (M32 — three off-by-default
+    `TRMMixer` controls split the #13 bundle; `ff`/`nomix` reproduce M31 bit-identically, `trm_flat` in
+    5/6 cells). Isolating each of the three things `nomix` has and `ff` lacks, plus mixing, each flipping
+    one named axis (+ a forced re-width to hold `trm_flat`'s budget — not a single-*parameter* change):
+    **(a) token-mixing does NOT help; on weather it is net HARMFUL** — Δ(mixer−nomix) MSE positive in all
+    6 cells (+0.03→+0.16), **decisive on weather** (10/0, 9/1, 10/0; p≤.021) but **NOT significant on
+    etth1** (8/2, 6/4, 8/2; the h336 6/4 is a coin-flip), and NOT monotone in horizon (weather median
+    non-monotone, per M31). Firm claim is the NEGATIVE one ("not the mechanism"); "harmful" is weather-
+    only. **(b) the shared readout is a REAL, sign-consistent, MODEST helper** — Δ(nomix−nomix_unsharedro)
+    negative in all 6 (−0.03→−0.10), decisive on weather; the more consistent axis on etth1 — NOT the
+    majority ingredient #13's naming implied. **(c) channel-INDEPENDENCE is the larger structural slice
+    when channels are MANY:** vs the fair `trm_flat` baseline it carries **76–84% on weather (M=21)** but
+    only **~9–44% on etth1 (M=7), where it is small and noise-dominated** (a ~0.009 `trm_flat` baseline
+    wobble alone swings the etth1-336 share 15%→9%). **(d) weight-sharing a modest third** (Δ(nomix−
+    distinctw) −0.03→−0.09, all 6). **(e) most of #13's raw `nomix−ff` number is ff-OVERFIT, not an
+    ingredient** — `trm_flat−ff` is 81% of the weather-h720 headline; the ingredients partition only the
+    minority RESIDUAL after removing ff's pathology, so "CI leads" means it leads that residual on
+    weather, not that it explains the win over ff. Net: #13's compound name is a real COMPOUND (both parts
+    contribute, same sign in every cell), its EMPHASIS (readout first) corrected toward channel-
+    independence ON THE MANY-CHANNEL SIDE — not a universal reordering. FORECASTING ONLY; synthetic mixing
+    wins (#7–8) untouched — the channel-independent side of #8's line. Caveats: the CI-structure contrast
+    (`nomix_unsharedro − trm_flat`) is NOT a single-knob flip — it bundles CI + readout-STRUCTURE + width
+    (the clean CD/CI flip is the mixing leg, which only agrees in direction); recurrence not separated
+    (read inert per M24e/M30, not re-proven); one reproduction wrinkle — `trm_flat` etth1-336 drifts
+    +0.0086 despite being a 2-D arm (isolated CPU non-determinism, NOT the 3-D-matmul cause); the split is
+    dataset-dependent
     (channel count), reported as two regimes not one ratio.
 
 ### 11.3 Open work
