@@ -1,0 +1,35 @@
+
+=== single ===
+  [seed=0] trm_mixer=-0.596  trm_mixer_nomix=-0.365  trm_mixer_unsharedro=-0.551  trm_mixer_nomix_unsharedro=-0.376  trm_mixer_nomix_distinctw=-0.424  trm_flat=-0.627  ff_matched=-1.447 (baseline=-1.004)
+  [seed=1] trm_mixer=-1.224  trm_mixer_nomix=-1.147  trm_mixer_unsharedro=-1.414  trm_mixer_nomix_unsharedro=-1.169  trm_mixer_nomix_distinctw=-1.191  trm_flat=-1.196  ff_matched=-2.838 (baseline=-2.060)
+  [seed=2] trm_mixer=-0.624  trm_mixer_nomix=-0.401  trm_mixer_unsharedro=-0.654  trm_mixer_nomix_unsharedro=-0.473  trm_mixer_nomix_distinctw=-0.465  trm_flat=-0.529  ff_matched=-0.885 (baseline=-0.600)
+  [seed=3] trm_mixer=-0.349  trm_mixer_nomix=-0.356  trm_mixer_unsharedro=-0.347  trm_mixer_nomix_unsharedro=-0.477  trm_mixer_nomix_distinctw=-0.417  trm_flat=-0.409  ff_matched=-0.658 (baseline=-0.583)
+  [seed=4] trm_mixer=-0.449  trm_mixer_nomix=-0.292  trm_mixer_unsharedro=-0.395  trm_mixer_nomix_unsharedro=-0.328  trm_mixer_nomix_distinctw=-0.325  trm_flat=-0.434  ff_matched=-0.445 (baseline=-0.468)
+  [seed=5] trm_mixer=-0.568  trm_mixer_nomix=-0.443  trm_mixer_unsharedro=-0.509  trm_mixer_nomix_unsharedro=-0.444  trm_mixer_nomix_distinctw=-0.414  trm_flat=-0.589  ff_matched=-1.098 (baseline=-0.332)
+  [seed=6] trm_mixer=-0.346  trm_mixer_nomix=-0.271  trm_mixer_unsharedro=-0.431  trm_mixer_nomix_unsharedro=-0.293  trm_mixer_nomix_distinctw=-0.284  trm_flat=-0.618  ff_matched=-0.595 (baseline=-0.354)
+  [seed=7] trm_mixer=-0.610  trm_mixer_nomix=-0.334  trm_mixer_unsharedro=-0.609  trm_mixer_nomix_unsharedro=-0.346  trm_mixer_nomix_distinctw=-0.342  trm_flat=-0.758  ff_matched=-0.994 (baseline=-0.315)
+  [seed=8] trm_mixer=-0.360  trm_mixer_nomix=-0.199  trm_mixer_unsharedro=-0.354  trm_mixer_nomix_unsharedro=-0.225  trm_mixer_nomix_distinctw=-0.226  trm_flat=-0.277  ff_matched=-0.383 (baseline=-0.319)
+  [seed=9] trm_mixer=-0.492  trm_mixer_nomix=-0.422  trm_mixer_unsharedro=-0.519  trm_mixer_nomix_unsharedro=-0.438  trm_mixer_nomix_distinctw=-0.442  trm_flat=-0.461  ff_matched=-0.795 (baseline=-0.585)
+  majority_baseline: acc -0.6621 ± 0.5341
+         trm_mixer: acc -0.5619 ± 0.2574
+   trm_mixer_nomix: acc -0.4230 ± 0.2649
+  trm_mixer_unsharedro: acc -0.5783 ± 0.3114
+  trm_mixer_nomix_unsharedro: acc -0.4569 ± 0.2636
+  trm_mixer_nomix_distinctw: acc -0.4532 ± 0.2703
+          trm_flat: acc -0.5899 ± 0.2524
+        ff_matched: acc -1.0139 ± 0.7158
+  Δ(trm_mixer_nomix − trm_mixer_nomix_unsharedro) = +0.0339 ± 0.0361  [MSE -0.0339 ± 0.0361]  [MAE -0.0170 ± 0.0264]  [R2 +0.0705 ± 0.0881]
+  Δ(trm_mixer − trm_mixer_unsharedro) = +0.0164 ± 0.0749  [MSE -0.0164 ± 0.0749]  [MAE -0.0121 ± 0.0379]  [R2 +0.0114 ± 0.0951]
+  Δ(trm_mixer − trm_mixer_nomix) = -0.1389 ± 0.0880  [MSE +0.1389 ± 0.0880]  [MAE +0.0748 ± 0.0554]  [R2 -0.2410 ± 0.1676]
+  Δ(trm_mixer_unsharedro − trm_mixer_nomix_unsharedro) = -0.1213 ± 0.1117  [MSE +0.1213 ± 0.1117]  [MAE +0.0699 ± 0.0804]  [R2 -0.1820 ± 0.1961]
+  Δ(trm_mixer_nomix − trm_mixer_nomix_distinctw) = +0.0302 ± 0.0288  [MSE -0.0302 ± 0.0288]  [MAE -0.0148 ± 0.0154]  [R2 +0.0553 ± 0.0581]
+  Δ(trm_mixer_nomix − ff_matched) = +0.5909 ± 0.4751  [MSE -0.5909 ± 0.4751]  [MAE -0.2639 ± 0.1360]  [R2 +0.8424 ± 0.3491]
+  Δ(trm_mixer_nomix_unsharedro − ff_matched) = +0.5570 ± 0.4873  [MSE -0.5570 ± 0.4873]  [MAE -0.2469 ± 0.1506]  [R2 +0.7719 ± 0.3791]
+  Δ(trm_mixer − ff_matched) = +0.4520 ± 0.4752  [MSE -0.4520 ± 0.4752]  [MAE -0.1890 ± 0.1478]  [R2 +0.6013 ± 0.3929]
+  Δ(trm_flat − ff_matched) = +0.4240 ± 0.4942  [MSE -0.4240 ± 0.4942]  [MAE -0.1515 ± 0.1407]  [R2 +0.5578 ± 0.4249]
+
+Results : results/m32_weather_h336_20260715T193241.json
+Curve   : results/m32_weather_h336_20260715T193241_curve.csv
+Deltas  : results/m32_weather_h336_20260715T193241_deltas.csv
+Params  : results/m32_weather_h336_20260715T193241_params.csv
+  ✓ BUDGET PARITY: all matched arms within ±5% per cell.

@@ -134,10 +134,10 @@ whose update is a *flat MLP over the concatenated grid* is **≈ a feedforward n
 communicate, so "does iterative refinement help?" was systematically confounded with "does the update
 operator match the task structure?" for M0–M22. The thing that makes TRM *work* — constraint propagation,
 the hard-solving win — **is the cross-cell token-mixing update**, not the
-loop per se. **(EXCEPTION — real forecasting: M31 showed the M26/M30 `etth1`/`weather` mixer win is NOT the
-mixing update but the mixer's per-cell SHARED READOUT; at a held shared readout, mixing is inert-to-harmful
-there. The constraint-coupled SYNTHETIC wins below stand; forecasting is on the channel-INDEPENDENT side —
-§11.2 #13.)** So **start every new recurrent experiment from `trm_mixer`; use the flat `trm` only as the
+loop per se. **(EXCEPTION — real forecasting: M31/M32 showed the M26/M30 `etth1`/`weather` mixer win is NOT the
+mixing update; mixing is net HARMFUL there. The win is CHANNEL-INDEPENDENCE first (per-cell own-variable
+processing, dominant when channels are many) + a modest shared-readout second. The constraint-coupled
+SYNTHETIC wins below stand; forecasting is on the channel-INDEPENDENT side — §11.2 #13–#14.)** So **start every new recurrent experiment from `trm_mixer`; use the flat `trm` only as the
 COMPARISON control** (the §4b "is it the mixing operator or just recurrence?" ablation — flat `trm` ≈ ff on
 structured tasks, so `Δ(trm_mixer − trm_flat)` is the operator's contribution). Do NOT default to flat
 `trm` as a "simplest starting point" — a null measured on it is a null about a feedforward-equivalent, not
@@ -147,7 +147,8 @@ columns are unsupported (use `distractors: 0` or `pad_to_label_multiple`); singl
 scalar-`y` parity) have no mixer, use flat `trm` there. (2) The mixer helps only where outputs are
 **cross-cell COUPLED with a shared input/output cell topology** (rings/grids/graphs) — it is
 inert on **exchangeable** features (`multi_parity`, M24d), and on real **forecasting** the mixer's *apparent*
-win is its shared readout, not coupling (M31, §11.2 #13), and on the **naive multi-label reshape** (no
+win is channel-independence + shared readout, not coupling — mixing there is net HARMFUL (M31/M32, §11.2
+#13–#14), and on the **naive multi-label reshape** (no
 input↔output correspondence, M25), where a plain MLP is best; a mixer null there is expected, not a
 refinement null. (3) 3-D matmul ⇒ pin `num_threads=1` for bit-repro. When in doubt, run `trm_mixer` AND
 flat `trm` AND `ff_matched` together (the M24 lean triple) so the operator's contribution is always visible.
@@ -465,7 +466,10 @@ file and one index row, not here.
   `trm_decoupled` (per-cell / joint-state ablation), and the mixing-matched controls
   `untied_mixer` (ceiling) + `untied_mixer_matched` (clean tying control), and `trm_mixer_nomix`
   (M31 shared-readout control: `TRMMixer` with `disable_token_mix=True` — shared readout, cross-cell
-  mixing REMOVED; off-by-default flag ⇒ `trm_mixer` byte-identical). M18 TRM-faithful
+  mixing REMOVED; off-by-default flag ⇒ `trm_mixer` byte-identical), and the M32 ingredient-
+  decomposition controls `trm_mixer_nomix_unsharedro` / `trm_mixer_unsharedro` (`shared_readout=False`
+  block-diagonal readout) + `trm_mixer_nomix_distinctw` (`distinct_cell_weights=True` per-cell channel
+  MLPs) — all off-by-default `TRMMixer` flags ⇒ byte-identical at defaults. M18 TRM-faithful
   knobs (`use_rmsnorm`, `n_latent`, `ema_decay`, `n_sup`) + `trm_faithful` arm; all
   off-by-default ⇒ bit-identical.
 - **Training/eval** (`src/looptab/train/`, `src/looptab/eval/`): routines `train`,
@@ -616,6 +620,32 @@ file and one index row, not here.
     variable weight-sharing — "it's the shared readout" means that whole cheap-parameterization package,
     not the readout matrix alone. Reproduction is to ROUNDING not bit-identical: `trm_flat`/`ff` match
     M30 per-seed, but `trm_mixer` weather-h720 drifts ~2.6e-3 (3-D-matmul non-determinism at max width).
+    **M32 (#14) SPLITS that bundle and CORRECTS the emphasis: it is channel-INDEPENDENCE first, the
+    shared readout a modest second — "it's the shared readout" (part b, readout named first) is too
+    specific; and mixing is not merely "weakly harmful" but net HARMFUL in all 6 cells.**
+14. **★ Decomposing #13: channel-INDEPENDENCE ≥ shared readout > weight-sharing ≫ mixing (NEGATIVE)**
+    (M32 — three off-by-default `TRMMixer` controls split the #13 bundle; all 6 cells reproduce M31 to
+    rounding). Isolating each of the three things `nomix` has and `ff` lacks, plus mixing, each a clean
+    single-flag flip budget-matched to `trm_flat`: **(a) token-mixing is net HARMFUL, not inert** —
+    Δ(mixer−nomix) MSE is POSITIVE in all 6 cells (+0.03→+0.16), decisive on weather (10/0, 9/1, 10/0)
+    and worsening with horizon; strengthens #13's "not mixing" to "affirmatively anti-mixing." **(b) the
+    shared readout is a REAL but MODEST helper** — Δ(nomix−nomix_unsharedro) negative in all 6
+    (−0.03→−0.10), sign-consistent, decisive on weather — NOT the majority ingredient #13's naming
+    implied. **(c) channel-INDEPENDENCE (per-cell own-variable processing) is the LARGER structural
+    ingredient, and dominates when channels are many:** vs the fair `trm_flat` baseline, the CI-structure
+    term carries **76–84% on weather (M=21 vars) but 15–44% on etth1 (M=7)** — the more weakly-coupled
+    channels, the more a CI bias avoids fitting cross-channel noise (every channel-DEPENDENT arm —
+    mixing loop, flat loop, joint MLP — is worse than CI). **(d) weight-sharing a modest third**
+    (Δ(nomix−distinctw) −0.03→−0.09, all 6). **(e) the #13 `nomix−ff` headline magnitude is an ff-OVERFIT
+    artifact** — `trm_flat−ff` supplies most of it (ff over-fits, worst on weather-h720, the ±1.8 outlier
+    block); `trm_flat` (recurrent, narrow, channel-DEPENDENT) is the honest CD baseline, and the
+    architecture ingredients are the small robust Δ's above, not the big number. Net: #13's compound name
+    ("shared-readout / channel-independent parameterization") is a real COMPOUND (both parts contribute,
+    same sign in every cell) but its ORDER was backwards — channel-independence leads. FORECASTING ONLY;
+    synthetic mixing wins (#7–8) untouched — this is the channel-independent side of #8's line. Caveats:
+    the CI-structure term (`nomix_unsharedro − trm_flat`) bundles CI + per-cell tokenization + recurrence
+    (recurrence read as inert per M24e/M30, not re-proven); the readout/CI split is dataset-dependent
+    (channel count), reported as two regimes not one ratio.
 
 ### 11.3 Open work
 
@@ -623,18 +653,18 @@ file and one index row, not here.
   where the single-timescale loop plateaus below target **and** ff/untied/untied-mixer do NOT
   share the ceiling at equal compute **and** more data does not close it. The current instance
   fails all three (data is the lever, M18j/M28).
-- **Forecasting frontier (M26 scope limits):** the horizon sweep (M30) and the shared-readout
-  control (M31) are **DONE — M31 re-attributes the mixer win to the SHARED READOUT, not mixing
-  (§11.2 #13)**. Still open, in priority order: (1) **more datasets** (ETTh2/ETTm/electricity/traffic
-  — needs a one-time out-of-band fetch + hash + determinism test per §9.4, then replicate the M31
-  4-arm recipe; would test whether the shared-readout-beats-ff / CI-beats-CD pattern generalizes).
-  (2) **benchmark-scale models** where channel-independence is known to win (M31's `nomix` already
-  points that way at tiny scale; M30's CD>CI held only at tiny CPU scale and lost M26's significance
-  — the CD>CI finding may not survive scale). (3) OPTIONAL, to name the single active ingredient
-  behind Δ(nomix−ff): a shared-readout *channel-DEPENDENT* MLP (and/or an unshared-readout
-  channel-independent arm) to split shared-readout vs channel-independence vs weight-sharing — not
-  needed for the M30 correction (the mixing isolation Δ(mixer−nomix) already settles "it's not
-  mixing"), only to pin which part of the cheap-parameterization package carries it.
+- **Forecasting frontier (M26 scope limits):** the horizon sweep (M30), the shared-readout control
+  (M31), and the ingredient decomposition (M32) are **DONE — the mixer win is channel-INDEPENDENCE
+  first, the shared readout a modest second, mixing net HARMFUL (§11.2 #13–#14)**. Still open, in
+  priority order: (1) **more datasets** (ETTh2/ETTm/electricity/traffic — needs a one-time out-of-band
+  fetch + hash + determinism test per §9.4, then replicate the M32 recipe; would test whether the
+  CI-leads / shared-readout / CI-beats-CD pattern generalizes). (2) **benchmark-scale models** where
+  channel-independence is known to win (M31/M32's `nomix` already points that way at tiny scale; M30's
+  CD>CI held only at tiny CPU scale and lost M26's significance — the CD>CI finding may not survive
+  scale, and M32 further weakens it: mixing is net harmful). (3) OPTIONAL, to name the single active
+  ingredient *within* the channel-independent parameterization even more finely (own-variable input vs
+  per-cell tokenization vs recurrence) — M32 already settles the readout/CI/weight-share/mixing split;
+  this is only for a recurrence-clean CI-vs-CD flip (a feedforward CI arm), low priority.
 - **Low-priority:** a stricter single-pass feedforward-mixer §4a control (the untied mixer
   already shows non-recurrent mixing suffices); a convergent fixed-point task the mixer
   under-fits, to test the DS carry in its motivated regime (none found — the mixer fits them
@@ -651,9 +681,10 @@ exactly two orbits, no other balanced+deep ECA); leaving the ECA family (M13); t
 hypothesis (M14); uniform-rule-vs-depth (M15–M15c — leg 2 depth-controlled on rule 13); real
 multi-label classification for the loop AND the mixer (M20/M25); the deep-supervision
 MECHANISM on the mixer (M29 — M18 holds, do not re-run the m29a/b/c decomposition); and the
-forecasting mixing-vs-shared-readout attribution (M31 — it's the shared readout, not mixing;
-do not re-run the horizon×dataset decomposition, and do not credit forecasting to the mixing
-operator again — §11.2 #13).
+forecasting mixing-vs-shared-readout attribution (M31/M32 — channel-independence leads, the shared
+readout is a modest second, mixing is net HARMFUL; do not re-run the horizon×dataset decomposition
+or the readout/CI/weight-share ingredient split, and do not credit forecasting to the mixing
+operator again — §11.2 #13–#14).
 
 ## 12. References
 
