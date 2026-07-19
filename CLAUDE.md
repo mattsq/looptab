@@ -652,6 +652,36 @@ file and one index row, not here.
     +0.0086 despite being a 2-D arm (isolated CPU non-determinism, NOT the 3-D-matmul cause); the split is
     dataset-dependent
     (channel count), reported as two regimes not one ratio.
+15. **★ On the SYNTHETIC constraint-coupled tasks the mixer's TOKEN-MIXING contribution FLIPS sign vs
+    forecasting: here mixing is ~the ENTIRE win (the clean single-flag leg) — #8's dividing line, on the
+    mixing axis, is now MEASURED not asserted** (M33 — runs the M31/M32 7-arm decomposition on all five
+    mixer-win tasks: Sudoku, `converge`, `hopfield`, `disruption`, `mixed_converge`; 10 configs; no code
+    changes, control arms pre-existed). Classification sign (POSITIVE Δ favours the first arm — OPPOSITE of
+    forecasting's MSE). **(a) THE FIRM, CLEANLY-ISOLATED RESULT — token-mixing IS the mechanism:**
+    Δ(trm_mixer − trm_mixer_nomix) EM **+0.51…+0.99, 8/0 (Sudoku 6/0), p≤.031** in every cell — the only
+    single-flag flip (`disable_token_mix`, all else held); removing cross-cell mixing collapses the win.
+    Every headline Δ(mixer−ff) reproduces its shipped M23/M24/M24c/M24f/M28a baseline (C3 reseed ⇒ the added
+    arms don't perturb mixer/flat/ff; disruption-w32 reproduces only after a gamma-bug fix, see below).
+    **(b) WEAKER, BUNDLED read — a channel-independent looped arm underperforms a joint MLP:** Δ(nomix − ff)
+    EM negative, 0/8 (−0.02…−0.64), BUT `nomix−ff` bundles CI + loop + tokenization + shared channel MLP
+    (the exact confound M31/M32 flagged), so this is a DIRECTION + plausible mechanism (a cell on a
+    ring/grid/clique needs its neighbours; CI cuts that path), NOT a clean CI isolation. **(c) readout /
+    weight-share axes are UNTESTABLE here (degenerate saturation, NOT a measured null):** Δ(nomix −
+    nomix_unsharedro) = Δ(nomix − distinctw) = 0.000 EM only because the three CI arms converge to the
+    IDENTICAL per-cell decision (per-seed metrics bit-identical to 15 sig figs; the CI optimum is a trivial
+    per-cell lookup with the same argmax under any parameterization) — `sign_test_robust` flags all-ties
+    (n_near_tie=8, p=1.0). On Sudoku the accuracy delta is actually nonzero-but-negligible (+0.0004/−0.0003);
+    only EM floors to 0. Consistent with the forecasting shared-readout being a horizon-M×H efficiency
+    artifact, but M33 does NOT independently measure it. The additive identity (Δ(mixer−ff)=Δ(mixer−nomix)+
+    Δ(nomix−ff), residual ≈1e-16, 12 cells) is an arithmetic tautology, a bookkeeping check not evidence.
+    **Net: the MIXING operator's contribution is opposite-signed between regimes — forecasting mixing net
+    harmful (CI+readout win, #13–#14), synthetic constraint-coupled mixing ~all of it — a strong
+    confirmation of #7/#8 on the mixing axis; the CI/readout legs are NOT cleanly measured on the synthetic
+    side (bundled / degenerate).** Caveats: `trm_mixer_nomix_distinctw` breaches budget (~0.905–0.936,
+    CONSERVATIVE/under) on binary w24/w32 cells (coarse per-cell-weight quantization) but Δ(nomix−distinctw)=0
+    there so moot; mixer arms inherit baseline widths (up to 1.041, within ±5% spec); **disruption_w32 had a
+    generator bug (gamma=14 copied from w24; the M24f w32 baseline + minimal-PSD margin require gamma=15) —
+    fixed and re-run at gamma=15 so it reproduces M24f; the mixing-leg conclusion held at gamma=14 too.**
 
 ### 11.3 Open work
 
@@ -690,7 +720,10 @@ MECHANISM on the mixer (M29 — M18 holds, do not re-run the m29a/b/c decomposit
 forecasting mixing-vs-shared-readout attribution (M31/M32 — channel-independence leads, the shared
 readout is a modest second, mixing is net HARMFUL; do not re-run the horizon×dataset decomposition
 or the readout/CI/weight-share ingredient split, and do not credit forecasting to the mixing
-operator again — §11.2 #13–#14).
+operator again — §11.2 #13–#14); and the SAME decomposition on the SYNTHETIC mixer-win tasks (M33 —
+Sudoku/`converge`/`hopfield`/`disruption`/`mixed_converge`: mixing is ~the ENTIRE win, channel-
+independence is HARMFUL, shared readout/weight-share exactly 0.000; do not re-run — the attribution
+flips vs forecasting exactly as #8's coupled-vs-CI line predicts — §11.2 #15).
 
 ## 12. References
 

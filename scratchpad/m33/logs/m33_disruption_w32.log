@@ -1,0 +1,36 @@
+
+=== single ===
+  [seed=0] trm_mixer=0.986  trm_mixer_nomix=0.770  trm_mixer_unsharedro=0.972  trm_mixer_nomix_unsharedro=0.770  trm_mixer_nomix_distinctw=0.770  trm_flat=0.930  ff_matched=0.935 (baseline=0.507)
+  [seed=1] trm_mixer=0.975  trm_mixer_nomix=0.757  trm_mixer_unsharedro=0.973  trm_mixer_nomix_unsharedro=0.757  trm_mixer_nomix_distinctw=0.757  trm_flat=0.930  ff_matched=0.938 (baseline=0.509)
+  [seed=2] trm_mixer=0.991  trm_mixer_nomix=0.832  trm_mixer_unsharedro=0.974  trm_mixer_nomix_unsharedro=0.832  trm_mixer_nomix_distinctw=0.832  trm_flat=0.938  ff_matched=0.945 (baseline=0.500)
+  [seed=3] trm_mixer=0.976  trm_mixer_nomix=0.749  trm_mixer_unsharedro=0.974  trm_mixer_nomix_unsharedro=0.749  trm_mixer_nomix_distinctw=0.749  trm_flat=0.929  ff_matched=0.933 (baseline=0.519)
+  [seed=4] trm_mixer=0.987  trm_mixer_nomix=0.770  trm_mixer_unsharedro=0.975  trm_mixer_nomix_unsharedro=0.770  trm_mixer_nomix_distinctw=0.770  trm_flat=0.928  ff_matched=0.938 (baseline=0.503)
+  [seed=5] trm_mixer=0.987  trm_mixer_nomix=0.767  trm_mixer_unsharedro=0.987  trm_mixer_nomix_unsharedro=0.767  trm_mixer_nomix_distinctw=0.767  trm_flat=0.932  ff_matched=0.941 (baseline=0.517)
+  [seed=6] trm_mixer=0.982  trm_mixer_nomix=0.750  trm_mixer_unsharedro=0.974  trm_mixer_nomix_unsharedro=0.750  trm_mixer_nomix_distinctw=0.750  trm_flat=0.913  ff_matched=0.926 (baseline=0.502)
+  [seed=7] trm_mixer=0.987  trm_mixer_nomix=0.765  trm_mixer_unsharedro=0.966  trm_mixer_nomix_unsharedro=0.765  trm_mixer_nomix_distinctw=0.765  trm_flat=0.912  ff_matched=0.925 (baseline=0.507)
+  majority_baseline: acc 0.5081 ± 0.0068
+   subset_baseline: EM  0.0551 ± 0.0209
+         trm_mixer: acc 0.9841 ± 0.0056
+   trm_mixer_nomix: acc 0.7700 ± 0.0264
+  trm_mixer_unsharedro: acc 0.9742 ± 0.0060
+  trm_mixer_nomix_unsharedro: acc 0.7700 ± 0.0264
+  trm_mixer_nomix_distinctw: acc 0.7700 ± 0.0264
+          trm_flat: acc 0.9264 ± 0.0090
+        ff_matched: acc 0.9351 ± 0.0068
+  Δ(trm_mixer − trm_mixer_nomix) = +0.2141 ± 0.0231  [EM +0.7841 ± 0.0419]  [coh +0.1784 ± 0.0714]
+  Δ(trm_mixer_nomix − ff_matched) = -0.1651 ± 0.0226  [EM -0.2425 ± 0.0526]  [coh -0.1236 ± 0.0478]
+  Δ(trm_mixer_nomix − trm_mixer_nomix_unsharedro) = +0.0000 ± 0.0000  [EM +0.0000 ± 0.0000]  [coh +0.0000 ± 0.0000]
+  Δ(trm_mixer − trm_mixer_unsharedro) = +0.0099 ± 0.0078  [EM +0.1197 ± 0.1025]  [coh -0.0453 ± 0.0400]
+  Δ(trm_mixer_unsharedro − trm_mixer_nomix_unsharedro) = +0.2042 ± 0.0270  [EM +0.6644 ± 0.0897]  [coh +0.2237 ± 0.0460]
+  Δ(trm_mixer_nomix − trm_mixer_nomix_distinctw) = +0.0000 ± 0.0000  [EM +0.0000 ± 0.0000]  [coh +0.0000 ± 0.0000]
+  Δ(trm_mixer_nomix_unsharedro − ff_matched) = -0.1651 ± 0.0226  [EM -0.2425 ± 0.0526]  [coh -0.1236 ± 0.0478]
+  Δ(trm_mixer − ff_matched) = +0.0490 ± 0.0077  [EM +0.5416 ± 0.0721]  [coh +0.0548 ± 0.0574]
+  Δ(trm_flat − ff_matched) = -0.0087 ± 0.0034  [EM +0.0171 ± 0.0317]  [coh +0.0465 ± 0.0283]
+
+Results : results/m33_disruption_w32_20260718T143347.json
+Curve   : results/m33_disruption_w32_20260718T143347_curve.csv
+Deltas  : results/m33_disruption_w32_20260718T143347_deltas.csv
+Params  : results/m33_disruption_w32_20260718T143347_params.csv
+  ⚠ BUDGET PARITY: 1 matched-arm cell(s) exceeded ±5% vs 'trm_flat':
+      [single] trm_mixer_nomix_distinctw: ratio 0.9357
+    NOTE: a breach on the loop/ff_matched is a depth-attribution blocker; a breach on untied_matched is the expected high-T width-quantization finding (narrow blocks) — see LOG.md.

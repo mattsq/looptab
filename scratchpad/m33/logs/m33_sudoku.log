@@ -1,0 +1,85 @@
+
+=== n_givens=24 ===
+  [seed=0] trm_mixer=0.999  trm_mixer_nomix=0.723  trm_mixer_unsharedro=0.999  trm_mixer_nomix_unsharedro=0.722  trm_mixer_nomix_distinctw=0.722  trm_flat=0.872  ff_matched=0.877 (baseline=0.167)
+  [seed=1] trm_mixer=0.999  trm_mixer_nomix=0.722  trm_mixer_unsharedro=0.998  trm_mixer_nomix_unsharedro=0.721  trm_mixer_nomix_distinctw=0.721  trm_flat=0.873  ff_matched=0.879 (baseline=0.167)
+  [seed=2] trm_mixer=0.998  trm_mixer_nomix=0.722  trm_mixer_unsharedro=0.998  trm_mixer_nomix_unsharedro=0.722  trm_mixer_nomix_distinctw=0.722  trm_flat=0.877  ff_matched=0.876 (baseline=0.167)
+  [seed=3] trm_mixer=0.999  trm_mixer_nomix=0.723  trm_mixer_unsharedro=0.999  trm_mixer_nomix_unsharedro=0.721  trm_mixer_nomix_distinctw=0.722  trm_flat=0.875  ff_matched=0.877 (baseline=0.167)
+  [seed=4] trm_mixer=0.999  trm_mixer_nomix=0.722  trm_mixer_unsharedro=0.999  trm_mixer_nomix_unsharedro=0.723  trm_mixer_nomix_distinctw=0.723  trm_flat=0.872  ff_matched=0.876 (baseline=0.167)
+  [seed=5] trm_mixer=0.999  trm_mixer_nomix=0.722  trm_mixer_unsharedro=0.999  trm_mixer_nomix_unsharedro=0.722  trm_mixer_nomix_distinctw=0.720  trm_flat=0.875  ff_matched=0.877 (baseline=0.167)
+  majority_baseline: acc 0.1667 ± 0.0000
+   subset_baseline: EM  0.0020 ± 0.0000
+         trm_mixer: acc 0.9990 ± 0.0004
+   trm_mixer_nomix: acc 0.7223 ± 0.0004
+  trm_mixer_unsharedro: acc 0.9988 ± 0.0004
+  trm_mixer_nomix_unsharedro: acc 0.7219 ± 0.0005
+  trm_mixer_nomix_distinctw: acc 0.7217 ± 0.0009
+          trm_flat: acc 0.8740 ± 0.0021
+        ff_matched: acc 0.8771 ± 0.0012
+  Δ(trm_mixer − trm_mixer_nomix) = +0.2767 ± 0.0004  [EM +0.9705 ± 0.0084]  [coh +0.0058 ± 0.0050]  ⚠ coherence_excess: 1/6 near-ties ⇒ robust p=0.062 (raw p=0.031)
+  Δ(trm_mixer_nomix − ff_matched) = -0.1549 ± 0.0014  [EM -0.0082 ± 0.0015]  [coh +0.0008 ± 0.0015]
+  Δ(trm_mixer_nomix − trm_mixer_nomix_unsharedro) = +0.0004 ± 0.0006  [EM +0.0000 ± 0.0000]  [coh -0.0000 ± 0.0000]
+  Δ(trm_mixer − trm_mixer_unsharedro) = +0.0002 ± 0.0003  [EM +0.0063 ± 0.0098]  [coh +0.0003 ± 0.0042]
+  Δ(trm_mixer_unsharedro − trm_mixer_nomix_unsharedro) = +0.2769 ± 0.0007  [EM +0.9642 ± 0.0123]  [coh +0.0056 ± 0.0042]  ⚠ coherence_excess: 1/6 near-ties ⇒ robust p=0.062 (raw p=0.031)
+  Δ(trm_mixer_nomix − trm_mixer_nomix_distinctw) = +0.0005 ± 0.0008  [EM +0.0000 ± 0.0000]  [coh -0.0000 ± 0.0000]
+  Δ(trm_mixer_nomix_unsharedro − ff_matched) = -0.1553 ± 0.0017  [EM -0.0082 ± 0.0015]  [coh +0.0008 ± 0.0015]
+  Δ(trm_mixer − ff_matched) = +0.1219 ± 0.0011  [EM +0.9623 ± 0.0073]  [coh +0.0066 ± 0.0054]  ⚠ coherence_excess: 1/6 near-ties ⇒ robust p=0.062 (raw p=0.031)
+  Δ(trm_flat − ff_matched) = -0.0032 ± 0.0025  [EM -0.0022 ± 0.0032]  [coh -0.0011 ± 0.0036]
+
+=== n_givens=18 ===
+  [seed=0] trm_mixer=0.996  trm_mixer_nomix=0.583  trm_mixer_unsharedro=0.996  trm_mixer_nomix_unsharedro=0.584  trm_mixer_nomix_distinctw=0.583  trm_flat=0.754  ff_matched=0.762 (baseline=0.167)
+  [seed=1] trm_mixer=0.998  trm_mixer_nomix=0.582  trm_mixer_unsharedro=0.996  trm_mixer_nomix_unsharedro=0.582  trm_mixer_nomix_distinctw=0.583  trm_flat=0.758  ff_matched=0.761 (baseline=0.167)
+  [seed=2] trm_mixer=0.996  trm_mixer_nomix=0.583  trm_mixer_unsharedro=0.996  trm_mixer_nomix_unsharedro=0.581  trm_mixer_nomix_distinctw=0.583  trm_flat=0.758  ff_matched=0.761 (baseline=0.167)
+  [seed=3] trm_mixer=0.998  trm_mixer_nomix=0.582  trm_mixer_unsharedro=0.997  trm_mixer_nomix_unsharedro=0.584  trm_mixer_nomix_distinctw=0.581  trm_flat=0.761  ff_matched=0.759 (baseline=0.167)
+  [seed=4] trm_mixer=0.998  trm_mixer_nomix=0.583  trm_mixer_unsharedro=0.998  trm_mixer_nomix_unsharedro=0.584  trm_mixer_nomix_distinctw=0.584  trm_flat=0.761  ff_matched=0.759 (baseline=0.167)
+  [seed=5] trm_mixer=0.999  trm_mixer_nomix=0.583  trm_mixer_unsharedro=0.998  trm_mixer_nomix_unsharedro=0.582  trm_mixer_nomix_distinctw=0.582  trm_flat=0.760  ff_matched=0.760 (baseline=0.167)
+  majority_baseline: acc 0.1667 ± 0.0000
+   subset_baseline: EM  0.0020 ± 0.0000
+         trm_mixer: acc 0.9973 ± 0.0011
+   trm_mixer_nomix: acc 0.5825 ± 0.0006
+  trm_mixer_unsharedro: acc 0.9968 ± 0.0009
+  trm_mixer_nomix_unsharedro: acc 0.5829 ± 0.0013
+  trm_mixer_nomix_distinctw: acc 0.5826 ± 0.0013
+          trm_flat: acc 0.7587 ± 0.0026
+        ff_matched: acc 0.7602 ± 0.0012
+  Δ(trm_mixer − trm_mixer_nomix) = +0.4148 ± 0.0015  [EM +0.9552 ± 0.0218]  [coh +0.0469 ± 0.0144]
+  Δ(trm_mixer_nomix − ff_matched) = -0.1777 ± 0.0012  [EM +0.0000 ± 0.0000]  [coh +0.0001 ± 0.0000]  ⚠ coherence_excess: 6/6 near-ties ⇒ robust p=1.000 (raw p=0.031)
+  Δ(trm_mixer_nomix − trm_mixer_nomix_unsharedro) = -0.0003 ± 0.0013  [EM +0.0000 ± 0.0000]  [coh +0.0000 ± 0.0000]
+  Δ(trm_mixer − trm_mixer_unsharedro) = +0.0005 ± 0.0007  [EM +0.0048 ± 0.0102]  [coh -0.0108 ± 0.0135]
+  Δ(trm_mixer_unsharedro − trm_mixer_nomix_unsharedro) = +0.4140 ± 0.0016  [EM +0.9503 ± 0.0171]  [coh +0.0577 ± 0.0151]
+  Δ(trm_mixer_nomix − trm_mixer_nomix_distinctw) = -0.0001 ± 0.0010  [EM +0.0000 ± 0.0000]  [coh +0.0000 ± 0.0000]
+  Δ(trm_mixer_nomix_unsharedro − ff_matched) = -0.1773 ± 0.0020  [EM +0.0000 ± 0.0000]  [coh +0.0001 ± 0.0000]  ⚠ coherence_excess: 6/6 near-ties ⇒ robust p=1.000 (raw p=0.031)
+  Δ(trm_mixer − ff_matched) = +0.2371 ± 0.0021  [EM +0.9552 ± 0.0218]  [coh +0.0469 ± 0.0144]
+  Δ(trm_flat − ff_matched) = -0.0015 ± 0.0038  [EM +0.0002 ± 0.0004]  [coh +0.0002 ± 0.0004]
+
+=== n_givens=14 ===
+  [seed=0] trm_mixer=0.992  trm_mixer_nomix=0.491  trm_mixer_unsharedro=0.993  trm_mixer_nomix_unsharedro=0.491  trm_mixer_nomix_distinctw=0.487  trm_flat=0.666  ff_matched=0.674 (baseline=0.167)
+  [seed=1] trm_mixer=0.993  trm_mixer_nomix=0.490  trm_mixer_unsharedro=0.992  trm_mixer_nomix_unsharedro=0.490  trm_mixer_nomix_distinctw=0.492  trm_flat=0.668  ff_matched=0.668 (baseline=0.167)
+  [seed=2] trm_mixer=0.990  trm_mixer_nomix=0.491  trm_mixer_unsharedro=0.985  trm_mixer_nomix_unsharedro=0.491  trm_mixer_nomix_distinctw=0.490  trm_flat=0.670  ff_matched=0.668 (baseline=0.167)
+  [seed=3] trm_mixer=0.993  trm_mixer_nomix=0.490  trm_mixer_unsharedro=0.993  trm_mixer_nomix_unsharedro=0.491  trm_mixer_nomix_distinctw=0.491  trm_flat=0.671  ff_matched=0.670 (baseline=0.167)
+  [seed=4] trm_mixer=0.993  trm_mixer_nomix=0.491  trm_mixer_unsharedro=0.992  trm_mixer_nomix_unsharedro=0.492  trm_mixer_nomix_distinctw=0.489  trm_flat=0.671  ff_matched=0.671 (baseline=0.167)
+  [seed=5] trm_mixer=0.993  trm_mixer_nomix=0.490  trm_mixer_unsharedro=0.992  trm_mixer_nomix_unsharedro=0.491  trm_mixer_nomix_distinctw=0.490  trm_flat=0.667  ff_matched=0.668 (baseline=0.167)
+  majority_baseline: acc 0.1667 ± 0.0000
+   subset_baseline: EM  0.0020 ± 0.0000
+         trm_mixer: acc 0.9922 ± 0.0011
+   trm_mixer_nomix: acc 0.4906 ± 0.0005
+  trm_mixer_unsharedro: acc 0.9910 ± 0.0031
+  trm_mixer_nomix_unsharedro: acc 0.4909 ± 0.0007
+  trm_mixer_nomix_distinctw: acc 0.4897 ± 0.0016
+          trm_flat: acc 0.6687 ± 0.0021
+        ff_matched: acc 0.6698 ± 0.0023
+  Δ(trm_mixer − trm_mixer_nomix) = +0.5016 ± 0.0012  [EM +0.8932 ± 0.0186]  [coh +0.1380 ± 0.0137]
+  Δ(trm_mixer_nomix − ff_matched) = -0.1792 ± 0.0021  [EM +0.0000 ± 0.0000]  [coh +0.0000 ± 0.0000]  ⚠ coherence_excess: 6/6 near-ties ⇒ robust p=1.000 (raw p=0.031)
+  Δ(trm_mixer_nomix − trm_mixer_nomix_unsharedro) = -0.0003 ± 0.0006  [EM +0.0000 ± 0.0000]  [coh +0.0000 ± 0.0000]
+  Δ(trm_mixer − trm_mixer_unsharedro) = +0.0012 ± 0.0022  [EM +0.0155 ± 0.0319]  [coh -0.0132 ± 0.0225]
+  Δ(trm_mixer_unsharedro − trm_mixer_nomix_unsharedro) = +0.5002 ± 0.0031  [EM +0.8777 ± 0.0422]  [coh +0.1512 ± 0.0334]
+  Δ(trm_mixer_nomix − trm_mixer_nomix_distinctw) = +0.0009 ± 0.0019  [EM +0.0000 ± 0.0000]  [coh -0.0000 ± 0.0000]
+  Δ(trm_mixer_nomix_unsharedro − ff_matched) = -0.1789 ± 0.0021  [EM +0.0000 ± 0.0000]  [coh +0.0000 ± 0.0000]  ⚠ coherence_excess: 6/6 near-ties ⇒ robust p=1.000 (raw p=0.031)
+  Δ(trm_mixer − ff_matched) = +0.3224 ± 0.0025  [EM +0.8932 ± 0.0186]  [coh +0.1380 ± 0.0137]
+  Δ(trm_flat − ff_matched) = -0.0011 ± 0.0032  [EM +0.0000 ± 0.0000]  [coh +0.0000 ± 0.0000]
+
+Results : results/m33_sudoku_20260718T185456.json
+Curve   : results/m33_sudoku_20260718T185456_curve.csv
+Deltas  : results/m33_sudoku_20260718T185456_deltas.csv
+Params  : results/m33_sudoku_20260718T185456_params.csv
+  ✓ BUDGET PARITY: all matched arms within ±5% per cell.
+Plot    : skipped (matplotlib not installed; CSV holds the curve)
