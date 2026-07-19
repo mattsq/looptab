@@ -1,0 +1,898 @@
+<title>Does thinking longer help on tables? — looptab results</title>
+<style>
+  .viz-root {
+    --surface-1:      #fcfcfb;
+    --page:           #f9f9f7;
+    --text-primary:   #0b0b0b;
+    --text-secondary: #52514e;
+    --text-muted:     #898781;
+    --grid:           #e1e0d9;
+    --axis:           #c3c2b7;
+    --border:         rgba(11,11,11,0.10);
+    --good:           #0ca30c;
+
+    --ff:      #2a78d6; /* feedforward control — blue */
+    --flat:    #4a3aa7; /* flat weight-tied loop — violet */
+    --decoup:  #eb6834; /* decoupled / per-cell ablation — orange */
+    --mixer:   #e34948; /* tied cross-cell mixer — red (the headline arm) */
+    --untiedm: #1baf7a; /* untied mixer, budget-matched — aqua */
+    --untiedc: #008300; /* untied mixer, 7x ceiling (reference only) — green */
+    --neutral: #898781;
+  }
+  @media (prefers-color-scheme: dark) {
+    .viz-root {
+      --surface-1:      #1a1a19;
+      --page:           #0d0d0d;
+      --text-primary:   #ffffff;
+      --text-secondary: #c3c2b7;
+      --text-muted:     #898781;
+      --grid:           #2c2c2a;
+      --axis:           #383835;
+      --border:         rgba(255,255,255,0.10);
+      --good:           #0ca30c;
+
+      --ff:      #3987e5;
+      --flat:    #9085e9;
+      --decoup:  #d95926;
+      --mixer:   #e66767;
+      --untiedm: #199e70;
+      --untiedc: #22a022;
+      --neutral: #c3c2b7;
+    }
+  }
+  :root[data-theme="dark"] .viz-root {
+    --surface-1:      #1a1a19; --page: #0d0d0d; --text-primary:#ffffff;
+    --text-secondary: #c3c2b7; --text-muted:#898781; --grid:#2c2c2a; --axis:#383835;
+    --border: rgba(255,255,255,0.10);
+    --ff:#3987e5; --flat:#9085e9; --decoup:#d95926; --mixer:#e66767;
+    --untiedm:#199e70; --untiedc:#22a022; --neutral:#c3c2b7;
+  }
+  :root[data-theme="light"] .viz-root {
+    --surface-1:      #fcfcfb; --page: #f9f9f7; --text-primary:#0b0b0b;
+    --text-secondary: #52514e; --text-muted:#898781; --grid:#e1e0d9; --axis:#c3c2b7;
+    --border: rgba(11,11,11,0.10);
+    --ff:#2a78d6; --flat:#4a3aa7; --decoup:#eb6834; --mixer:#e34948;
+    --untiedm:#1baf7a; --untiedc:#008300; --neutral:#898781;
+  }
+
+  * { box-sizing: border-box; }
+  .viz-root {
+    font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+    background: var(--page);
+    color: var(--text-primary);
+    line-height: 1.55;
+    padding: 0 0 96px 0;
+  }
+  .wrap { max-width: 760px; margin: 0 auto; padding: 0 24px; }
+  .wrap-wide { max-width: 820px; margin: 0 auto; padding: 0 24px; }
+
+  header.hero {
+    padding: 88px 24px 56px;
+    border-bottom: 1px solid var(--border);
+    background: var(--surface-1);
+  }
+  .eyebrow {
+    font-size: 13px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase;
+    color: var(--text-muted); margin: 0 0 14px;
+  }
+  h1.title {
+    font-size: clamp(32px, 5vw, 46px); font-weight: 700; letter-spacing: -0.02em;
+    margin: 0 0 20px; color: var(--text-primary); max-width: 15ch;
+  }
+  .dek {
+    font-size: 19px; color: var(--text-secondary); max-width: 62ch; margin: 0 0 28px;
+  }
+  .meta-row {
+    display: flex; gap: 20px; flex-wrap: wrap; font-size: 13px; color: var(--text-muted);
+  }
+  .meta-row span { display:flex; align-items:center; gap:6px; }
+  .dot { width:6px; height:6px; border-radius:50%; background: var(--text-muted); display:inline-block; }
+
+  section.chapter { padding: 64px 24px; border-bottom: 1px solid var(--border); }
+  section.chapter:nth-of-type(even) { background: var(--surface-1); }
+  .chapter-num {
+    font-size: 13px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase;
+    color: var(--mixer); margin: 0 0 12px;
+  }
+  h2.claim {
+    font-size: clamp(24px, 3.4vw, 32px); font-weight: 700; letter-spacing: -0.015em;
+    margin: 0 0 20px; max-width: 22ch;
+  }
+  .body-text { font-size: 17px; color: var(--text-secondary); max-width: 68ch; }
+  .body-text p { margin: 0 0 16px; }
+  .body-text strong { color: var(--text-primary); }
+  .body-text code { background: var(--surface-1); border:1px solid var(--border); border-radius:4px; padding:1px 5px; font-size:0.92em; }
+  section.chapter:nth-of-type(even) .body-text code { background: var(--page); }
+
+  .chart-card {
+    margin: 28px 0 12px; background: var(--surface-1);
+    border: 1px solid var(--border); border-radius: 12px; padding: 20px 20px 8px;
+    overflow-x: auto;
+  }
+  section.chapter:nth-of-type(even) .chart-card { background: var(--page); }
+  .chart-title { font-size: 14px; font-weight: 600; color: var(--text-primary); margin: 0 0 2px; }
+  .chart-sub { font-size: 13px; color: var(--text-muted); margin: 0 0 12px; }
+  svg.chart { width: 100%; height: auto; display:block; min-width: 280px; }
+  .legend { display:flex; gap:16px; flex-wrap:wrap; margin: 10px 2px 4px; font-size: 12.5px; color: var(--text-secondary); }
+  .legend-item { display:flex; align-items:center; gap:6px; }
+  .swatch { width:10px; height:10px; border-radius:2px; display:inline-block; }
+
+  .rigor {
+    margin-top: 16px; padding: 12px 16px; border-left: 2px solid var(--axis);
+    font-size: 13.5px; color: var(--text-muted);
+  }
+  .rigor b { color: var(--text-secondary); font-weight: 600; }
+
+  .caveat {
+    margin-top: 14px; font-size: 14.5px; color: var(--text-secondary);
+    background: rgba(233,148,0,0.08); border: 1px solid rgba(233,148,0,0.25);
+    border-radius: 8px; padding: 10px 14px;
+  }
+  :root[data-theme="dark"] .caveat, @media (prefers-color-scheme: dark) { }
+  .caveat b { color: var(--text-primary); }
+
+  .hero-stat {
+    display:flex; align-items:baseline; gap:18px; flex-wrap:wrap;
+    margin: 24px 0 4px;
+  }
+  .hero-stat .from { font-size: 28px; font-weight: 600; color: var(--text-muted); }
+  .hero-stat .arrow { font-size: 22px; color: var(--text-muted); }
+  .hero-stat .to { font-size: 56px; font-weight: 700; letter-spacing: -0.02em; color: var(--mixer); }
+  .hero-stat .label { font-size: 14px; color: var(--text-secondary); flex-basis: 100%; }
+
+  .grid5 { display:grid; grid-template-columns: repeat(auto-fit,minmax(120px,1fr)); gap:14px; margin-top: 20px; }
+  .panel {
+    background: var(--surface-1); border:1px solid var(--border); border-radius:10px;
+    padding: 14px; text-align:center;
+  }
+  section.chapter:nth-of-type(even) .panel { background: var(--page); }
+  .panel .task { font-size: 12.5px; color: var(--text-muted); text-transform: uppercase; letter-spacing:.04em; margin-bottom:8px; }
+  .panel .figure { font-size: 22px; font-weight:700; }
+  .panel .status { font-size: 12px; margin-top:6px; font-weight:600; }
+  .panel .status.win { color: var(--good); }
+  .panel .status.tie { color: var(--text-muted); }
+
+  ul.summary { padding-left: 20px; font-size: 16px; color: var(--text-secondary); }
+  ul.summary li { margin-bottom: 10px; }
+  ul.summary b { color: var(--text-primary); }
+
+  .checklist-wrap { overflow-x:auto; margin-top: 28px; }
+  table.checklist { width:100%; border-collapse: collapse; font-size: 14.5px; min-width: 480px; }
+  table.checklist th { text-align:left; font-size:12px; text-transform:uppercase; letter-spacing:.04em;
+    color: var(--text-muted); font-weight:600; padding: 8px 14px 8px 0; border-bottom: 1px solid var(--axis); }
+  table.checklist td { padding: 12px 14px 12px 0; border-bottom: 1px solid var(--grid); color: var(--text-secondary); vertical-align:top; }
+  table.checklist td:first-child { color: var(--text-primary); font-weight:600; white-space:nowrap; }
+
+  .two-col { display:grid; grid-template-columns: 1fr 1fr; gap:16px; }
+  @media (max-width: 640px) { .two-col { grid-template-columns: 1fr; } }
+
+  footer.close {
+    padding: 56px 24px 40px; text-align:center; color: var(--text-muted); font-size: 13.5px;
+  }
+  footer.close a { color: var(--text-secondary); }
+
+  .tooltip-fixed { font-size: 11px; }
+</style>
+
+<div class="viz-root">
+
+<header class="hero">
+  <div class="wrap">
+    <p class="eyebrow">looptab &middot; results narrative</p>
+    <h1 class="title">Does "thinking longer" help a model that just fills in a table?</h1>
+    <p class="dek">
+      A research program spent thirty milestones testing whether <b>iterative latent
+      refinement</b> (the loop inside reasoning models like TRM and HRM) gives a small tabular
+      model an edge over a parameter-matched feedforward network with no loop at all. The
+      answer is a specific, evidence-backed <em>it depends</em>. This page covers the seven
+      findings that hold up.
+    </p>
+    <div class="meta-row">
+      <span><span class="dot"></span>29 milestones, ~2,000+ trained model runs</span>
+      <span><span class="dot"></span>every number below ships with its control and a paired sign test</span>
+      <span><span class="dot"></span>synthetic suite + 4 real datasets</span>
+    </div>
+  </div>
+</header>
+
+<!-- ============================================================ CHAPTER 1 -->
+<section class="chapter">
+  <div class="wrap">
+    <p class="chapter-num">Chapter 1</p>
+    <h2 class="claim">The question, and the rule that makes the answer trustworthy</h2>
+    <div class="body-text">
+      <p>
+        Models like TRM and HRM don't stop after one forward pass. They keep a hidden
+        "scratchpad" state and <b>refine it in a loop</b>: update the scratchpad, re-read an
+        answer from it, repeat, for a fixed number of steps. More refinement steps, the idea
+        goes, should get the model closer to reasoning than a single-shot guess.
+      </p>
+      <p>
+        That loop is also easy to fool yourself about. A loop with <var>N</var> steps and a
+        hidden state of size <var>h</var> has, roughly, the same capacity as a plain
+        feedforward network that is <var>N</var> layers deep. Any accuracy gain it shows could
+        just mean "it's secretly a deeper, wider network." Not "the loop does something a
+        non-recurrent network structurally can't."
+      </p>
+      <p>
+        So every experiment in this program follows one rule: <b>a recurrent result never ships
+        alone.</b> It always ships next to a <b>parameter-matched feedforward network</b> (same
+        weight budget, one forward pass, no loop) and, where relevant, a <b>depth-matched
+        stack</b> of the same block repeated without sharing weights. The number that matters
+        is never the loop's raw accuracy. It's the gap (Δ) between the loop and its matched
+        control, with enough seeds (≥5, usually 8&ndash;10) to run a paired sign test on that gap.
+      </p>
+    </div>
+    <div class="rigor">
+      <b>Why 8&ndash;10 seeds, not 5?</b> Five seeds is a variance floor, not a significance
+      floor: the exact two-sided binomial sign test can't reach p&lt;.05 with fewer than 6 seeds
+      (a unanimous 5/5 split still only gets p=.0625). Every "beats its control" claim on this
+      page that needs a real significance call uses 8 or 10 seeds so a unanimous result can
+      clear that bar. It's the same caution the NLP-reporting literature raises: a conclusion
+      can flip depending on how much search/compute went into reaching it.
+    </div>
+    <div class="body-text">
+      <p>
+        The testbed is a small synthetic suite with a difficulty knob and a known ground-truth
+        algorithm: <code>parity</code> (an irregular target buried in noise bits), an elementary
+        cellular automaton run for <var>T</var> steps (<code>iterated</code>, a target that
+        <em>is</em> an explicit multi-step algorithm), and CA variants run to a
+        <b>fixed point</b> (<code>converge</code>). Real tabular data comes later, through two
+        bridges: multi-label classification and multivariate forecasting.
+      </p>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================================ CHAPTER 2 -->
+<section class="chapter">
+  <div class="wrap">
+    <p class="chapter-num">Chapter 2</p>
+    <h2 class="claim">A loop built the obvious way is close to a deep net in disguise</h2>
+    <div class="body-text">
+      <p>
+        The simplest recurrent design updates one flat MLP over the <em>entire</em> row at
+        once: every step sees the whole table row as a single flattened vector. That design
+        does edge out a matched feedforward net on fixed-point targets (a real effect, see
+        Chapter 3). It's measurably more accurate cell-by-cell, and that per-cell edge holds
+        steady to growing as the row widens. On <em>whole-row</em> exact match specifically,
+        the edge looks like it shrinks. That's an artifact of how exact match compounds
+        per-cell accuracy across more cells, not a sign the underlying edge is disappearing.
+        Either way, it's dwarfed by what matters more (Chapter 4).
+      </p>
+    </div>
+    <div class="chart-card">
+      <p class="chart-title">Fixed-point CA task (<code>converge</code>) — exact-match accuracy, flat loop vs. matched feedforward</p>
+      <p class="chart-sub">Whole-row exact match (%) · 8 seeds · sign test 8/0 in the loop's favor at every width, p=.008</p>
+      <div id="chart-ch2"></div>
+      <div class="legend" id="legend-ch2"></div>
+    </div>
+    <div class="rigor">
+      <b>Rigor.</b> Params matched within budget contract at all three widths · exact two-sided
+      binomial sign test · the flat loop's edge over feedforward <b>grows</b> on per-cell token
+      accuracy (+0.5&thinsp;pt &rarr; +1.2&thinsp;pt &rarr; +4.5&thinsp;pt across w=24/32/48)
+      even as it shrinks on this whole-row EM view. That's an EM-floor compounding effect this
+      program's own adversarial review already flagged on an identical case, not evidence the
+      edge itself is vanishing · canonical run <code>m24_mixer_converge_20260703T012300</code>.
+    </div>
+  </div>
+</section>
+
+<!-- ============================================================ CHAPTER 3 -->
+<section class="chapter">
+  <div class="wrap">
+    <p class="chapter-num">Chapter 3</p>
+    <h2 class="claim">The mechanism that <em>is</em> real: refining every cell in one shared state buys whole-row coherence</h2>
+    <div class="body-text">
+      <p>
+        Isolate one design choice: does the loop refine <b>all output cells inside one shared
+        latent</b>, or does each cell get its <b>own independent latent</b> that never talks to
+        the others? On local fixed-point targets, the shared-latent version wins decisively on
+        whole-row exact match. Unusually for this program, the edge <b>grows</b> with model
+        size instead of shrinking or staying flat.
+      </p>
+    </div>
+    <div class="chart-card">
+      <p class="chart-title">Joint shared-state loop vs. per-cell independent-state loop</p>
+      <p class="chart-sub">Δ exact-match (percentage points), same task &amp; width, only the state-sharing changes · 10 seeds, 10/0 in favor of the shared state at every size, p=.002</p>
+      <div id="chart-ch3"></div>
+    </div>
+    <div class="rigor">
+      <b>Rigor.</b> "Deep + local" is necessary but not sufficient. The effect is absent on a
+      shallow or fully-dense task, and even within the deep+local CA family it only reproduces
+      on a specific hard-convergence subfamily. Other deep+local rules tested in this same
+      sweep are null (rule 140: Δ +0.01&thinsp;EM, a tie) or reversed (rule 232: Δ
+      &minus;0.11&thinsp;EM, favoring the decoupled arm) at the identical width. Canonical:
+      <code>m11_size_{small,base,large}</code>.
+    </div>
+  </div>
+</section>
+
+<!-- ============================================================ CHAPTER 4 -->
+<section class="chapter">
+  <div class="wrap">
+    <p class="chapter-num">Chapter 4</p>
+    <h2 class="claim">The pivot: what solves hard puzzles is cells talking to each other, not the loop</h2>
+    <div class="body-text">
+      <p>
+        Every result up to here used the flat, whole-row update. Swap it for an update that
+        lets each table cell attend to every other cell, a <b>cross-cell mixing</b> operator,
+        and the picture changes completely. On Sudoku, the canonical hard-reasoning benchmark
+        for this whole model family, the flat loop and the matched feedforward net both fail
+        outright on hard puzzles. The mixing loop solves most of them.
+      </p>
+    </div>
+    <div class="hero-stat">
+      <span class="from">0%</span><span class="arrow">&rarr;</span><span class="to">89.3%</span>
+      <span class="label">Hard Sudoku (14 givens), whole-puzzle exact match: feedforward and flat loop both fail outright; the cross-cell mixer solves it.</span>
+    </div>
+    <div class="chart-card">
+      <p class="chart-title">Sudoku (14 givens — the hardest tested difficulty) — whole-puzzle exact match</p>
+      <p class="chart-sub">6 seeds · mixer beats both flat loop and feedforward, 6/0, p=.031 · parameter budgets matched within &lt;1%</p>
+      <div id="chart-ch4a"></div>
+      <div class="legend" id="legend-ch4a"></div>
+    </div>
+    <div class="rigor">
+      <b>Rigor.</b> No untied-mixer control has been run on Sudoku itself, so this number alone
+      doesn't yet separate <em>recurrence</em> from the <em>mixing architecture</em>. That
+      isolation (below) was only built on <code>converge</code>. Treat "solves hard Sudoku" as
+      a mixer-architecture result pending the same control on Sudoku.
+    </div>
+    <div class="body-text" style="margin-top:8px;">
+      <p>
+        The obvious next question: is that a win for <b>recurrence</b>, or just for the
+        <b>mixing architecture</b>? The honest control is a mixing block stacked <var>N</var>
+        times <em>without</em> sharing weights, at the same parameter budget, run against the
+        weight-tied loop on the fixed-point CA task from Chapter 2 (the cleanest task where
+        that control exists).
+      </p>
+      <p>
+        The untied stack, at matched budget, already captures almost the entire win over
+        feedforward. The weight-tied loop keeps a real, budget-clean edge over it, but that
+        edge is the ordinary parameter-efficiency benefit of weight sharing, not a new
+        capability: give the untied stack ~7&times; the parameters and it fully closes the gap.
+      </p>
+    </div>
+    <div class="chart-card">
+      <p class="chart-title"><code>converge</code> exact match — architecture vs. recurrence, isolated</p>
+      <p class="chart-sub">Same mixing operator throughout; only weight-tying and budget change</p>
+      <div id="chart-ch4b"></div>
+      <div class="legend" id="legend-ch4b"></div>
+    </div>
+    <div class="caveat">
+      <b>Corrected finding, kept honest.</b> An earlier pass of this experiment credited the
+      win to "the loop doing algorithmic hard-solving." An adversarial re-check of the
+      controls overturned that: the defensible claim is narrower. A cross-cell
+      <b>mixing architecture</b> does the hard-solving; weight-tying only makes it cheaper to
+      deploy at a given accuracy. This walk-back counts as a first-class result, not a
+      footnote; see <code>results/log/m24.md</code> for the full correction trail.
+    </div>
+    <div class="rigor">
+      <b>Rigor.</b> Untied-matched control within ±5% of the tied loop's budget; the 7&times;
+      arm is an explicit, labeled capacity ceiling, not a fair control · all deltas 8/0,
+      p=.008 · canonical: <code>m24e_converge_mixer_untied_20260703T235935</code>.
+    </div>
+  </div>
+</section>
+
+<!-- ============================================================ CHAPTER 5 -->
+<section class="chapter">
+  <div class="wrap-wide">
+    <p class="chapter-num">Chapter 5</p>
+    <h2 class="claim">Where mixing helps: table cells that are coupled to each other</h2>
+    <div class="body-text">
+      <p>
+        Cross-cell mixing isn't a free lunch. It helps when the output cells depend on each
+        other, whether that coupling is <b>local</b> (a ring of neighbors) or <b>dense</b>
+        (every cell coupled to every other cell, as in a Hopfield-style attractor network). It
+        does nothing, or actively hurts, when the outputs are <b>exchangeable</b>: independent
+        quantities with no structure to propagate.
+      </p>
+    </div>
+    <div class="grid5" id="ch5-panels"></div>
+    <p style="font-size:13px;color:var(--text-muted);margin:14px 2px 0;">
+      Note: the first four panels are percentage-point differences in EM or F1. The forecasting
+      panel is a relative reduction in mean-squared error. Different units, comparable in
+      direction and significance, not in raw magnitude.
+    </p>
+    <div class="rigor" style="margin-top:14px;">
+      <b>Rigor.</b> One changed variable (the mixing operator) per comparison, 8&ndash;10 seeds
+      each, exact sign test. Sources: <code>m24_mixer_converge</code>,
+      <code>m24c_hopfield_mixer</code>, <code>m24d_multiparity_mixer</code>,
+      <code>m25_mixer_multilabel_yeast</code>, <code>m26_weather_forecast</code>.
+    </div>
+  </div>
+</section>
+
+<!-- ============================================================ CHAPTER 6 -->
+<section class="chapter">
+  <div class="wrap">
+    <p class="chapter-num">Chapter 6</p>
+    <h2 class="claim">Two real-data bridges, and they land on opposite sides of that line</h2>
+    <div class="body-text">
+      <p>
+        Synthetic findings are only useful if they survive contact with real tabular data. Two
+        real bridges were run, chosen to fall on either side of the Chapter 5 divide.
+      </p>
+    </div>
+    <div class="two-col">
+      <div class="chart-card" style="margin-top:0;">
+        <p class="chart-title">Real multi-label classification</p>
+        <p class="chart-sub">micro-F1, mixer vs. matched feedforward &middot; 10 seeds, both ties</p>
+        <div id="chart-ch6a"></div>
+        <div class="legend" id="legend-ch6a"></div>
+      </div>
+      <div class="chart-card" style="margin-top:0;">
+        <p class="chart-title">Real multivariate forecasting</p>
+        <p class="chart-sub">MSE reduction, mixer vs. matched feedforward &middot; 10 backtest blocks, both p&lt;.03*</p>
+        <div id="chart-ch6b"></div>
+        <div class="legend" id="legend-ch6b"></div>
+      </div>
+    </div>
+    <div class="body-text" style="margin-top:20px;">
+      <p>
+        <b>Negative on multi-label:</b> a naive feature-to-label reshape has no shared
+        input/output structure for cells to propagate across. Labels are just a flat output
+        vector, not cells on a shared grid. The mixer ties a plain joint MLP on micro-F1 and
+        accuracy on two datasets; every mixer-specific edge that looked real was an
+        exact-match artifact of the label-combination distribution, and it disappeared under F1.
+      </p>
+      <p>
+        <b>Positive on forecasting:</b> multivariate time series supply the structure
+        multi-label lacked: variable <var>i</var> on the input is the same variable
+        <var>i</var> on the output, a shared cell topology. There the cross-variable mixer
+        beats a matched MLP on MSE, and the edge <b>grows</b> with the number of coupled
+        variables, the clearest real-data positive in the whole program. A follow-up sweep
+        pushed the forecast horizon from 96 steps out to 720. The win <b>holds at every
+        horizon</b> on both datasets, never reversing, and on <code>weather</code> it keeps
+        growing the further out the model has to predict.
+      </p>
+    </div>
+    <div class="chart-card">
+      <p class="chart-title">Forecast horizon sweep — MSE reduction, mixer vs. matched feedforward</p>
+      <p class="chart-sub">96&ndash;720-step horizon &middot; 10 backtest blocks per point</p>
+      <div id="chart-ch6c"></div>
+      <div class="legend" id="legend-ch6c"></div>
+    </div>
+    <div class="rigor">
+      <b>Rigor.</b> Multi-label: 10-fold CV, micro+macro F1, 2 datasets (<code>yeast</code>,
+      <code>scene</code>), both ties. Forecasting: 2 datasets (<code>ETTh1</code>,
+      <code>Weather</code>), MSE/MAE/R&sup2;, both significant at 96 steps and horizon-robust out
+      to 720. <b>*</b>The forecasting sign test is indicative, not clean: the 10 backtest blocks
+      have disjoint test windows but <em>nested/overlapping training windows</em>, so the
+      per-block deltas are correlated rather than independent. The exact binomial p-value is
+      anti-conservative. The effect is consistent across easy and hard blocks, but treat the
+      p-value as suggestive. On the horizon sweep, the <code>weather</code> h=720 point is a
+      raw mean, and one hard backtest block inflates it roughly 2&times;: the direction of
+      growth survives on the block median, the magnitude of that single point doesn't. There's
+      also an open confound: the mixer arms use a per-cell <em>shared</em> readout, while the
+      flat/feedforward arms use an <em>unshared</em> readout that balloons with horizon. At
+      long horizons some of this win may be shared-readout efficiency rather than cross-cell
+      mixing, and no run yet isolates the two (the architecture-vs-recurrence isolation
+      Chapter 4 has for <code>converge</code> doesn't exist here). Canonical:
+      <code>m30_{etth1,weather}_h{192,336,720}</code>.
+    </div>
+  </div>
+</section>
+
+<!-- ============================================================ CHAPTER 7 -->
+<section class="chapter">
+  <div class="wrap">
+    <p class="chapter-num">Chapter 7</p>
+    <h2 class="claim">The honest ceiling: it never finds a real fixed point, and a hierarchy wasn't earned</h2>
+    <div class="body-text">
+      <p>
+        Two findings bound how far to trust the loop, even in its winning regime. First,
+        <b>introspection</b>: even where the loop wins, its latent state doesn't settle into a
+        fixed point across refinement steps. The residual between steps stays large, and
+        unrolling past training length makes it worse, not better. It behaves like a deep
+        network computing in stages, not an algorithm converging to an answer.
+      </p>
+    </div>
+    <div class="chart-card">
+      <p class="chart-title">Iterated-CA task — accuracy vs. test-time loop count, trained at 4 steps</p>
+      <p class="chart-sub">The same shape of chart that motivated this whole research program — run on our own task, it goes the other way</p>
+      <div id="chart-ch7-unroll"></div>
+    </div>
+    <div class="rigor">
+      <b>Rigor.</b> The ARC-Prize HRM autopsy, the paper that set this whole program's "test the
+      loop before the hierarchy" approach, found that giving HRM one extra refinement loop
+      nearly <b>doubled</b> its accuracy (18.6%&rarr;35.5%), with further loops adding
+      diminishing-but-positive returns (8 loops: 38.1%; 16 loops: 39.0%). The identical question
+      asked here (same model, same task, only the number of test-time loops changes) gives the
+      opposite shape: accuracy peaks at the trained loop count (97.2%) and collapses toward
+      chance the moment test-time loops exceed it, then never recovers. Deeper training depths
+      don't even reach a peak to collapse from; they hit a separate learnability wall first,
+      unrelated to this effect. Canonical: <code>m1_iterated_extrapolation_20260620T023255</code>.
+    </div>
+    <div class="body-text" style="margin-top:20px;">
+      <p>
+        Second, the <b>hierarchy question</b>: the "high-level slow / low-level fast" split
+        that HRM introduced. The instinct to build a two-timescale version of this loop was
+        tested against its own falsification criterion first, the way the original ARC-Prize
+        post-mortem on HRM recommended: only add the second timescale if the single loop
+        provably plateaus below the target <em>at equal training compute</em>, in a way a
+        feedforward control doesn't share. It did plateau. But adding more training data, not
+        a second timescale, closed the gap:
+      </p>
+    </div>
+    <div class="chart-card">
+      <p class="chart-title">Two-timescale fixed-point task — exact match vs. training-set size</p>
+      <p class="chart-sub">Weight-tied loop vs. matched feedforward, same architecture, only training data grows</p>
+      <div id="chart-ch7"></div>
+      <div class="legend" id="legend-ch7"></div>
+    </div>
+    <div class="body-text" style="margin-top:8px;">
+      <p>
+        At 64k training rows the single-timescale loop <b>solves</b> the task outright (99.0%
+        exact match). The apparent need for a hierarchy was a sample-size wall shared by the
+        feedforward control, not a timescale-specific deficit only a hierarchy could fix, so
+        the hierarchical architecture was <b>not built</b>. Building it anyway would have
+        repeated the exact mistake the HRM autopsy diagnosed: adding structure before proving
+        the simpler model can't already do the job.
+      </p>
+    </div>
+    <div class="rigor">
+      <b>Rigor.</b> All arms trained to train-accuracy ≈1.0 (equal compute, not just equal
+      epochs) before comparing · canonical: <code>m18g_nested_equalcompute</code>,
+      <code>m18h_nested_data16k</code>, <code>m18j_nested_data64k</code>.
+    </div>
+  </div>
+</section>
+
+<!-- ============================================================ CLOSING -->
+<section class="chapter" style="border-bottom:none;">
+  <div class="wrap">
+    <p class="chapter-num">In one page</p>
+    <h2 class="claim">What this loop buys on tabular data, and what it doesn't</h2>
+    <div class="two-col">
+      <div class="body-text">
+        <p style="color:var(--text-primary); font-weight:600; margin-bottom:12px;">It buys</p>
+        <ul class="summary">
+          <li><b>Whole-row coherence</b> from refining all outputs in one shared latent state, growing with model size, on local fixed-point targets.</li>
+          <li><b>Hard constraint-satisfaction solving</b> (Sudoku, ring/fixed-point CA) once the update lets cells mix: a real, large, growing-with-difficulty win over a matched MLP.</li>
+          <li><b>A generalization win on real multivariate forecasting</b>: the mixer fits training data worse but tests better, the signature of a better inductive bias, not overfitting.</li>
+          <li><b>Parameter efficiency from weight-tying</b>: a real, if modest, edge over an untied stack at matched budget.</li>
+        </ul>
+      </div>
+      <div class="body-text">
+        <p style="color:var(--text-primary); font-weight:600; margin-bottom:12px;">It doesn't buy</p>
+        <ul class="summary">
+          <li>A capability an <b>untied</b> version of the same mixing architecture lacks, once capacity is matched. The win is the architecture, not the recurrence.</li>
+          <li>A literal converging fixed point: the trained loop's latent state doesn't contract, even where it wins outright.</li>
+          <li><b>Depth-extrapolation</b>: more test-time refinement steps do not recover longer computations than it was trained on.</li>
+          <li>Any edge on <b>exchangeable features</b> or real multi-label classification: tasks with no shared input/output cell structure for cells to propagate across.</li>
+          <li>Justification for a hierarchical (two-timescale) extension. The one instance tested was a data wall, not a case for a hierarchy.</li>
+        </ul>
+      </div>
+    </div>
+    <div class="checklist-wrap">
+      <table class="checklist">
+        <tr><th>Reporting practice</th><th>What this program actually did</th></tr>
+        <tr><td>Seeds</td><td>≥5 for variance bands; 8&ndash;10 wherever a significance call is the point (5/5 unanimous still can't clear p&lt;.05 on the exact sign test).</td></tr>
+        <tr><td>Controls</td><td>Every recurrent number ships against a parameter-matched feedforward and, where relevant, a depth-matched untied stack. Never a lone recurrent score.</td></tr>
+        <tr><td>Budget matching</td><td>Parameter counts matched within a declared tolerance (typically &plusmn;5%); exceptions are labeled explicitly as ceilings, not silently absorbed.</td></tr>
+        <tr><td>Determinism</td><td>Data and training are a pure function of (config, seed); single-thread pinned for the 3-D matmul (mixer) arms so results are bit-reproducible.</td></tr>
+        <tr><td>Self-correction</td><td>Overclaims found by later or adversarial review stay visible as corrections in <code>results/log/*.md</code> rather than being quietly edited away. Five of this page's own claims were corrected this way.</td></tr>
+        <tr><td>Traceability</td><td>Every number on this page cites the exact dated run file it was read from.</td></tr>
+      </table>
+    </div>
+  </div>
+</section>
+
+<footer class="close">
+  <div class="wrap">
+    Every figure on this page is a direct read of a tracked CSV under <code>results/</code>,
+    each traceable to a specific dated run and its git SHA. Full milestone-by-milestone
+    evidence, including every adversarial correction, lives in <code>results/LOG.md</code>.
+  </div>
+</footer>
+
+</div>
+
+<script>
+(function () {
+  const svgNS = 'http://www.w3.org/2000/svg';
+  function el(tag, attrs, parent) {
+    const e = document.createElementNS(svgNS, tag);
+    for (const k in attrs) e.setAttribute(k, attrs[k]);
+    if (parent) parent.appendChild(e);
+    return e;
+  }
+  function cssVar(name) {
+    return getComputedStyle(document.querySelector('.viz-root')).getPropertyValue(name).trim();
+  }
+  function fmtPct(v, digits) {
+    digits = digits === undefined ? 1 : digits;
+    return (v * 100).toFixed(digits) + '%';
+  }
+  function fmtPts(v, digits) {
+    digits = digits === undefined ? 1 : digits;
+    const s = (v * 100).toFixed(digits);
+    return (v >= 0 ? '+' : '') + s + ' pts';
+  }
+
+  // Generic grouped bar chart. values may be negative (baseline = 0 line).
+  function groupedBar(containerId, opts) {
+    const container = document.getElementById(containerId);
+    const width = 720, height = opts.height || 340;
+    const marginLeft = 54, marginRight = 14, marginTop = 14, marginBottom = 46;
+    const plotW = width - marginLeft - marginRight;
+    const plotH = height - marginTop - marginBottom;
+    const cats = opts.categories;
+    const series = opts.series;
+    const nCats = cats.length, nSeries = series.length;
+    const groupGap = nCats > 1 ? 30 : 0;
+    const groupWidth = (plotW - groupGap * Math.max(nCats - 1, 0)) / nCats;
+    const barGap = 3;
+    const barWidth = Math.min(26, (groupWidth - barGap * (nSeries - 1)) / nSeries);
+    const usedGroupWidth = barWidth * nSeries + barGap * (nSeries - 1);
+
+    let yMin = opts.yMin, yMax = opts.yMax;
+    if (yMin === undefined || yMax === undefined) {
+      let lo = 0, hi = 0;
+      cats.forEach((c, ci) => series.forEach(s => {
+        const v = s.values[ci];
+        if (v < lo) lo = v; if (v > hi) hi = v;
+      }));
+      yMin = opts.yMin !== undefined ? opts.yMin : lo;
+      yMax = opts.yMax !== undefined ? opts.yMax : hi;
+    }
+    const yRange = yMax - yMin;
+    const yScale = v => marginTop + plotH - ((v - yMin) / yRange) * plotH;
+    const zeroY = yScale(0);
+
+    const svg = el('svg', { class: 'chart', viewBox: `0 0 ${width} ${height}` }, container);
+
+    // gridlines
+    const ticks = opts.yTicks || 5;
+    for (let i = 0; i <= ticks; i++) {
+      const v = yMin + (yRange * i) / ticks;
+      const y = yScale(v);
+      el('line', { x1: marginLeft, x2: width - marginRight, y1: y, y2: y, stroke: 'var(--grid)', 'stroke-width': 1 }, svg);
+      const label = opts.yFmt ? opts.yFmt(v) : v.toFixed(1);
+      el('text', { x: marginLeft - 8, y: y + 4, 'text-anchor': 'end', 'font-size': 12, fill: 'var(--text-muted)' }, svg).textContent = label;
+    }
+    // baseline (zero) axis, heavier
+    el('line', { x1: marginLeft, x2: width - marginRight, y1: zeroY, y2: zeroY, stroke: 'var(--axis)', 'stroke-width': 1 }, svg);
+
+    cats.forEach((cat, ci) => {
+      const groupX = marginLeft + ci * (groupWidth + groupGap) + (groupWidth - usedGroupWidth) / 2;
+      let lastLabelY = null, lastLabelX = null;
+      series.forEach((s, si) => {
+        const v = s.values[ci];
+        if (v === null || v === undefined) return;
+        const x = groupX + si * (barWidth + barGap);
+        const yTop = yScale(Math.max(v, 0));
+        const yBase = yScale(Math.min(v, 0));
+        const r = Math.min(4, barWidth / 2);
+        // rounded top (or bottom if negative) rect via path
+        const isPos = v >= 0;
+        let d;
+        if (isPos) {
+          d = `M${x},${yBase} L${x},${yTop + r} Q${x},${yTop} ${x + r},${yTop} L${x + barWidth - r},${yTop} Q${x + barWidth},${yTop} ${x + barWidth},${yTop + r} L${x + barWidth},${yBase} Z`;
+        } else {
+          const yb = yScale(v);
+          d = `M${x},${zeroY} L${x},${yb - r} Q${x},${yb} ${x + r},${yb} L${x + barWidth - r},${yb} Q${x + barWidth},${yb} ${x + barWidth},${yb - r} L${x + barWidth},${zeroY} Z`;
+        }
+        const bar = el('path', { d, fill: s.color }, svg);
+        const title = el('title', {}, bar);
+        title.textContent = `${s.label} — ${cat.label}: ${opts.valueFmt ? opts.valueFmt(v) : v}`;
+        if (opts.showValues) {
+          const labelX = x + barWidth / 2;
+          const labelY = isPos ? yTop - 6 : yScale(v) + 14;
+          // declutter: skip a label that would collide with the previous one in this group
+          const collides = lastLabelY !== null && Math.abs(labelY - lastLabelY) < 13 && Math.abs(labelX - lastLabelX) < barWidth * 1.6;
+          if (!collides) {
+            el('text', {
+              x: labelX, y: labelY, 'text-anchor': 'middle',
+              'font-size': 12, 'font-weight': 600, fill: 'var(--text-primary)'
+            }, svg).textContent = opts.valueFmt ? opts.valueFmt(v) : v;
+            lastLabelY = labelY; lastLabelX = labelX;
+          }
+        }
+      });
+      const anchor = nCats === 1 ? 'middle' : (ci === 0 ? 'start' : (ci === nCats - 1 ? 'end' : 'middle'));
+      const labelX = anchor === 'start' ? groupX : (anchor === 'end' ? groupX + usedGroupWidth : groupX + usedGroupWidth / 2);
+      el('text', {
+        x: labelX, y: height - marginBottom + 20, 'text-anchor': anchor,
+        'font-size': 12.5, fill: 'var(--text-secondary)'
+      }, svg).textContent = cat.label;
+    });
+
+    if (opts.legendId) {
+      const lg = document.getElementById(opts.legendId);
+      series.forEach(s => {
+        const item = document.createElement('span');
+        item.className = 'legend-item';
+        item.innerHTML = `<span class="swatch" style="background:${s.color}"></span>${s.label}`;
+        lg.appendChild(item);
+      });
+    }
+  }
+
+  // Line chart for 2 series over ordinal x categories.
+  function lineChart(containerId, opts) {
+    const container = document.getElementById(containerId);
+    const width = 720, height = opts.height || 320;
+    const marginLeft = 54, marginRight = 20, marginTop = 20, marginBottom = 46;
+    const plotW = width - marginLeft - marginRight;
+    const plotH = height - marginTop - marginBottom;
+    const cats = opts.categories;
+    const nCats = cats.length;
+    const xScale = i => marginLeft + (nCats === 1 ? plotW / 2 : (plotW * i) / (nCats - 1));
+    const yMin = opts.yMin, yMax = opts.yMax;
+    const yRange = yMax - yMin;
+    const yScale = v => marginTop + plotH - ((v - yMin) / yRange) * plotH;
+
+    const svg = el('svg', { class: 'chart', viewBox: `0 0 ${width} ${height}` }, container);
+
+    const ticks = opts.yTicks || 4;
+    for (let i = 0; i <= ticks; i++) {
+      const v = yMin + (yRange * i) / ticks;
+      const y = yScale(v);
+      el('line', { x1: marginLeft, x2: width - marginRight, y1: y, y2: y, stroke: 'var(--grid)', 'stroke-width': 1 }, svg);
+      el('text', { x: marginLeft - 8, y: y + 4, 'text-anchor': 'end', 'font-size': 12, fill: 'var(--text-muted)' }, svg).textContent = opts.yFmt ? opts.yFmt(v) : v;
+    }
+    el('line', { x1: marginLeft, x2: width - marginRight, y1: marginTop + plotH, y2: marginTop + plotH, stroke: 'var(--axis)', 'stroke-width': 1 }, svg);
+
+    opts.series.forEach(s => {
+      const pts = s.values.map((v, i) => [xScale(i), yScale(v)]);
+      const d = pts.map((p, i) => (i === 0 ? 'M' : 'L') + p[0] + ',' + p[1]).join(' ');
+      el('path', { d, fill: 'none', stroke: s.color, 'stroke-width': 2, 'stroke-linejoin': 'round', 'stroke-linecap': 'round' }, svg);
+      pts.forEach((p, i) => {
+        const dot = el('circle', { cx: p[0], cy: p[1], r: 5, fill: s.color, stroke: 'var(--surface-1)', 'stroke-width': 2 }, svg);
+        const title = el('title', {}, dot);
+        title.textContent = `${s.label} — ${cats[i].label}: ${opts.valueFmt ? opts.valueFmt(s.values[i]) : s.values[i]}`;
+      });
+    });
+
+    cats.forEach((c, i) => {
+      const anchor = i === 0 ? 'start' : (i === nCats - 1 ? 'end' : 'middle');
+      el('text', { x: xScale(i), y: marginTop + plotH + 22, 'text-anchor': anchor, 'font-size': 12.5, fill: 'var(--text-secondary)' }, svg).textContent = c.label;
+    });
+
+    if (opts.legendId) {
+      const lg = document.getElementById(opts.legendId);
+      opts.series.forEach(s => {
+        const item = document.createElement('span');
+        item.className = 'legend-item';
+        item.innerHTML = `<span class="swatch" style="background:${s.color}"></span>${s.label}`;
+        lg.appendChild(item);
+      });
+    }
+  }
+
+  function ready(fn) {
+    if (document.readyState !== 'loading') fn(); else document.addEventListener('DOMContentLoaded', fn);
+  }
+
+  ready(function () {
+    const c = getComputedStyle(document.querySelector('.viz-root'));
+    const V = name => c.getPropertyValue(name).trim();
+
+    // ---- Chapter 2: converge EM, ff vs flat, w=24/32/48 ----
+    groupedBar('chart-ch2', {
+      categories: [{label:'w=24'}, {label:'w=32'}, {label:'w=48'}],
+      series: [
+        { key:'ff', label:'Feedforward (matched)', color: V('--ff'), values: [0.643, 0.300, 0.0225] },
+        { key:'flat', label:'Flat loop', color: V('--flat'), values: [0.785, 0.438, 0.105] },
+      ],
+      yMin: 0, yMax: 1, yFmt: v => (v*100).toFixed(0)+'%', valueFmt: v => fmtPct(v),
+      showValues: true, legendId: 'legend-ch2'
+    });
+
+    // ---- Chapter 3: joint - decoupled EM delta vs model size ----
+    lineChart('chart-ch3', {
+      categories: [{label:'Small (6.3k)'}, {label:'Base (16.6k)'}, {label:'Large (49.6k)'}],
+      series: [{ key:'delta', label:'Δ exact match, shared-state − per-cell-state', color: V('--flat'), values: [0.079, 0.397, 0.659] }],
+      yMin: 0, yMax: 0.75, yTicks: 5, yFmt: v => '+'+(v*100).toFixed(0)+'pt',
+      valueFmt: v => fmtPts(v)
+    });
+
+    // ---- Chapter 4a: Sudoku EM, ff/flat/mixer ----
+    groupedBar('chart-ch4a', {
+      categories: [{label:'Sudoku, 14 givens'}],
+      series: [
+        { key:'ff', label:'Feedforward (matched)', color: V('--ff'), values: [0.0] },
+        { key:'flat', label:'Flat loop', color: V('--flat'), values: [0.0] },
+        { key:'mixer', label:'Cross-cell mixer (tied loop)', color: V('--mixer'), values: [0.893] },
+      ],
+      yMin: 0, yMax: 1, height: 300, yFmt: v => (v*100).toFixed(0)+'%', valueFmt: v => fmtPct(v),
+      showValues: true, legendId: 'legend-ch4a'
+    });
+
+    // ---- Chapter 4b: converge EM, ff / untied-matched / tied-mixer / untied-ceiling ----
+    groupedBar('chart-ch4b', {
+      categories: [{label:'w=24'}, {label:'w=32'}, {label:'w=48'}],
+      series: [
+        { key:'ff', label:'Feedforward (matched)', color: V('--ff'), values: [0.643, 0.300, 0.0225] },
+        { key:'untiedm', label:'Mixer, untied (budget-matched)', color: V('--untiedm'), values: [0.955, 0.902, 0.676] },
+        { key:'mixer', label:'Mixer, tied (weight-shared loop)', color: V('--mixer'), values: [0.988, 0.976, 0.964] },
+        { key:'untiedc', label:'Mixer, untied (7× params, reference ceiling)', color: V('--untiedc'), values: [0.979, 0.965, 0.917] },
+      ],
+      yMin: 0, yMax: 1, yFmt: v => (v*100).toFixed(0)+'%', valueFmt: v => fmtPct(v),
+      legendId: 'legend-ch4b'
+    });
+
+    // ---- Chapter 5: 5-task dividing line panels ----
+    // `value` is always signed so positive = favors the mixer; `unit` picks how it's displayed
+    // (fmt is always derived from value, never hardcoded separately, so the two can't drift apart).
+    const ch5 = [
+      { task: 'Ring CA (converge)', value: 0.676, unit: 'em', win: true, note: 'local coupling' },
+      { task: 'Dense Hopfield net', value: 0.454, unit: 'em', win: true, note: 'dense coupling' },
+      { task: 'Independent parities', value: -0.508, unit: 'em', win: false, note: 'exchangeable, no advantage' },
+      { task: 'Real multi-label (yeast)', value: -0.005, unit: 'f1', win: false, note: 'no shared topology, tie' },
+      { task: 'Real forecasting (weather)', value: 0.483, unit: 'mse_reduction', win: true, note: 'shared topology' },
+    ];
+    function fmtCh5(d) {
+      if (d.unit === 'mse_reduction') return '−' + (d.value * 100).toFixed(0) + '% MSE';
+      const pts = Math.abs(d.value * 100).toFixed(1);
+      const label = d.unit === 'em' ? 'pts EM' : 'pts F1';
+      return (d.value >= 0 ? '+' : '−') + pts + ' ' + label;
+    }
+    const panelsEl = document.getElementById('ch5-panels');
+    ch5.forEach(d => {
+      const fmt = fmtCh5(d);
+      const p = document.createElement('div');
+      p.className = 'panel';
+      p.innerHTML = `<div class="task">${d.task}</div>
+        <div class="figure" style="color:${d.win ? V('--good') : V('--text-muted')}">${fmt}</div>
+        <div class="status ${d.win ? 'win' : 'tie'}">${d.win ? '▲ mixer wins' : (d.value < -0.05 ? 'no advantage' : 'statistical tie')}</div>
+        <div style="font-size:11.5px;color:${V('--text-muted')};margin-top:4px;">${d.note}</div>`;
+      panelsEl.appendChild(p);
+    });
+
+    // ---- Chapter 6a: multilabel micro-F1, ff vs mixer, 2 datasets ----
+    groupedBar('chart-ch6a', {
+      categories: [{label:'yeast'}, {label:'scene'}],
+      series: [
+        { key:'ff', label:'Feedforward (matched)', color: V('--ff'), values: [0.590, 0.763] },
+        { key:'mixer', label:'Mixer', color: V('--mixer'), values: [0.584, 0.758] },
+      ],
+      yMin: 0, yMax: 0.9, height: 300, yFmt: v => (v*100).toFixed(0)+'%', valueFmt: v => fmtPct(v,1),
+      showValues: true, legendId: 'legend-ch6a'
+    });
+    // ---- Chapter 6b: forecasting MSE reduction ----
+    groupedBar('chart-ch6b', {
+      categories: [{label:'ETTh1'}, {label:'Weather'}],
+      series: [
+        { key:'mixer', label:'Mixer MSE reduction vs. feedforward', color: V('--mixer'), values: [0.206, 0.483] },
+      ],
+      yMin: 0, yMax: 0.55, height: 300, yFmt: v => (v*100).toFixed(0)+'%', valueFmt: v => '−'+(v*100).toFixed(0)+'%',
+      showValues: true, legendId: 'legend-ch6b'
+    });
+    // ---- Chapter 6c: forecast horizon sweep, % MSE reduction, mixer vs ff ----
+    lineChart('chart-ch6c', {
+      categories: [{label:'h=96'}, {label:'h=192'}, {label:'h=336'}, {label:'h=720'}],
+      series: [
+        { key:'etth1', label:'ETTh1', color: V('--ff'), values: [0.206, 0.228, 0.148, 0.190] },
+        { key:'weather', label:'Weather', color: V('--mixer'), values: [0.483, 0.434, 0.446, 0.603] },
+      ],
+      yMin: 0, yMax: 0.7, yTicks: 5, yFmt: v => (v*100).toFixed(0)+'%',
+      valueFmt: v => '−'+(v*100).toFixed(0)+'%', legendId: 'legend-ch6c'
+    });
+
+    // ---- Chapter 7: accuracy vs test-time loop count, trained at R=4 ----
+    lineChart('chart-ch7-unroll', {
+      categories: [{label:'R=4 (trained)'}, {label:'R=6'}, {label:'R=8'}, {label:'R=10'}, {label:'R=12'}],
+      series: [
+        { key:'loop', label:'Weight-tied loop (trm_nods)', color: V('--flat'), values: [0.972, 0.549, 0.525, 0.514, 0.517] },
+      ],
+      yMin: 0.4, yMax: 1.0, yTicks: 4, yFmt: v => (v*100).toFixed(0)+'%',
+      valueFmt: v => fmtPct(v)
+    });
+
+    // ---- Chapter 7: nested_converge EM vs data size, loop vs ff ----
+    lineChart('chart-ch7', {
+      categories: [{label:'4k rows'}, {label:'16k rows'}, {label:'64k rows'}],
+      series: [
+        { key:'ff', label:'Feedforward (matched)', color: V('--ff'), values: [0.714, 0.900, 0.969] },
+        { key:'loop', label:'Weight-tied loop', color: V('--flat'), values: [0.750, 0.925, 0.990] },
+      ],
+      yMin: 0.6, yMax: 1.0, yTicks: 4, yFmt: v => (v*100).toFixed(0)+'%',
+      valueFmt: v => fmtPct(v), legendId: 'legend-ch7'
+    });
+  });
+})();
+</script>
