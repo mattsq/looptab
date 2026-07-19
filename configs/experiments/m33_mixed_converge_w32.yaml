@@ -1,0 +1,112 @@
+# M33 — port the M31/M32 shared-readout / channel-independence DECOMPOSITION to the synthetic
+# mixer-win task `mixed_converge` (w=32). Same lean recipe as the baseline (m28a_mixed_converge_mixer.yaml); the ONLY change is the
+# 7-arm decomposition set (adds trm_mixer_nomix / _unsharedro / _nomix_unsharedro /
+# _nomix_distinctw) budget-matched to trm_flat, to measure whether the mixer win here is genuine
+# token-MIXING (expected — the mirror-image of forecasting, where mixing was net harmful) or the
+# shared-readout / channel-independent parameterization (M31/M32). Control widths from
+# scratchpad/m33/probe_budget.py. num_threads = repo default 1 (mixer/decoupled 3-D matmul).
+
+task:
+  name: mixed_converge
+  params:
+    rule_set: [78, 92, 141, 197]
+    distractors: 0
+    T: 6
+    w: 32
+  n_train: 4000
+  n_test: 1000
+  task_seed: 42
+  train_sample_seed: 1
+  test_sample_seed: 2
+
+arms:
+  - name: trm_mixer
+    label: trm_mixer                   # cross-cell MIXING loop (baseline width, budget ref = trm_flat)
+    hidden_dim: 96
+    latent_dim: 64
+    token_hidden: 48
+    n_steps: 8
+    n_latent: 1
+    use_rmsnorm: true
+    deep_supervision: true
+  - name: trm_mixer_nomix
+    label: trm_mixer_nomix             # SHARED readout, token-mixing REMOVED (channel-independent)
+    hidden_dim: 88
+    latent_dim: 88
+    token_hidden: 48
+    n_steps: 8
+    n_latent: 1
+    use_rmsnorm: true
+    deep_supervision: true
+  - name: trm_mixer_unsharedro
+    label: trm_mixer_unsharedro        # mix ON, UNSHARED per-cell readout (readout isolate, CD body)
+    hidden_dim: 66
+    latent_dim: 66
+    token_hidden: 48
+    n_steps: 8
+    n_latent: 1
+    use_rmsnorm: true
+    deep_supervision: true
+  - name: trm_mixer_nomix_unsharedro
+    label: trm_mixer_nomix_unsharedro  # mix OFF, UNSHARED per-cell readout (readout isolate, CI body)
+    hidden_dim: 74
+    latent_dim: 74
+    token_hidden: 48
+    n_steps: 8
+    n_latent: 1
+    use_rmsnorm: true
+    deep_supervision: true
+  - name: trm_mixer_nomix_distinctw
+    label: trm_mixer_nomix_distinctw   # mix OFF, per-cell DISTINCT channel weights (weight-share isolate)
+    hidden_dim: 16
+    latent_dim: 16
+    token_hidden: 48
+    n_steps: 8
+    n_latent: 1
+    use_rmsnorm: true
+    deep_supervision: true
+  - name: trm
+    label: trm_flat                    # flat loop (channel-dependent, unshared M*H readout) — budget ref
+    hidden_dim: 64
+    latent_dim: 64
+    n_steps: 8
+    n_latent: 1
+    use_rmsnorm: true
+    deep_supervision: true
+  - name: ff_matched
+    label: ff_matched                  # §4a param-matched shallow joint MLP — anchor
+    hidden_dim: 64
+    latent_dim: 64
+    n_steps: 8
+
+deltas:
+  # KEY leg — token-mixing at a held shared readout (expected LARGE POSITIVE = mixing is the mechanism)
+  - [trm_mixer, trm_mixer_nomix]
+  # shared-readout / channel-independence vs the joint MLP (expected SMALL on synthetic)
+  - [trm_mixer_nomix, ff_matched]
+  # the shared readout, isolated (clean CI-body flip + CD-body cross-check)
+  - [trm_mixer_nomix, trm_mixer_nomix_unsharedro]
+  - [trm_mixer, trm_mixer_unsharedro]
+  # mixing at an unshared readout (cross-check of the key leg)
+  - [trm_mixer_unsharedro, trm_mixer_nomix_unsharedro]
+  # per-variable weight-sharing (CI + shared readout held)
+  - [trm_mixer_nomix, trm_mixer_nomix_distinctw]
+  # per-cell CI vs joint MLP at unshared readout
+  - [trm_mixer_nomix_unsharedro, ff_matched]
+  # HEADLINE mixer win (reproduces baseline) + context
+  - [trm_mixer, ff_matched]
+  - [trm_flat, ff_matched]
+
+train:
+  epochs: 100
+  lr: 1e-3
+  weight_decay: 1e-4
+  batch_size: 256
+  device: cpu
+
+budget_reference: trm_flat
+budget_tol: 0.05
+
+seeds: [0, 1, 2, 3, 4, 5, 6, 7]
+parallel_workers: 4
+results_dir: results
