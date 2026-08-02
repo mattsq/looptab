@@ -9,3 +9,4 @@ venv/
 results/*.json
 results/*.log
 !results/.gitkeep
+scratchpad/
