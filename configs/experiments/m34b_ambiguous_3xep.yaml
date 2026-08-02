@@ -2,40 +2,29 @@
 #
 # A K=8 exploration step costs 8 no-grad forwards + 1 train step ≈ 3× a K=1 step. M18's lesson is
 # that an apparent mechanism gain is often just more optimization, so the K=8 arms must be judged
-# against K=1 arms given the SAME total compute, not the same epoch count. This config re-runs only
-# the deterministic / K=1 arms at 3× epochs (600 vs 200); everything else — task, seeds, widths,
-# noise channel, budget guard — is identical, so the comparison is epochs and nothing else.
+# against K=1 arms given the SAME total compute, not the same epoch count. This runs the two K=1
+# arms at 3× epochs (300 vs 100) on the HARDEST cell (n_masked=6, mean 6.7 modes), where the main
+# run's exploration effect is largest. Everything else — task, seeds, widths, latent channel — is
+# identical, so the cross-config comparison is epochs and nothing else.
 #
-# Read Δ(K=8 @200ep − K=1 @600ep) from the two runs: if exploration's edge survives that, it is the
-# exploration; if it evaporates, it was compute.
+# Read Δ(K=8 @100ep − K=1 @300ep) across the two run records on `mode_validity` / `mode_coverage`:
+# if exploration's edge survives a 3× compute handicap, it is the exploration; if it evaporates, it
+# was compute. (The seed-0 probe additionally ran every K=1/det arm at 200 epochs — a second,
+# independent 2×-compute control at all three difficulties.)
 
 task:
   name: ambiguous_converge
   params:
     w: 24
     rule: 78          # the M9/M24/M33 converge anchor; screened: every row ambiguous, all
-    n_masked: 4       #   completions convergent, mean 3.7 modes at n_masked=4
+    n_masked: 6       #   completions convergent, mean 3.7 modes at n_masked=4
   n_train: 4000
   n_test: 1000
   task_seed: 42
   train_sample_seed: 1
   test_sample_seed: 2
 
-sweep:
-  param: n_masked     # the difficulty dial = log2(#completions); mean modes 1.9 / 3.7 / 6.7
-  values: [2, 4, 6]
-
 arms:
-  - name: trm_mixer
-    label: trm_mixer_det          # §4 default recurrent arm; latent present but std=0 ⇒ deterministic
-    hidden_dim: 102
-    latent_dim: 64
-    token_hidden: 48
-    n_steps: 8
-    use_rmsnorm: true
-    deep_supervision: true
-    explore_noise_dim: 24         # one noise channel per cell (keeps in%out==0 for the mixer)
-    explore_noise_std: 0.0
   - name: trm_mixer
     label: trm_mixer_xm1          # stochastic latent, ONE draw (the exploration control)
     hidden_dim: 102
@@ -48,13 +37,6 @@ arms:
     explore_noise_std: 1.0
     explore_k: 1
   - name: ff_matched
-    label: ff_det                 # §4a param-matched joint MLP, deterministic
-    hidden_dim: 65
-    latent_dim: 64
-    n_steps: 8
-    explore_noise_dim: 24
-    explore_noise_std: 0.0
-  - name: ff_matched
     label: ff_xm1
     hidden_dim: 65
     latent_dim: 64
@@ -62,27 +44,15 @@ arms:
     explore_noise_dim: 24
     explore_noise_std: 1.0
     explore_k: 1
-  - name: trm
-    label: trm_flat_det           # flat loop = the §4 comparison control (budget reference)
-    hidden_dim: 64
-    latent_dim: 64
-    n_steps: 8
-    use_rmsnorm: true
-    deep_supervision: true
-    explore_noise_dim: 24
-    explore_noise_std: 0.0
 
 deltas:
-  - [trm_mixer_xm1, trm_mixer_det]    # does a latent alone (no exploration) move anything?
-  - [trm_mixer_det, ff_det]           # the M24 mixer-win anchor, at 3× epochs
-  - [ff_xm1, ff_det]
-  - [trm_mixer_xm1, ff_xm1]
+  - [trm_mixer_xm1, ff_xm1]           # the two 3×-compute controls against each other
 
-budget_reference: trm_flat_det
+budget_reference: trm_mixer_xm1
 budget_tol: 0.05
 
 train:
-  epochs: 600
+  epochs: 300
   lr: 1e-3
   weight_decay: 1e-4
   batch_size: 256
