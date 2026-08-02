@@ -214,6 +214,120 @@ def evaluate(
 
 
 @torch.inference_mode()
+def sample_predictions(
+    model: nn.Module,
+    loader: DataLoader,
+    *,
+    n_samples: int,
+    noise_dim: int,
+    noise_std: float = 1.0,
+    device: str = "cpu",
+    seed: int = 0,
+    regression: bool = False,
+) -> tuple[np.ndarray, np.ndarray]:
+    """``n_samples`` independent latent draws per example (M34). Returns ``(preds, targets)``.
+
+    ``preds`` is ``(n_samples, N, ...)`` — the SAME rows re-predicted under different latents, in
+    loader order, so sample ``s`` of row ``i`` is ``preds[s, i]``. This is the raw material for
+    every exploration diagnostic: does the latent change the output at all (collapse check), how
+    many distinct answers does the model hold, and what would an oracle picker achieve. The
+    generator is seeded, so the sample set is a pure function of ``(seed, n_samples)``.
+    """
+    model.eval()
+    gen = torch.Generator(device=device).manual_seed(seed)
+    per_sample = [[] for _ in range(n_samples)]
+    targets = []
+    for X, y in loader:
+        X = X.to(device)
+        targets.append(y.numpy())
+        for s in range(n_samples):
+            eps = torch.randn(X.shape[0], noise_dim, generator=gen, device=device) * noise_std
+            model.set_noise(eps)
+            out, _ = model(X)
+            model.clear_noise()
+            per_sample[s].append(
+                out.cpu().numpy() if regression else out.argmax(dim=-1).cpu().numpy()
+            )
+    return (
+        np.stack([np.concatenate(p) for p in per_sample]),
+        np.concatenate(targets),
+    )
+
+
+def explore_diagnostics(
+    preds: np.ndarray, targets: np.ndarray, *, want_exact_match: bool
+) -> dict:
+    """Exploration descriptors from ``(S, N, ...)`` sampled predictions (M34).
+
+    Three families, and the naming is deliberate — only the first is a headline-comparable number:
+
+      - ``sampled_accuracy`` / ``sampled_exact_match``: mean over draws of the ordinary metric, i.e.
+        what ONE honest sample from the model scores. Comparable across arms.
+      - ``oracle_accuracy`` / ``oracle_exact_match``: the best draw **selected using the label**.
+        This is an ORACLE and can never be a headline (it reads the answer key); it is reported
+        because XM's claim is about the candidate SET, and oracle@K vs sampled is how much a
+        (hypothetical) selector could recover. Named so no reader can mistake it.
+      - ``latent_sensitivity`` (mean normalized disagreement between two independent draws) and
+        ``distinct_predictions`` (mean count of distinct answers among the S draws, per row). These
+        are the COLLAPSE CHECK: if the model learns to ignore ε, both go to ~0/1 and best-of-K
+        training has degenerated into noisier ERM — the null this experiment must be able to detect.
+    """
+    S = preds.shape[0]
+    correct = preds == targets[None, ...]
+    out = {"sampled_accuracy": float(correct.mean())}
+    flat = preds.reshape(S, preds.shape[1], -1)
+    # Disagreement between independent draws, averaged over all ordered pairs (0 = ε is ignored).
+    if S > 1:
+        diffs = [
+            float((flat[i] != flat[j]).mean())
+            for i in range(S)
+            for j in range(i + 1, S)
+        ]
+        out["latent_sensitivity"] = float(np.mean(diffs))
+        rows = flat.transpose(1, 0, 2)  # (N, S, cells)
+        out["distinct_predictions"] = float(
+            np.mean([len({tuple(r) for r in row}) for row in rows])
+        )
+    else:
+        out["latent_sensitivity"] = 0.0
+        out["distinct_predictions"] = 1.0
+    if want_exact_match and targets.ndim > 1:
+        row_ok = correct.all(axis=-1)  # (S, N)
+        out["sampled_exact_match"] = float(row_ok.mean())
+        out["oracle_exact_match"] = float(row_ok.any(axis=0).mean())
+        out["oracle_accuracy"] = float(correct.mean(axis=-1).max(axis=0).mean())
+    else:
+        out["oracle_accuracy"] = float(correct.max(axis=0).mean())
+    return out
+
+
+def evaluate_explore(
+    model: nn.Module,
+    loader: DataLoader,
+    *,
+    n_samples: int,
+    noise_dim: int,
+    noise_std: float = 1.0,
+    device: str = "cpu",
+    seed: int = 0,
+    want_exact_match: bool = False,
+) -> dict:
+    """Side-car exploration metrics (M34). The headline metrics still come from ``evaluate`` at the
+    ZERO latent (a single deterministic forward, comparable to every earlier milestone); this adds
+    the sampled / oracle / collapse descriptors that say whether exploration did anything."""
+    preds, targets = sample_predictions(
+        model,
+        loader,
+        n_samples=n_samples,
+        noise_dim=noise_dim,
+        noise_std=noise_std,
+        device=device,
+        seed=seed,
+    )
+    return explore_diagnostics(preds, targets, want_exact_match=want_exact_match)
+
+
+@torch.inference_mode()
 def _predict_regression(
     model: nn.Module, loader: DataLoader, device: str, **kwargs
 ) -> tuple[np.ndarray, np.ndarray]:

@@ -7,6 +7,7 @@ import torch
 from torch.utils.data import Dataset
 
 from .generators import (
+    make_ambiguous_converge,
     make_converge,
     make_disruption,
     make_hopfield,
@@ -123,6 +124,13 @@ def make_splits(
             return TabularDataset(X, y)
         elif task == "converge":
             X, y = make_converge(n=n, task_seed=task_seed, sample_seed=sample_seed, **task_cfg)
+            return TabularDataset(X, y)
+        elif task == "ambiguous_converge":
+            # M34: the one MULTIMODAL task — several valid fixed points per input, mode set
+            # enumerable from X (see generators.ambiguous_modes / eval.ambiguity).
+            X, y = make_ambiguous_converge(
+                n=n, task_seed=task_seed, sample_seed=sample_seed, **task_cfg
+            )
             return TabularDataset(X, y)
         elif task == "hopfield":
             X, y = make_hopfield(n=n, task_seed=task_seed, sample_seed=sample_seed, **task_cfg)

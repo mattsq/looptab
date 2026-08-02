@@ -4,13 +4,16 @@ import numpy as np
 import pytest
 
 from looptab.data.generators import (
+    AMBIGUOUS_MASK_VALUE,
     _build_disruption_weights,
     _build_hopfield_weights,
     _count_sudoku_solutions,
     _inner_relax,
     _ring_band_mask,
     _threshold_step,
+    ambiguous_modes,
     ca_step,
+    make_ambiguous_converge,
     make_converge,
     make_disruption,
     make_hopfield,
@@ -996,3 +999,88 @@ def test_sudoku_rejects_unreachable_givens():
         make_sudoku(n=5, size=6, n_givens=36, task_seed=0, sample_seed=0)  # == size*size
     with pytest.raises(ValueError):
         make_sudoku(n=5, size=6, n_givens=5, task_seed=0, sample_seed=0)  # < size
+
+
+# --- M34: ambiguous_converge (the multimodal target) --------------------------------------------
+
+
+def test_ambiguous_converge_determinism():
+    a = make_ambiguous_converge(n=100, w=24, n_masked=4, task_seed=5, sample_seed=9, rule=78)
+    b = make_ambiguous_converge(n=100, w=24, n_masked=4, task_seed=5, sample_seed=9, rule=78)
+    np.testing.assert_array_equal(a[0], b[0])
+    np.testing.assert_array_equal(a[1], b[1])
+
+
+def test_ambiguous_converge_shapes_and_mask():
+    X, y = make_ambiguous_converge(n=50, w=24, n_masked=4, task_seed=0, sample_seed=1, rule=78)
+    assert X.shape == (50, 24) and y.shape == (50, 24)
+    assert X.dtype == np.float32 and y.dtype == np.int64
+    masked = np.isclose(X, AMBIGUOUS_MASK_VALUE)
+    assert masked.sum(axis=1).tolist() == [4] * 50   # exactly n_masked hidden cells per row
+    # The masked block is a property of the FUNCTION (task_seed), identical across rows.
+    assert masked.all(axis=0).sum() == 4
+    # Unmasked entries are still bits.
+    assert set(np.unique(X[~masked]).tolist()) <= {0.0, 1.0}
+
+
+def test_ambiguous_converge_task_seed_moves_the_mask_not_the_rows():
+    """§3 seed discipline: task_seed defines the function (which cells are hidden), sample_seed
+    the rows. Two task_seeds must give different mask positions."""
+    Xa, _ = make_ambiguous_converge(n=40, w=24, n_masked=3, task_seed=0, sample_seed=1)
+    Xb, _ = make_ambiguous_converge(n=40, w=24, n_masked=3, task_seed=7, sample_seed=1)
+    ma = np.flatnonzero(np.isclose(Xa[0], AMBIGUOUS_MASK_VALUE))
+    mb = np.flatnonzero(np.isclose(Xb[0], AMBIGUOUS_MASK_VALUE))
+    assert not np.array_equal(ma, mb)
+
+
+def test_ambiguous_converge_labels_are_valid_modes():
+    """Every label must be one of the row's enumerated fixed points, and every row must be
+    genuinely ambiguous (>= min_modes distinct modes) — the task's defining property."""
+    X, y = make_ambiguous_converge(
+        n=60, w=24, n_masked=4, task_seed=2, sample_seed=3, rule=78, min_modes=2
+    )
+    modes = ambiguous_modes(X, rule=78)
+    assert len(modes) == 60
+    for i in range(60):
+        assert len(modes[i]) >= 2
+        assert any(np.array_equal(y[i], m) for m in modes[i])
+        # Every mode is a genuine fixed point of the rule.
+        np.testing.assert_array_equal(ca_step(modes[i], 78), modes[i])
+
+
+def test_ambiguous_converge_modes_recoverable_from_X_alone():
+    """The eval path re-derives mode sets from X (the sentinel makes X self-describing), so this
+    must match an enumeration done at generation time."""
+    X, _ = make_ambiguous_converge(n=30, w=16, n_masked=3, task_seed=1, sample_seed=2, rule=78)
+    modes = ambiguous_modes(X, rule=78)
+    masked = np.flatnonzero(np.isclose(X[0], AMBIGUOUS_MASK_VALUE))
+    for i in range(30):
+        obs = np.rint(X[i]).astype(np.int64)
+        found = set()
+        for bits in range(2 ** len(masked)):
+            comp = obs.copy()
+            comp[masked] = [(bits >> j) & 1 for j in range(len(masked))]
+            s = comp[None, :]
+            for _ in range(4 * 16):
+                nxt = ca_step(s, 78)
+                if np.array_equal(nxt, s):
+                    break
+                s = nxt
+            found.add(tuple(s[0]))
+        assert found == {tuple(m) for m in modes[i]}
+
+
+def test_ambiguous_converge_more_masking_gives_more_modes():
+    """n_masked is the difficulty dial: hiding more cells widens the target's support."""
+    counts = []
+    for m in (2, 4, 6):
+        X, _ = make_ambiguous_converge(n=60, w=24, n_masked=m, task_seed=0, sample_seed=1)
+        counts.append(np.mean([len(s) for s in ambiguous_modes(X, rule=78)]))
+    assert counts[0] < counts[1] < counts[2]
+
+
+def test_ambiguous_converge_rejects_bad_n_masked():
+    with pytest.raises(ValueError):
+        make_ambiguous_converge(n=10, w=8, n_masked=8, task_seed=0, sample_seed=0)
+    with pytest.raises(ValueError):
+        make_ambiguous_converge(n=10, w=24, n_masked=13, task_seed=0, sample_seed=0)

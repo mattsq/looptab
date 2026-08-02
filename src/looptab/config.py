@@ -20,6 +20,7 @@ class TaskConfig(BaseModel):
     name: Literal[
         "linear", "parity", "multi_parity", "iterated", "converge", "hopfield", "mixed_converge",
         "nested_converge", "disruption", "multilabel", "sudoku", "etth1", "weather",
+        "ambiguous_converge",  # M34: the multimodal target (several valid fixed points per input)
     ]
     # "classification" (default; all M0–M25 tasks) trains with cross-entropy and reports
     # accuracy/EM/F1. "regression" (M26 forecasting) trains with MSE and reports MSE/MAE/R².
@@ -114,6 +115,26 @@ class ModelConfig(BaseModel):
     jac_reg_weight: float = 0.0
     fixed_point_weight: float = 0.0
     n_reg_steps: int = 4
+
+    # --- M34: Explorative Modeling (XM; arXiv 2607.27372) -------------------------------------
+    # XM handles MULTIMODAL targets by factoring the TRAINING loop instead of the generation
+    # procedure: explore K candidate latents, score each against the datapoint, backprop the
+    # closest — so candidates commit to modes rather than blurring to the conditional mean. Both
+    # knobs default OFF (`explore_noise_dim=0` ⇒ no wrapper, no new code path) so every committed
+    # M0–M33 result is bit-identical.
+    #   explore_noise_dim — width of the latent noise channel appended to X (0 = deterministic
+    #                       arm, the pre-M34 model). ANY arm can carry it (ff/trm/trm_mixer/...),
+    #                       so exploration is testable on non-recurrent controls too — the point,
+    #                       since XM's thesis is that the objective can replace the refinement loop.
+    #                       For mixer arms `(in_features + explore_noise_dim) % out_features == 0`
+    #                       must hold (cell factorization); use a multiple of the cell count.
+    #   explore_k         — candidates explored per example per step. 1 = the SINGLE-KNOB control
+    #                       (same architecture, same noise channel, one draw): Δ(K>1 − K=1) is the
+    #                       exploration effect with "has a stochastic latent" held fixed.
+    #   explore_noise_std — scale of the N(0, σ²) latent.
+    explore_k: int = 1
+    explore_noise_dim: int = 0
+    explore_noise_std: float = 1.0
 
     def resolved_label(self) -> str:
         return self.label or self.name
@@ -226,6 +247,11 @@ class ExperimentConfig(BaseModel):
     deltas: Optional[list[list[str]]] = None
     seeds: list[int] = Field(default_factory=lambda: [0, 1, 2, 3, 4])
     results_dir: str = "results"
+
+    # M34: draws per example in the exploration side-car eval (sampled / oracle@K / collapse
+    # descriptors). Only used by arms with `explore_noise_dim > 0`; the headline metrics are always
+    # the deterministic zero-latent single pass, so this never touches accuracy/EM/F1.
+    explore_eval_samples: int = 8
 
     # Number of worker processes for the per-axis-point seed loop. Seeds are embarrassingly
     # parallel — each is a pure function of its seed and self-reseeds (CLAUDE.md §5.3) — so

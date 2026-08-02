@@ -1,0 +1,47 @@
+# M34 smoke — pipeline tripwire for the multimodal task + the exploration routine.
+# Tiny and fast: checks that `ambiguous_converge` builds, that the mode metrics run for BOTH a
+# deterministic and an exploring arm, and that the Δ table carries mode_validity / mode_coverage.
+# Not a result — the real runs are m34a (real multi-label) and m34b (this task at scale).
+
+task:
+  name: ambiguous_converge
+  params:
+    w: 16
+    n_masked: 3
+    rule: 78
+  n_train: 800
+  n_test: 300
+  task_seed: 42
+  train_sample_seed: 1
+  test_sample_seed: 2
+
+arms:
+  - name: ff_matched
+    label: ff_det                 # zero-variance latent: architecture + budget identical, no noise
+    hidden_dim: 32
+    latent_dim: 32
+    n_steps: 4
+    explore_noise_dim: 16
+    explore_noise_std: 0.0
+  - name: ff_matched
+    label: ff_xm4                 # K=4 exploration
+    hidden_dim: 32
+    latent_dim: 32
+    n_steps: 4
+    explore_noise_dim: 16
+    explore_noise_std: 1.0
+    explore_k: 4
+
+deltas:
+  - [ff_xm4, ff_det]
+
+train:
+  epochs: 20
+  lr: 1e-3
+  weight_decay: 1e-4
+  batch_size: 128
+  device: cpu
+
+explore_eval_samples: 4
+seeds: [0, 1]
+results_dir: results

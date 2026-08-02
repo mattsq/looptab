@@ -23,25 +23,48 @@ import yaml
 
 from .config import ExperimentConfig, ModelConfig
 from .data.dataset import make_loaders, make_splits, make_trajectory_dataset
+from .data.generators import ambiguous_modes
+from .eval.ambiguity import evaluate_modes
 from .eval.introspection import run_introspection
 from .eval.metrics import (
     accuracy,
     delta_report,
     evaluate,
     evaluate_act,
+    evaluate_explore,
     evaluate_regression,
     majority_baseline,
     persistence_baseline_mse,
     subset_accuracy_baseline,
 )
+from .models.explore import ExploreWrapper
 from .registry import get_model
 from .train.loop import (
     train,
     train_act,
     train_curriculum,
     train_deep_supervision,
+    train_explore,
     train_progressive,
     train_stable,
+)
+
+# M34: exploration side-car descriptors (sampled / oracle@K / latent-collapse). Kept in one place
+# so the aggregate + CSV writers and the Δ table stay in sync with evaluate_explore's keys.
+EXPLORE_METRICS = (
+    "sampled_accuracy",
+    "sampled_exact_match",
+    "oracle_accuracy",
+    "oracle_exact_match",
+    "latent_sensitivity",
+    "distinct_predictions",
+    # Mode-level metrics for the multimodal `ambiguous_converge` task — reported for EVERY arm on
+    # that task (not just exploration arms), since "does it emit a valid mode at all" is exactly
+    # the question a deterministic control has to answer too.
+    "mode_validity",
+    "mode_validity_first",
+    "mode_coverage",
+    "mode_count",
 )
 
 
@@ -59,6 +82,11 @@ def _build_model(
     out_features: Optional[int] = None,
     n_steps: Optional[int] = None,
 ):
+    # M34: an exploration arm carries a latent noise channel appended to X, so it is built WIDER
+    # by `explore_noise_dim` and wrapped (see models/explore.py). 0 (default) ⇒ no wrapper and a
+    # byte-identical model to every pre-M34 run.
+    noise_dim = arm.explore_noise_dim
+    in_features = in_features + noise_dim
     # `n_steps` overrides the arm's static depth when the experiment couples depth to a
     # swept task param (M3a `couple_n_steps_to_param`); otherwise the per-arm value stands.
     kwargs = dict(
@@ -99,7 +127,8 @@ def _build_model(
     if arm.name in ("untied_mixer", "untied_mixer_matched"):  # M24e: mixing-matched §4b controls
         kwargs["use_rmsnorm"] = arm.use_rmsnorm
         kwargs["token_hidden"] = arm.token_hidden
-    return get_model(arm.name, **kwargs)
+    model = get_model(arm.name, **kwargs)
+    return ExploreWrapper(model, noise_dim) if noise_dim > 0 else model
 
 
 def _baselines(loader, *, want_exact_match: bool) -> dict[str, float]:
@@ -184,6 +213,14 @@ def run_point(cfg: ExperimentConfig, task_params: dict, seed: int) -> tuple[dict
         )
         traj_loader, _ = make_loaders(traj_ds, traj_ds, cfg.train.batch_size)
 
+    # M34: on the multimodal task, enumerate each TEST row's mode set ONCE (it is a pure function
+    # of X and the rule) and score every arm against the same sets — mode validity / coverage are
+    # the metrics that separate "commits to a mode" from "blurs to the conditional mean", which
+    # accuracy and EM provably cannot here (see eval/ambiguity.py).
+    test_modes = None
+    if task_cfg.name == "ambiguous_converge":
+        test_modes = ambiguous_modes(test_ds.X, rule=int(task_params.get("rule", 78)))
+
     device = cfg.train.device
     results = {}
     models = {}
@@ -193,6 +230,24 @@ def run_point(cfg: ExperimentConfig, task_params: dict, seed: int) -> tuple[dict
         torch.manual_seed(seed)
         m = _build_model(arm, in_features, num_classes, out_features, n_steps=coupled_steps)
         stable = arm.jac_reg_weight > 0 or arm.fixed_point_weight > 0
+        explore = arm.explore_noise_dim > 0
+        if explore and (curriculum is not None or arm.use_act or arm.n_sup > 1 or stable):
+            # M34: best-of-K exploration is its own training routine (train_explore). Combining it
+            # with the curriculum / ACT / N_sup / contraction routines would conflate two
+            # supervision schemes — fail loudly (§5.6, one knob per arm).
+            raise ValueError(
+                f"arm '{arm.resolved_label()}' sets explore_noise_dim>0 together with "
+                "curriculum / use_act / n_sup>1 / contraction-reg; these are mutually exclusive "
+                "routines (one knob per arm)."
+            )
+        if arm.explore_k > 1 and not explore:
+            # A K>1 arm with no latent has nothing to explore over — every candidate would be the
+            # same deterministic output. Almost certainly a config typo; fail rather than silently
+            # train a plain arm and report it as an exploration result.
+            raise ValueError(
+                f"arm '{arm.resolved_label()}' sets explore_k>1 but explore_noise_dim=0: there is "
+                "no latent to explore. Set explore_noise_dim > 0."
+            )
         if regression and (curriculum is not None or arm.use_act or arm.n_sup > 1 or stable):
             # M26 regression uses the standard MSE train path only; the curriculum/ACT/N_sup/stable
             # routines are CA-trajectory / classification mechanisms (they build CE losses and
@@ -329,6 +384,23 @@ def run_point(cfg: ExperimentConfig, task_params: dict, seed: int) -> tuple[dict
                 reg_seed=seed,
                 device=device,
             )
+        elif explore:
+            # M34: Explorative Modeling — K candidate latents per example, train on the closest.
+            train_explore(
+                m,
+                train_loader,
+                explore_k=arm.explore_k,
+                noise_dim=arm.explore_noise_dim,
+                noise_std=arm.explore_noise_std,
+                epochs=cfg.train.epochs,
+                lr=cfg.train.lr,
+                weight_decay=cfg.train.weight_decay,
+                deep_supervision_weight=arm.deep_supervision_weight,
+                ema_decay=arm.ema_decay,
+                loss_type="mse" if regression else "ce",
+                explore_seed=seed,
+                device=device,
+            )
         else:
             train(
                 m,
@@ -400,6 +472,38 @@ def run_point(cfg: ExperimentConfig, task_params: dict, seed: int) -> tuple[dict
             # M20: micro/macro-F1 — the honest co-headline to EM on imbalanced multi-label.
             metrics["micro_f1"] = test_metrics["micro_f1"]
             metrics["macro_f1"] = test_metrics["macro_f1"]
+        if test_modes is not None:
+            # M34: mode-level metrics — scored for EVERY arm (deterministic arms repeat their one
+            # answer across the same number of draws, so the coverage comparison is fair).
+            metrics.update(
+                evaluate_modes(
+                    m,
+                    test_loader,
+                    test_modes,
+                    n_samples=cfg.explore_eval_samples,
+                    noise_dim=arm.explore_noise_dim,
+                    noise_std=arm.explore_noise_std,
+                    device=device,
+                    seed=seed,
+                )
+            )
+        if explore:
+            # M34 side-car. The headline metrics above are the DETERMINISTIC zero-latent forward
+            # (comparable to every earlier milestone and never an oracle); these add what one
+            # sampled draw scores, what a label-reading oracle over K draws could reach, and the
+            # collapse check (does the output depend on the latent at all).
+            metrics.update(
+                evaluate_explore(
+                    m,
+                    test_loader,
+                    n_samples=cfg.explore_eval_samples,
+                    noise_dim=arm.explore_noise_dim,
+                    noise_std=arm.explore_noise_std,
+                    device=device,
+                    seed=seed,
+                    want_exact_match=multi_output,
+                )
+            )
         results[arm.resolved_label()] = metrics
         models[arm.resolved_label()] = m
 
@@ -474,6 +578,12 @@ def _aggregate(per_seed: list[dict], labels: list[str]) -> dict:
                 vals = [s[lbl][rk] for s in per_seed]
                 stats[f"{rk}_mean"] = float(np.mean(vals))
                 stats[f"{rk}_std"] = _std(vals)
+        for ek in EXPLORE_METRICS:  # M34 exploration side-car (present only for explore arms)
+            if ek in per_seed[0][lbl]:
+                vals = [s[lbl][ek] for s in per_seed]
+                stats[f"{ek}_mean"] = float(np.mean(vals))
+                stats[f"{ek}_std"] = _std(vals)
+                stats[f"{ek}_per_seed"] = vals
         if "avg_segments" in per_seed[0][lbl]:  # M23 ACT adaptive-compute diagnostic
             segs = [s[lbl]["avg_segments"] for s in per_seed]
             stats["avg_segments_mean"] = float(np.mean(segs))
@@ -827,7 +937,21 @@ def main():
             print(f"  sign tests {'over' if paired_sign_tests else 'skipped:'} {sign_reason}")
         for lbl in labels:
             a = agg[lbl]
-            print(f"  {lbl:>16}: acc {a['accuracy_mean']:.4f} ± {a['accuracy_std']:.4f}")
+            line = f"  {lbl:>16}: acc {a['accuracy_mean']:.4f} ± {a['accuracy_std']:.4f}"
+            if "latent_sensitivity_mean" in a:  # M34: exploration descriptors (collapse check)
+                line += (
+                    f"  [sEM {a.get('sampled_exact_match_mean', float('nan')):.4f}"
+                    f"  oracle*EM {a.get('oracle_exact_match_mean', float('nan')):.4f}"
+                    f"  latent_sens {a['latent_sensitivity_mean']:.4f}"
+                    f"  distinct {a['distinct_predictions_mean']:.2f}]"
+                )
+            if "mode_validity_mean" in a:  # M34: multimodal-task headline
+                line += (
+                    f"  [modeValid {a['mode_validity_mean']:.4f}"
+                    f"  modeCov {a['mode_coverage_mean']:.4f}"
+                    f"  nModes {a['mode_count_mean']:.2f}]"
+                )
+            print(line)
 
         # Exact-match is a distinct, meaningful signal on multi-output tasks (Task B),
         # so we report its paired Δ *with variance* too — not just a point estimate.
@@ -873,6 +997,25 @@ def main():
                     )
                     deltas[f"{a}-{b}"]["coherence_excess"] = ce_rep
                     line += f"  [coh {ce_rep['delta_mean']:+.4f} ± {ce_rep['delta_std']:.4f}]"
+            # M34: exploration Δs — only where BOTH arms carry the side-car (an explore-vs-explore
+            # pair, e.g. K=8 vs K=1). Against a deterministic control these keys are absent and the
+            # pair simply reports the ordinary metrics.
+            for ek, tag in (
+                ("sampled_accuracy", "sAcc"),
+                ("sampled_exact_match", "sEM"),
+                ("oracle_exact_match", "oEM*"),
+                ("mode_validity", "mVal"),      # M34 headline on `ambiguous_converge`
+                ("mode_coverage", "mCov"),      # XM's "modes captured grows with exploration"
+            ):
+                if ek in per_seed[0][a] and ek in per_seed[0][b]:
+                    e_rep = delta_report(
+                        [s[a][ek] for s in per_seed],
+                        [s[b][ek] for s in per_seed],
+                        label=ek,
+                        paired_sign_test=paired_sign_tests,
+                    )
+                    deltas[f"{a}-{b}"][ek] = e_rep
+                    line += f"  [{tag} {e_rep['delta_mean']:+.4f} ± {e_rep['delta_std']:.4f}]"
             # M26: forecasting-regression Δs (lower MSE/MAE is better, so a NEGATIVE Δ favours the
             # first arm — the opposite sign convention to accuracy; the writeup states this).
             for rk, tag in (("mse", "MSE"), ("mae", "MAE"), ("r2", "R2")):
@@ -1050,6 +1193,11 @@ def main():
                     if f"{rk}_mean" in a:
                         w.writerow(
                             [p["label"], lbl, rk, a[f"{rk}_mean"], a[f"{rk}_std"], a["n_params"]]
+                        )
+                for ek in EXPLORE_METRICS:  # M34 exploration side-car
+                    if f"{ek}_mean" in a:
+                        w.writerow(
+                            [p["label"], lbl, ek, a[f"{ek}_mean"], a[f"{ek}_std"], a["n_params"]]
                         )
                 if "avg_segments_mean" in a:  # M23 ACT adaptive-compute diagnostic
                     w.writerow(

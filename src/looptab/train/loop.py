@@ -275,6 +275,141 @@ def train_act(
     return losses
 
 
+def _per_example_loss(
+    logits: torch.Tensor, targets: torch.Tensor, loss_type: str = "ce"
+) -> torch.Tensor:
+    """``_loss_fn`` without the batch reduction: a (B,) score per example.
+
+    Best-of-K exploration matches candidates to datapoints **per example** (each row picks its own
+    winning latent), so the scoring loss must not be pooled across the batch. Reduced over the
+    cell/horizon axes exactly as ``_loss_fn`` reduces them, so the mean of this equals ``_loss_fn``.
+    """
+    if loss_type == "mse":
+        diff = (logits - targets.to(logits.dtype)) ** 2
+        return diff.flatten(1).mean(dim=-1) if diff.ndim > 1 else diff
+    if targets.ndim == 1:
+        return nn.functional.cross_entropy(logits, targets, reduction="none")
+    B, W, C = logits.shape
+    per_cell = nn.functional.cross_entropy(
+        logits.reshape(B * W, C), targets.reshape(B * W), reduction="none"
+    )
+    return per_cell.view(B, W).mean(dim=-1)
+
+
+def train_explore(
+    model: nn.Module,
+    train_loader: DataLoader,
+    *,
+    explore_k: int,
+    noise_dim: int,
+    noise_std: float = 1.0,
+    epochs: int = 100,
+    lr: float = 1e-3,
+    weight_decay: float = 1e-4,
+    deep_supervision_weight: float = 1.0,
+    ema_decay: float | None = None,
+    loss_type: str = "ce",
+    explore_seed: int = 0,
+    device: str = "cpu",
+    verbose: bool = False,
+) -> list[float]:
+    """Explorative-Modeling training: explore K latents per example, train on the best (M34).
+
+    The XM training step (Gladstone/Ji/Du 2026, arXiv 2607.27372), ported to this repo's supervised
+    setting. Per batch:
+
+      1. draw ``explore_k`` latents ``ε_k ~ N(0, noise_std²)`` and run the model **without
+         gradients** for each, scoring every candidate against ``y`` per example;
+      2. pick each example's argmin candidate (the closest match — XM's "score each against x,
+         train only the closest");
+      3. re-run **one** forward with the per-example winning latents installed, and backpropagate
+         that loss alone.
+
+    So the cost is K no-grad forwards + 1 full train step, not K train steps — the paper's own
+    accounting, and why exploration is pitched as a *third* axis trading against params/data. The
+    §8-mandated control is therefore not "same wall clock" by accident: configs pair every K>1 arm
+    with a K=1 arm (identical architecture, identical noise channel — the single-knob exploration
+    ablation) AND a longer-trained K=1 arm, because M18's lesson is that an apparent mechanism gain
+    is often just more optimization.
+
+    ``K=1`` is NOT the same code path as ``train``: it is ordinary training of a noise-conditioned
+    model (one sampled latent per example per step), which is exactly the control the exploration Δ
+    needs. Candidates are scored on the FINAL readout only (the model's "generation"); per-step deep
+    supervision is applied to the winning pass as usual, so DS and exploration stay unconfounded.
+
+    Requires an ``ExploreWrapper``-wrapped model (``set_noise``/``clear_noise``). Deterministic: the
+    latent stream comes from a generator seeded by ``explore_seed``.
+    """
+    if explore_k < 1:
+        raise ValueError(f"explore_k must be >= 1, got {explore_k}")
+    if not hasattr(model, "set_noise"):
+        raise ValueError("train_explore requires an ExploreWrapper-wrapped model (set_noise).")
+    model = model.to(device)
+    opt = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=weight_decay)
+    ema = EMA(model, ema_decay) if ema_decay is not None else None
+    gen = torch.Generator(device=device).manual_seed(explore_seed)
+    losses = []
+
+    for epoch in range(epochs):
+        model.train()
+        epoch_loss = 0.0
+        n_batches = 0
+        for X, y in train_loader:
+            X, y = X.to(device), y.to(device)
+            B = X.shape[0]
+
+            # --- 1/2: explore K candidate latents, score per example, keep each row's winner ----
+            cand = torch.randn(
+                explore_k, B, noise_dim, generator=gen, device=device
+            ) * noise_std
+            if explore_k == 1:
+                best_noise = cand[0]
+            else:
+                with torch.no_grad():
+                    scores = torch.stack(
+                        [
+                            _per_example_loss(model_forward_noise(model, X, cand[k])[0], y,
+                                              loss_type)
+                            for k in range(explore_k)
+                        ]
+                    )  # (K, B)
+                winner = scores.argmin(dim=0)  # (B,) — per-example match, not per-batch
+                best_noise = cand[winner, torch.arange(B, device=device)]
+
+            # --- 3: one gradient step through the winning candidates only ---------------------
+            opt.zero_grad()
+            model.set_noise(best_noise)
+            logits, all_logits = model(X)
+            loss = _loss_fn(logits, y, loss_type)
+            if all_logits is not None and deep_supervision_weight > 0:
+                ds_loss = sum(_loss_fn(sl, y, loss_type) for sl in all_logits) / len(all_logits)
+                loss = loss + deep_supervision_weight * ds_loss
+            loss.backward()
+            opt.step()
+            model.clear_noise()
+            if ema is not None:
+                ema.update(model)
+            epoch_loss += loss.item()
+            n_batches += 1
+        avg = epoch_loss / max(n_batches, 1)
+        losses.append(avg)
+        if verbose and (epoch % 10 == 0 or epoch == epochs - 1):
+            print(f"  epoch {epoch:3d}  loss={avg:.4f}")
+
+    if ema is not None:
+        ema.copy_to(model)
+    return losses
+
+
+def model_forward_noise(model: nn.Module, X: torch.Tensor, noise: torch.Tensor):
+    """Forward with ``noise`` installed, restoring the zero default afterwards."""
+    model.set_noise(noise)
+    try:
+        return model(X)
+    finally:
+        model.clear_noise()
+
+
 def _stable_step_map(model: nn.Module, X: torch.Tensor):
     """The one-step latent map ``F(z) = update(cat[X, z, readout(z)])`` as a function of ``z`` only.
 

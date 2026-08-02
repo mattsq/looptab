@@ -1,0 +1,83 @@
+# M34a-control — the COMPUTE-MATCHED control for m34a_multilabel_yeast.yaml.
+#
+# A K=8 exploration step costs 8 no-grad forwards + 1 train step ≈ 3× a K=1 step, so the K=8 arms
+# must also be judged against K=1 arms given the SAME total compute (M18: an apparent mechanism
+# gain is often just more optimization). This re-runs only the deterministic / K=1 arms at 3×
+# epochs (900 vs 300); task, folds, widths, noise channel and budget guard are identical.
+
+task:
+  name: multilabel
+  params:
+    dataset: yeast
+    n_folds: 10
+    cv_seed: 0
+    standardize: true
+  n_train: 4000               # non-binding caps; each fold uses ~2175 train / ~242 test
+  n_test: 1000
+  task_seed: 42
+  train_sample_seed: 1
+  test_sample_seed: 2
+
+arms:
+  - name: trm
+    label: trm_det              # joint loop, deterministic (budget reference)
+    hidden_dim: 64
+    latent_dim: 64
+    n_steps: 6
+    use_rmsnorm: true
+    deep_supervision: true
+    explore_noise_dim: 8
+    explore_noise_std: 0.0
+  - name: trm
+    label: trm_xm1              # stochastic latent, ONE draw
+    hidden_dim: 64
+    latent_dim: 64
+    n_steps: 6
+    use_rmsnorm: true
+    deep_supervision: true
+    explore_noise_dim: 8
+    explore_noise_std: 1.0
+    explore_k: 1
+  - name: ff_matched
+    label: ff_det               # §4a param-matched shallow JOINT MLP — the M20/M25 winner
+    hidden_dim: 64
+    latent_dim: 64
+    n_steps: 6
+    explore_noise_dim: 8
+    explore_noise_std: 0.0
+  - name: ff_matched
+    label: ff_xm1
+    hidden_dim: 64
+    latent_dim: 64
+    n_steps: 6
+    explore_noise_dim: 8
+    explore_noise_std: 1.0
+    explore_k: 1
+  - name: trm_decoupled
+    label: trm_decoupled_det    # per-LABEL refinement = binary-relevance — leg-1 reference (M20)
+    hidden_dim: 64
+    latent_dim: 64
+    n_steps: 6
+    deep_supervision: true
+    explore_noise_dim: 8
+    explore_noise_std: 0.0
+
+deltas:
+  - [ff_xm1, ff_det]                 # does a latent alone (no exploration) move anything?
+  - [trm_det, ff_det]                # M20/M25 replication anchor
+  - [trm_det, trm_decoupled_det]     # leg-1: joint > binary-relevance
+
+budget_reference: trm_det
+budget_tol: 0.05
+
+train:
+  epochs: 900
+  lr: 1e-3
+  weight_decay: 1e-4
+  batch_size: 128
+  device: cpu
+
+explore_eval_samples: 8
+seeds: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
+parallel_workers: 4
+results_dir: results

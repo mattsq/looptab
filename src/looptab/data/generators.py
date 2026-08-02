@@ -182,6 +182,154 @@ def make_converge(
     return X.astype(np.float32), s_inf.astype(np.int64)
 
 
+AMBIGUOUS_MASK_VALUE = 0.5
+
+
+def _relax_to_fixed_point(
+    s: np.ndarray, rule: int, max_steps: int
+) -> tuple[np.ndarray, np.ndarray]:
+    """Iterate ``ca_step`` to a per-row fixed point. Returns ``(s, converged)``.
+
+    Vectorized over rows (the caller stacks every completion of every row into one array), with a
+    per-row convergence flag so non-converging rows can be rejected rather than silently returned
+    as a "fixed point" — the same guard ``make_converge`` applies globally, made per-row because
+    the ambiguity task must reject a row if ANY of its completions fails to converge.
+    """
+    for _ in range(max_steps):
+        nxt = ca_step(s, rule)
+        if np.array_equal(nxt, s):
+            break
+        s = nxt
+    converged = (ca_step(s, rule) == s).all(axis=-1)
+    return s, converged
+
+
+def _completion_fixed_points(
+    obs: np.ndarray, masked: np.ndarray, rule: int, max_steps: int
+) -> tuple[np.ndarray, np.ndarray]:
+    """Fixed points of every 2^m completion of the masked cells. Returns ``(fps, converged)``.
+
+    ``obs`` is ``(n, w)`` int with arbitrary values at ``masked``; ``fps`` is ``(n, 2^m, w)`` and
+    ``converged`` is ``(n, 2^m)``. This is the enumeration that makes the mode set of each row
+    KNOWN — the property no image/video/text multimodality benchmark has, and the reason this task
+    can measure XM's central claim (modes captured grows with exploration) directly rather than by
+    proxy.
+    """
+    n, w = obs.shape
+    m = len(masked)
+    bits = ((np.arange(2**m)[:, None] >> np.arange(m)[None, :]) & 1).astype(obs.dtype)  # (2^m, m)
+    grids = np.repeat(obs[:, None, :], 2**m, axis=1)  # (n, 2^m, w)
+    grids[:, :, masked] = bits[None, :, :]
+    flat, conv = _relax_to_fixed_point(grids.reshape(n * 2**m, w), rule, max_steps)
+    return flat.reshape(n, 2**m, w), conv.reshape(n, 2**m)
+
+
+def _distinct_modes(fps: np.ndarray) -> np.ndarray:
+    """Distinct fixed points among a row's completions — the row's MODE SET, ``(n_modes, w)``."""
+    return np.unique(fps, axis=0)
+
+
+def ambiguous_modes(
+    X: np.ndarray, rule: int = 78, max_steps: int | None = None
+) -> list[np.ndarray]:
+    """Recover each row's mode set from the ``make_ambiguous_converge`` INPUT alone.
+
+    The masked cells carry the sentinel ``AMBIGUOUS_MASK_VALUE``, so X is self-describing: the mode
+    set is a deterministic function of X and the rule, with no extra plumbing through the dataset
+    or the loader. Evaluation uses this to ask the two questions ordinary metrics cannot —
+    *is the prediction a valid mode at all* (commitment vs blur) and *how many distinct modes does
+    the model cover under K latent draws* (XM's scaling claim).
+    """
+    masked = np.flatnonzero(np.isclose(X[0], AMBIGUOUS_MASK_VALUE))
+    if masked.size == 0:
+        raise ValueError("ambiguous_modes: X carries no masked cells (wrong task?).")
+    if not np.isclose(X[:, masked], AMBIGUOUS_MASK_VALUE).all():
+        raise ValueError("ambiguous_modes: masked positions differ across rows.")
+    w = X.shape[1]
+    max_steps = max_steps or 4 * w
+    obs = np.rint(np.asarray(X)).astype(np.int64)  # masked entries are overwritten below
+    fps, conv = _completion_fixed_points(obs, masked, rule, max_steps)
+    out = []
+    for i in range(len(X)):
+        out.append(_distinct_modes(fps[i][conv[i]]))
+    return out
+
+
+def make_ambiguous_converge(
+    n: int,
+    w: int,
+    n_masked: int,
+    task_seed: int,
+    sample_seed: int,
+    rule: int = 78,
+    min_modes: int = 2,
+    max_modes: int | None = None,
+    max_steps: int | None = None,
+    oversample: int = 6,
+):
+    """A GENUINELY MULTIMODAL fixed-point task with an ENUMERABLE mode set (M34).
+
+    Every other task in this suite is a single-valued function of X, so ``p(y|x)`` has one mode and
+    there is nothing for Explorative Modeling (arXiv 2607.27372) to explore: best-of-K would
+    degenerate into a noisier ERM. This task supplies the missing regime while staying inside the
+    exact structure the loop's validated win lives in (§9.2: local-update, deep, hard-convergence
+    CA fixed points).
+
+    Construction: draw ``s0``, then HIDE a contiguous block of ``n_masked`` cells (position fixed by
+    ``task_seed`` — it is part of the *function*; rows come from ``sample_seed``, §3). The input
+    shows the sentinel ``0.5`` at those cells. The target is the CA fixed point of a completion —
+    and since several completions relax to DIFFERENT fixed points, the row's conditional target
+    distribution is genuinely multimodal with a **known, enumerable support**: the distinct fixed
+    points of all ``2^n_masked`` completions. The label is drawn uniformly over that mode set, so
+    the conditional mean is not any mode — precisely the blur XM claims to fix, and precisely what
+    whole-row exact-match punishes.
+
+    Rows are rejection-filtered to genuine ambiguity (``min_modes`` distinct modes, every
+    completion convergent), mirroring ``converge``/``mixed_converge``. ``max_modes`` optionally caps
+    the mode count so the difficulty dial (``n_masked`` = log2 of the completion count) can be moved
+    without the mode count drifting. Returns ``(X, y)`` with X ``(n, w)`` float32 (sentinel at the
+    masked cells) and y ``(n, w)`` int64 — one drawn mode. Width is unchanged, so the mixer's cell
+    factorization (``in_features % out_features == 0``) still holds.
+    """
+    if not 1 <= n_masked < w:
+        raise ValueError(f"n_masked must be in [1, w), got {n_masked} (w={w})")
+    if n_masked > 12:
+        raise ValueError(f"n_masked={n_masked} would enumerate 2^{n_masked} completions per row")
+    fn_rng = np.random.default_rng(task_seed)
+    row_rng = np.random.default_rng(sample_seed)
+    max_steps = max_steps or 4 * w
+    start = int(fn_rng.integers(0, w))
+    masked = (start + np.arange(n_masked)) % w  # contiguous block: locality makes modes interact
+
+    draw = max(n * oversample, n + 64)
+    s0 = row_rng.integers(0, 2, size=(draw, w))
+    fps, conv = _completion_fixed_points(s0, masked, rule, max_steps)
+
+    keep_X, keep_y = [], []
+    for i in range(draw):
+        if not conv[i].all():
+            continue  # a non-convergent completion ⇒ the mode set is not well-defined; reject
+        modes = _distinct_modes(fps[i])
+        if len(modes) < min_modes or (max_modes is not None and len(modes) > max_modes):
+            continue
+        row = s0[i].astype(np.float32)
+        row[masked] = AMBIGUOUS_MASK_VALUE
+        keep_X.append(row)
+        # Uniform over DISTINCT modes (not over completions): the flat mixture is the hardest case
+        # for a conditional-mean predictor and makes mode coverage a clean [0,1] fraction.
+        keep_y.append(modes[row_rng.integers(0, len(modes))])
+        if len(keep_X) == n:
+            break
+
+    if len(keep_X) < n:
+        raise ValueError(
+            f"make_ambiguous_converge: only {len(keep_X)}/{n} rows had ≥{min_modes} modes with all "
+            f"completions convergent (rule={rule}, w={w}, n_masked={n_masked}, drew {draw}). Raise "
+            "oversample / n_masked, or pick a rule with a richer basin structure."
+        )
+    return np.stack(keep_X).astype(np.float32), np.stack(keep_y).astype(np.int64)
+
+
 # Default per-position rule pool for `make_mixed_converge`: ECA symmetry orbit 1 (M12), the
 # converging-orbit-mates of rule 78. Mixing these per position breaks translation-invariance while
 # every position still runs a *converging* radius-1 rule (best global-convergence rate of the
