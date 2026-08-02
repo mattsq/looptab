@@ -1,0 +1,8 @@
+config,arm,n_params,ref_params,ratio,role,within_tol
+single,trm_det,29324,29324,1.0000,reference,True
+single,trm_xm1,29324,29324,1.0000,matched,True
+single,trm_xm8,29324,29324,1.0000,matched,True
+single,ff_det,29337,29324,1.0004,matched,True
+single,ff_xm1,29337,29324,1.0004,matched,True
+single,ff_xm8,29337,29324,1.0004,matched,True
+single,trm_decoupled_det,29438,29324,1.0039,matched,True
