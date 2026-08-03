@@ -755,10 +755,18 @@ file and one index row, not here.
     `results/` wholesale.
   - **Neither is bit-identical**, so they are opt-in and an experiment must set them **uniformly
     across every arm** — a uniform shift cancels in the Δ the repo reports, a per-arm one does not.
-  - **Scope of the retest: CLASSIFICATION (sudoku) only.** `amp` is untested on the M26/M30
-    forecasting REGRESSION path, where fp16 on an MSE loss has a genuinely different error profile
-    (small gradients, no softmax to renormalise), and on the multilabel-F1 path. Verify there
-    before trusting it — do not assume the sudoku result transfers.
+  - **★ `amp` is NOT a free win — TIME IT on your config before using it.** Retested on M26 ETTh1
+    forecasting (regression/MSE, 6 arms, 10 backtest blocks): the **numerics are fine** — all 7 Δs
+    reproduce with signs intact, largest shift 0.0042 against ±0.027–0.074 seed stds — but AMP is
+    **~0.74x, i.e. 35% SLOWER** (6m22s → 8m49s; reproduced 95s vs 127/128s per seed with the run
+    order flipped). Per-arm isolation shows *every* arm neutral-or-slower, including the widest
+    (`trm_mixer` h224 0.86x, `trm_decoupled` 0.81x) — so it is **not** arm width. The plausible
+    driver is the GEMM row count `batch × n_cells`: sudoku runs 256×36 = **9216** rows and gains
+    1.18x, ETTh1 runs 128×7 = **896** (ETTh1 has only 7 variable-cells) and loses. Below some size
+    the fp32↔fp16 cast traffic costs more than Turing's tensor cores save. Two data points, so
+    treat the mechanism as a hypothesis and the *rule* as: **measure, don't assume.** The risk is
+    wasted wall clock, not wrong results.
+  - Still untested: `amp` on the multilabel-F1 path, and `compile` on anything but sudoku.
 
 ### 11.4 Closed levers — do not redo casually
 
