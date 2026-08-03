@@ -65,6 +65,7 @@ def train(
     ema_decay: float | None = None,
     loss_type: str = "ce",
     device: str = "cpu",
+    amp: bool = False,
     verbose: bool = False,
 ) -> list[float]:
     """Train model; return per-epoch train losses.
@@ -73,11 +74,22 @@ def train(
     the model at the end, so evaluation runs on the averaged weights. ``None`` = no EMA,
     bit-identical to the pre-M18 routine. ``loss_type`` ("ce" default / "mse" for M26 regression)
     selects the task loss; "ce" is bit-identical to the pre-M26 routine.
+
+    ``amp`` (opt-in, CUDA-only): run the forward/loss under fp16 autocast and scale gradients.
+    Weights stay fp32 masters and evaluation is untouched (fp32), so only the training arithmetic
+    changes. **When ``amp=False`` this routine is bit-identical to the pre-AMP one**: an autocast
+    context with ``enabled=False`` and a ``GradScaler`` with ``enabled=False`` are documented
+    no-ops (``scale``/``step``/``update`` degrade to ``loss``/``opt.step()``/nothing).
     """
     model = model.to(device)
     opt = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=weight_decay)
     ema = EMA(model, ema_decay) if ema_decay is not None else None
     losses = []
+
+    # fp16 tensor cores are a CUDA feature; on CPU autocast(float16) would be a slow no-win, so
+    # `amp` is inert there rather than an error (configs stay portable between cpu/cuda boxes).
+    use_amp = amp and torch.device(device).type == "cuda"
+    scaler = torch.cuda.amp.GradScaler(enabled=use_amp)
 
     for epoch in range(epochs):
         model.train()
@@ -86,15 +98,17 @@ def train(
         for X, y in train_loader:
             X, y = X.to(device), y.to(device)
             opt.zero_grad()
-            logits, all_logits = model(X)
-            loss = _loss_fn(logits, y, loss_type)
-            if all_logits is not None and deep_supervision_weight > 0:
-                ds_loss = sum(
-                    _loss_fn(sl, y, loss_type) for sl in all_logits
-                ) / len(all_logits)
-                loss = loss + deep_supervision_weight * ds_loss
-            loss.backward()
-            opt.step()
+            with torch.autocast(device_type="cuda", dtype=torch.float16, enabled=use_amp):
+                logits, all_logits = model(X)
+                loss = _loss_fn(logits, y, loss_type)
+                if all_logits is not None and deep_supervision_weight > 0:
+                    ds_loss = sum(
+                        _loss_fn(sl, y, loss_type) for sl in all_logits
+                    ) / len(all_logits)
+                    loss = loss + deep_supervision_weight * ds_loss
+            scaler.scale(loss).backward()
+            scaler.step(opt)
+            scaler.update()
             if ema is not None:
                 ema.update(model)
             epoch_loss += loss.item()

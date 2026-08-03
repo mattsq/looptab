@@ -645,3 +645,60 @@ def test_extrapolation_harness_determinism():
     assert baseline == baseline_main
     assert extrap_out[("trm_ds", 3)]["accuracy"] == out_main["trm_ds"]["accuracy"]
     assert extrap_out[("trm_nods", 3)]["accuracy"] == out_main["trm_nods"]["accuracy"]
+
+
+# --- speed knobs: `amp` / `compile` (§11.1) ------------------------------------------------
+# Both change NUMERICS when on, so the contract is: (1) OFF is bit-identical to the pre-knob
+# runner, and (2) a configuration that cannot honour the knob FAILS LOUDLY rather than silently
+# training some arms differently — a per-arm precision difference would land in the reported Δ.
+
+
+def test_amp_off_is_bit_identical():
+    """amp=False must reproduce the pre-AMP path exactly (autocast/GradScaler disabled are
+    documented no-ops). Guards the wrapper itself, on whatever device the suite runs on."""
+    # Same train settings as the default _cfg; the ONLY difference is amp being stated explicitly.
+    ref_cfg = _cfg()
+    ref, _, _, _ = run_point(ref_cfg, ref_cfg.task.params, seed=0)
+    cfg = _cfg(train=dict(epochs=3, lr=1e-3, batch_size=128, device="cpu", amp=False))
+    got, _, _, _ = run_point(cfg, cfg.task.params, seed=0)
+    assert set(ref) == set(got)
+    for label in ref:
+        assert ref[label]["accuracy"] == got[label]["accuracy"]
+        assert ref[label]["n_params"] == got[label]["n_params"]
+
+
+def test_amp_defaults_off():
+    cfg = _cfg()
+    assert cfg.train.amp is False and cfg.train.compile is False
+
+
+def test_amp_rejects_non_standard_train_routines():
+    """AMP is wired into the standard train path only; n_sup>1 / use_act / contraction arms must
+    raise, not silently drop the flag."""
+    for arm_over in [
+        dict(n_sup=2),
+        dict(use_act=True),
+        dict(jac_reg_weight=0.1),
+    ]:
+        arm = dict(name="trm", label="a", hidden_dim=16, latent_dim=16, n_steps=3, **arm_over)
+        cfg = _cfg(
+            arms=[arm],
+            train=dict(epochs=1, lr=1e-3, weight_decay=1e-4, batch_size=64, amp=True),
+        )
+        with pytest.raises(ValueError, match="standard train path only"):
+            run_point(cfg, cfg.task.params, seed=0)
+
+
+def test_compile_failure_is_actionable():
+    """Where torch.compile can't run (old torch / no Triton), the error must name the fix rather
+    than surfacing a bare dynamo RuntimeError. Skipped where compile actually works."""
+    from looptab.run import _compile_model
+
+    try:
+        torch.compile(torch.nn.Linear(2, 2))
+    except Exception:
+        pass
+    else:
+        pytest.skip("torch.compile is available here; nothing to assert about the failure path")
+    with pytest.raises(RuntimeError, match="train.compile=true"):
+        _compile_model(torch.nn.Linear(2, 2))

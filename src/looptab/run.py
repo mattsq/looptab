@@ -102,6 +102,26 @@ def _build_model(
     return get_model(arm.name, **kwargs)
 
 
+def _compile_model(m):
+    """`torch.compile` an arm, failing loudly with actionable guidance if the toolchain can't.
+
+    Inductor's CUDA backend generates Triton kernels, so this needs (a) a torch new enough for
+    the running interpreter — torch 2.2 + Python 3.12 raises "Dynamo is not supported" — and
+    (b) Triton, which publishes no Windows wheels (the community `triton-windows` package fills
+    that gap). Both failures are environment problems with concrete fixes, so say so rather than
+    surfacing a bare RuntimeError from deep inside dynamo.
+    """
+    try:
+        return torch.compile(m)
+    except Exception as e:  # noqa: BLE001 - re-raised immediately with guidance attached
+        raise RuntimeError(
+            f"train.compile=true but torch.compile is unavailable here ({type(e).__name__}: {e}). "
+            f"Needs a torch supporting Dynamo on this interpreter (torch {torch.__version__} on "
+            "Python 3.12 does not if <2.4) plus Triton (on Windows: pip install triton-windows). "
+            "Set compile: false to run without it."
+        ) from e
+
+
 def _baselines(loader, *, want_exact_match: bool) -> dict[str, float]:
     out = {"accuracy": majority_baseline(loader)}
     if want_exact_match:
@@ -196,6 +216,11 @@ def run_point(cfg: ExperimentConfig, task_params: dict, seed: int) -> tuple[dict
         # shuffle stream are identical across arms and independent of arm order.
         torch.manual_seed(seed)
         m = _build_model(arm, in_features, num_classes, out_features, n_steps=coupled_steps)
+        # `count_params` is read off the ORIGINAL module: torch.compile returns a wrapper, and
+        # the budget-parity check must measure the real parameter set either way.
+        m_orig = m
+        if cfg.train.compile:
+            m = _compile_model(m)
         stable = arm.jac_reg_weight > 0 or arm.fixed_point_weight > 0
         if regression and (curriculum is not None or arm.use_act or arm.n_sup > 1 or stable):
             # M26 regression uses the standard MSE train path only; the curriculum/ACT/N_sup/stable
@@ -205,6 +230,17 @@ def run_point(cfg: ExperimentConfig, task_params: dict, seed: int) -> tuple[dict
                 f"arm '{arm.resolved_label()}': regression (objective=regression) supports only "
                 "standard train path — curriculum / use_act / n_sup>1 / contraction-reg are "
                 "classification routines."
+            )
+        if cfg.train.amp and (curriculum is not None or arm.use_act or arm.n_sup > 1 or stable):
+            # AMP is wired into the STANDARD train path only. The curriculum / ACT / N_sup /
+            # contraction routines have their own loss and backward structure (and train_stable
+            # differentiates through a Jacobian probe, which fp16 would degrade). Fail loudly
+            # rather than silently training some arms in fp16 and others in fp32 — a per-arm
+            # precision difference would land directly in the reported Δ.
+            raise ValueError(
+                f"arm '{arm.resolved_label()}': train.amp=true is supported on the standard "
+                "train path only — curriculum / use_act / n_sup>1 / contraction-reg arms have "
+                "their own training routines. Set amp: false for this experiment."
             )
         if curriculum is not None and stable:
             # The M27 contraction penalty is a standard-train mechanism; combining it with the
@@ -344,6 +380,7 @@ def run_point(cfg: ExperimentConfig, task_params: dict, seed: int) -> tuple[dict
                 ema_decay=arm.ema_decay,
                 loss_type="mse" if regression else "ce",
                 device=device,
+                amp=cfg.train.amp,
             )
         # M26 forecasting: MSE/MAE/R² from the raw regression readout (no argmax). `accuracy`
         # mirrors −mse so the generic curve/baseline plumbing stays meaningful; the reported
@@ -356,7 +393,7 @@ def run_point(cfg: ExperimentConfig, task_params: dict, seed: int) -> tuple[dict
             metrics = {
                 "accuracy": test_metrics["accuracy"],
                 "train_accuracy": train_acc,
-                "n_params": m.count_params(),
+                "n_params": m_orig.count_params(),
                 "mse": test_metrics["mse"],
                 "mae": test_metrics["mae"],
                 "r2": test_metrics["r2"],
@@ -391,7 +428,7 @@ def run_point(cfg: ExperimentConfig, task_params: dict, seed: int) -> tuple[dict
             # fails at high T with *low train acc too* is an optimization failure (Phase 2's
             # step-aligned DS may help), not a capacity verdict against the loop.
             "train_accuracy": train_acc,
-            "n_params": m.count_params(),
+            "n_params": m_orig.count_params(),
         }
         if arm.use_act and "avg_segments" in test_metrics:
             metrics["avg_segments"] = test_metrics["avg_segments"]  # adaptive-compute diagnostic

@@ -134,6 +134,24 @@ class TrainConfig(BaseModel):
     # pinning is a pure speed/portability win, not a numerical change. `None` leaves torch's
     # default untouched (set this if you ever scale the models past the tiny regime).
     num_threads: Optional[int] = 1
+    # --- Speed knobs. BOTH default OFF and are bit-identical when off; both CHANGE NUMERICS
+    # when on, so they are opt-in and a whole experiment must set them uniformly (every arm on
+    # the same path) — a uniform shift cancels in the Δ the repo reports, a per-arm one does not.
+    #
+    # `amp`: fp16 mixed precision for TRAINING only (autocast + GradScaler); evaluation always
+    # runs in fp32, so metrics stay directly comparable. CUDA-only (silently inert on CPU, which
+    # has no fp16 tensor cores). Turing/Ampere+ give ~2x on the GEMMs; measured ~1.1-1.2x
+    # end-to-end here. Supported on the STANDARD train path only — the curriculum / ACT / N_sup /
+    # contraction routines raise rather than silently ignore it.
+    #
+    # `compile`: wrap each arm in `torch.compile`. Measured ~1.9-2.2x with amp (the largest
+    # single lever), but it needs a torch new enough for this interpreter (torch 2.2 + Python
+    # 3.12 raises "Dynamo is not supported") AND Triton — which has no Windows wheels, so on
+    # Windows it additionally needs the community `triton-windows` package. Costs a ~30s compile
+    # warmup per process, which is heavy for short runs. Fails loudly with guidance if the
+    # toolchain can't support it.
+    amp: bool = False
+    compile: bool = False
 
 
 class SweepConfig(BaseModel):

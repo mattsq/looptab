@@ -721,24 +721,44 @@ file and one index row, not here.
   already shows non-recurrent mixing suffices); a convergent fixed-point task the mixer
   under-fits, to test the DS carry in its motivated regime (none found — the mixer fits them
   all). Neither is needed to interpret current evidence.
-- **Speed: the remaining wins all change NUMERICS, so they are a DECISION, not a task.** Compute
-  is ~99% of a run and the dominant channel-MLP GEMM already sits at ~94% of fp32 peak, so
-  nothing is left on the engineering side — the GPU is not underutilised. Measured and *rejected*
-  as no-ops/harms: fused Adam (1.006x), CUDA graphs (1.00x), uniform batch shapes (1.014x),
-  dataloader work (0.9% of runtime), `torch.func.vmap` seed-ensembling (**0.88x, slower**),
-  multi-process GPU sharing (**0.40–0.51x**). What *does* work, and what it costs:
-  - **AMP fp16** (~1.1–1.2x): Turing has fp16-only tensor cores, exactly 2.00x on that GEMM.
-  - **`torch.compile`** (~1.9–2.2x, the big one): needs torch ≥2.4 for py3.12 plus Triton, which
-    has **no Windows wheels** — the community `triton-windows` package + the already-installed
-    torch 2.13 makes it work. Costs a ~30s compile warmup *per process*, which is heavy for this
-    repo's many short runs.
-  - Both are **metric-neutral but not bit-identical** (measured over 15 epochs × 3 seeds:
-    Δaccuracy +0.0000, ΔEM −0.003…−0.004, mixed signs, vs a seed-to-seed EM spread of 0.13).
-    Adopting `torch.compile` also means moving off the `torch>=2.2,<2.3` pin, which changes
-    numerics against **every committed result in `results/`**. So: fine as an opt-in fast lane
-    for exploration, with **all arms of a comparison on the same path** (a uniform shift cancels
-    in Δ); not fine as a silent default. Hand-written CUDA kernels reached 1.68x and were
-    **rejected** — `torch.compile` beats them with no custom code (see the GPU memory note).
+- **Speed knobs `train.amp` / `train.compile` (BUILT, opt-in, off by default).** Compute is ~99%
+  of a run and the dominant channel-MLP GEMM already sits at ~94% of fp32 peak, so nothing is
+  left on the plumbing side. Measured and *rejected* as no-ops/harms: fused Adam (1.006x), CUDA
+  graphs (1.00x), uniform batch shapes (1.014x), dataloader work (0.9% of runtime),
+  `torch.func.vmap` seed-ensembling (**0.88x, slower**), and hand-written CUDA kernels (reached
+  1.68x but `torch.compile` beats them with no custom code — see the GPU memory note). What
+  works:
+  - **`amp: true`** — fp16 autocast + GradScaler on the STANDARD train path (raises on the
+    curriculum / ACT / N_sup / contraction routines rather than silently skipping). Training
+    only; **eval always runs fp32**, so metrics stay comparable. **RETESTED on the full M23
+    mixer sweep (3 difficulties × 6 seeds) and the conclusions are preserved:** Δ(trm_mixer −
+    ff_matched) = +0.1218 / +0.2371 / +0.3225 vs the fp32 +0.1219 / +0.2372 / +0.3224 — agreeing
+    to **±0.0001**, ~25× inside the seed std (±0.0025); EM within ±0.002 vs a ±0.016–0.02 std.
+    1.18x wall clock (7m08s vs 8m26s). CUDA-only (inert on CPU).
+  - **`compile: true`** — `torch.compile` per arm. Needs a torch supporting Dynamo on the running
+    interpreter (torch 2.2 + py3.12 does NOT) plus Triton, which has **no Windows wheels** (use
+    the community `triton-windows`; this box's system torch 2.13 + that package works). Costs a
+    compile warmup per process, but Inductor's on-disk cache amortises it across a sweep.
+    `_compile_model` fails loudly with this guidance.
+  - **Measured on the full M23 mixer sweep** (3 difficulties × 6 seeds, headline Δ@n_givens=14
+    and wall clock; the pinned torch-2.2.2 fp32 run is the reference):
+    | config | time | Δ(mixer−ff)@14 | EM@14 |
+    |---|---|---|---|
+    | torch 2.2.2 eager fp32 (reference) | 8m26s | +0.3224 | +0.8932 |
+    | torch 2.2.2 + amp | 7m08s (1.18x) | +0.3225 | +0.8952 |
+    | torch 2.13 eager fp32 | 8m10s | +0.3224 | +0.8932 |
+    | torch 2.13 + compile + amp | **4m50s (1.74x)** | +0.3224 | +0.8935 |
+    Accuracy Δ agrees to **±0.0001** (~25× inside the ±0.0025 seed std) and EM to ±0.002
+    (±0.016–0.02 std) in every cell. **A torch 2.13 vs 2.2.2 eager run is itself metric-identical
+    to 4 dp here** (only `coherence_excess` @18 moves in the 4th decimal), so the version bump is
+    far less disruptive than feared — but that is ONE config, not a licence to re-baseline
+    `results/` wholesale.
+  - **Neither is bit-identical**, so they are opt-in and an experiment must set them **uniformly
+    across every arm** — a uniform shift cancels in the Δ the repo reports, a per-arm one does not.
+  - **Scope of the retest: CLASSIFICATION (sudoku) only.** `amp` is untested on the M26/M30
+    forecasting REGRESSION path, where fp16 on an MSE loss has a genuinely different error profile
+    (small gradients, no softmax to renormalise), and on the multilabel-F1 path. Verify there
+    before trusting it — do not assume the sudoku result transfers.
 
 ### 11.4 Closed levers — do not redo casually
 
