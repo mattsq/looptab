@@ -135,7 +135,9 @@ def run_point(cfg: ExperimentConfig, task_params: dict, seed: int) -> tuple[dict
         n_test=task_cfg.n_test,
         seed=seed,
     )
-    train_loader, test_loader = make_loaders(train_ds, test_ds, cfg.train.batch_size)
+    train_loader, test_loader = make_loaders(
+        train_ds, test_ds, cfg.train.batch_size, device=cfg.train.device
+    )
 
     X_sample, _ = train_ds[0]
     in_features = int(X_sample.shape[0])
@@ -182,7 +184,9 @@ def run_point(cfg: ExperimentConfig, task_params: dict, seed: int) -> tuple[dict
             n=task_cfg.n_train,
             T_max=curriculum.T_max,
         )
-        traj_loader, _ = make_loaders(traj_ds, traj_ds, cfg.train.batch_size)
+        traj_loader, _ = make_loaders(
+            traj_ds, traj_ds, cfg.train.batch_size, device=cfg.train.device
+        )
 
     device = cfg.train.device
     results = {}
@@ -556,7 +560,9 @@ def run_extrapolation_point(
         n_test=task_cfg.n_test,
         seed=seed,
     )
-    _, test_loader = make_loaders(test_ds, test_ds, cfg.train.batch_size)
+    _, test_loader = make_loaders(
+        test_ds, test_ds, cfg.train.batch_size, device=cfg.train.device
+    )
     multi_output = test_ds.y.ndim > 1
 
     point_results = {}

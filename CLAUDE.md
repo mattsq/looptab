@@ -487,6 +487,22 @@ file and one index row, not here.
 - **Configs/results:** experiment configs in `configs/experiments/`; tracked summaries in
   `results/`; milestone narratives indexed by `results/LOG.md`. `pad_to_label_multiple`
   (M25, off by default) right-pads X so `d % L == 0` for the mixer on real data.
+- **GPU (`train.device: cuda`).** Works, and is a large win on the 3-D-matmul arms (the M23
+  mixer sweep: 74m CPU → 9m GPU, ~8.3x; tiny/flat configs gain little — CUDA-context startup
+  dominates). Two things to know before running on GPU:
+  - The loader parks the dataset **on the device** (`make_loaders(..., device=...)`), so batches
+    are device-side gathers instead of a host→device copy each batch. Batches are
+    **bit-identical** (the permutation is still drawn on the CPU generator; only the gather
+    moves) — verified by `tests/test_dataset.py` and by reproducing committed run output
+    exactly. Sized honestly: the copies are ~0.9% of runtime, so this is **~1.02x** on the fp32
+    path (~1.10x under AMP) — small, but free, and it stops the copies becoming the floor if
+    compute ever gets cheaper.
+  - **`parallel_workers` still helps on GPU — keep it.** A microbenchmark that spawned a fresh
+    process per model suggested GPU workers were a *pessimisation* (0.40–0.51x), but that was an
+    artifact of paying CUDA-context startup per process; the runner's `ProcessPoolExecutor` keeps
+    workers alive across seeds. Clean A/B on the real M23 mixer sweep, same code both arms:
+    `parallel_workers: 3` = **8m26s** vs `1` = **9m37s** (1.14x). Trust the real-config A/B, not
+    the microbenchmark.
 
 ### 11.2 Behaviour-changing conclusions (read before re-running anything)
 
@@ -705,6 +721,24 @@ file and one index row, not here.
   already shows non-recurrent mixing suffices); a convergent fixed-point task the mixer
   under-fits, to test the DS carry in its motivated regime (none found — the mixer fits them
   all). Neither is needed to interpret current evidence.
+- **Speed: the remaining wins all change NUMERICS, so they are a DECISION, not a task.** Compute
+  is ~99% of a run and the dominant channel-MLP GEMM already sits at ~94% of fp32 peak, so
+  nothing is left on the engineering side — the GPU is not underutilised. Measured and *rejected*
+  as no-ops/harms: fused Adam (1.006x), CUDA graphs (1.00x), uniform batch shapes (1.014x),
+  dataloader work (0.9% of runtime), `torch.func.vmap` seed-ensembling (**0.88x, slower**),
+  multi-process GPU sharing (**0.40–0.51x**). What *does* work, and what it costs:
+  - **AMP fp16** (~1.1–1.2x): Turing has fp16-only tensor cores, exactly 2.00x on that GEMM.
+  - **`torch.compile`** (~1.9–2.2x, the big one): needs torch ≥2.4 for py3.12 plus Triton, which
+    has **no Windows wheels** — the community `triton-windows` package + the already-installed
+    torch 2.13 makes it work. Costs a ~30s compile warmup *per process*, which is heavy for this
+    repo's many short runs.
+  - Both are **metric-neutral but not bit-identical** (measured over 15 epochs × 3 seeds:
+    Δaccuracy +0.0000, ΔEM −0.003…−0.004, mixed signs, vs a seed-to-seed EM spread of 0.13).
+    Adopting `torch.compile` also means moving off the `torch>=2.2,<2.3` pin, which changes
+    numerics against **every committed result in `results/`**. So: fine as an opt-in fast lane
+    for exploration, with **all arms of a comparison on the same path** (a uniform shift cancels
+    in Δ); not fine as a silent default. Hand-written CUDA kernels reached 1.68x and were
+    **rejected** — `torch.compile` beats them with no custom code (see the GPU memory note).
 
 ### 11.4 Closed levers — do not redo casually
 
