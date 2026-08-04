@@ -702,3 +702,44 @@ def test_compile_failure_is_actionable():
         pytest.skip("torch.compile is available here; nothing to assert about the failure path")
     with pytest.raises(RuntimeError, match="train.compile=true"):
         _compile_model(torch.nn.Linear(2, 2))
+
+
+def test_cuda_graph_off_is_bit_identical():
+    """cuda_graph=False must reproduce the pre-cuda_graph path exactly (it's inert on CPU too,
+    but this guards the wrapper itself takes the untouched branch when the flag is off)."""
+    ref_cfg = _cfg()
+    ref, _, _, _ = run_point(ref_cfg, ref_cfg.task.params, seed=0)
+    cfg = _cfg(train=dict(epochs=3, lr=1e-3, batch_size=128, device="cpu", cuda_graph=False))
+    got, _, _, _ = run_point(cfg, cfg.task.params, seed=0)
+    assert set(ref) == set(got)
+    for label in ref:
+        assert ref[label]["accuracy"] == got[label]["accuracy"]
+        assert ref[label]["n_params"] == got[label]["n_params"]
+
+
+def test_cuda_graph_defaults_off():
+    cfg = _cfg()
+    assert cfg.train.amp is False and cfg.train.compile is False and cfg.train.cuda_graph is False
+
+
+def test_cuda_graph_rejects_non_standard_train_routines():
+    """cuda_graph is wired into the standard train path only; n_sup>1 / use_act / contraction
+    arms must raise, not silently drop the flag."""
+    for arm_over in [
+        dict(n_sup=2),
+        dict(use_act=True),
+        dict(jac_reg_weight=0.1),
+    ]:
+        arm = dict(name="trm", label="a", hidden_dim=16, latent_dim=16, n_steps=3, **arm_over)
+        cfg = _cfg(
+            arms=[arm],
+            train=dict(epochs=1, lr=1e-3, weight_decay=1e-4, batch_size=64, cuda_graph=True),
+        )
+        with pytest.raises(ValueError, match="standard train path only"):
+            run_point(cfg, cfg.task.params, seed=0)
+
+
+def test_cuda_graph_amp_mutually_exclusive():
+    cfg = _cfg(train=dict(epochs=1, lr=1e-3, batch_size=64, amp=True, cuda_graph=True))
+    with pytest.raises(ValueError, match="cannot be combined"):
+        run_point(cfg, cfg.task.params, seed=0)

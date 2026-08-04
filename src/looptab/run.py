@@ -74,7 +74,7 @@ def _build_model(
     # variants that take the SAME knobs (rmsnorm/n_latent/token_hidden) and stay byte-identical to
     # `trm_mixer` at their default flags — only their hardwired flag (readout/weight-share) differs.
     mixer_family = (
-        "trm_mixer", "trm_mixer_nomix",
+        "trm_mixer", "trm_mixer_fused", "trm_mixer_nomix",
         "trm_mixer_unsharedro", "trm_mixer_nomix_unsharedro", "trm_mixer_nomix_distinctw",
     )
     # The TRM loop and both untied-stack controls (§4b) emit per-step readouts, so deep
@@ -243,6 +243,24 @@ def run_point(cfg: ExperimentConfig, task_params: dict, seed: int) -> tuple[dict
                 "train path only — curriculum / use_act / n_sup>1 / contraction-reg arms have "
                 "their own training routines. Set amp: false for this experiment."
             )
+        cuda_graph_conflict = curriculum is not None or arm.use_act or arm.n_sup > 1 or stable
+        if cfg.train.cuda_graph and cuda_graph_conflict:
+            # cuda_graph is wired into the STANDARD train path only, same reasoning as amp above:
+            # the other routines run a variable inner-loop structure (curriculum depth sampling,
+            # ACT/N_sup detached-carry passes, the stable Jacobian probe) that a single fixed
+            # captured graph cannot represent. Fail loudly rather than silently falling back.
+            raise ValueError(
+                f"arm '{arm.resolved_label()}': train.cuda_graph=true is supported on the "
+                "standard train path only — curriculum / use_act / n_sup>1 / contraction-reg "
+                "arms have their own training routines. Set cuda_graph: false for this experiment."
+            )
+        if cfg.train.cuda_graph and cfg.train.amp:
+            # GradScaler's dynamic loss-scale logic needs host-side inf/nan checks each step;
+            # combining that with a statically replayed graph is unsupported for now (§11.3).
+            raise ValueError(
+                f"arm '{arm.resolved_label()}': train.cuda_graph and train.amp cannot be combined "
+                "yet. Set one of them false for this experiment."
+            )
         if curriculum is not None and stable:
             # The M27 contraction penalty is a standard-train mechanism; combining it with the
             # trajectory curriculum would conflate two schemes (§5.6, one knob per ablation).
@@ -382,6 +400,7 @@ def run_point(cfg: ExperimentConfig, task_params: dict, seed: int) -> tuple[dict
                 loss_type="mse" if regression else "ce",
                 device=device,
                 amp=cfg.train.amp,
+                cuda_graph=cfg.train.cuda_graph,
             )
         # M26 forecasting: MSE/MAE/R² from the raw regression readout (no argmax). `accuracy`
         # mirrors −mse so the generic curve/baseline plumbing stays meaningful; the reported

@@ -471,7 +471,14 @@ file and one index row, not here.
   block-diagonal readout) + `trm_mixer_nomix_distinctw` (`distinct_cell_weights=True` per-cell channel
   MLPs) — all off-by-default `TRMMixer` flags ⇒ byte-identical at defaults. M18 TRM-faithful
   knobs (`use_rmsnorm`, `n_latent`, `ema_decay`, `n_sup`) + `trm_faithful` arm; all
-  off-by-default ⇒ bit-identical.
+  off-by-default ⇒ bit-identical. `trm_mixer_fused` (`TRMMixerFused`): `trm_mixer` with the
+  token-mixing step dispatched to a hand-written CUDA kernel (`models/csrc/fused_token_mix.cu`)
+  instead of eager transpose+Sequential+transpose — numerically exact (gradcheck-verified), not a
+  precision tradeoff, but compiled for a CLOSED set of `(n_cells, token_hidden)` shapes (currently
+  the real configs' shapes: sudoku 36/64, ETTh1 7/8, weather 21/8, plus 6/6 for tests); an
+  unsupported shape raises loudly at construction. CUDA-only, needs a working extension build
+  toolchain (MSVC on Windows — see the global CLAUDE.md vcvars note); JIT-compiled lazily on first
+  use, so importing the package never requires the toolchain. See §11.2 #16.
 - **Training/eval** (`src/looptab/train/`, `src/looptab/eval/`): routines `train`,
   `train_curriculum`, `train_progressive`, `train_deep_supervision` (detached-carry DS —
   runs on `trm`/`trm_decoupled` and, since M29, `trm_mixer`), `train_act` (ACT halting,
@@ -503,6 +510,13 @@ file and one index row, not here.
     workers alive across seeds. Clean A/B on the real M23 mixer sweep, same code both arms:
     `parallel_workers: 3` = **8m26s** vs `1` = **9m37s** (1.14x). Trust the real-config A/B, not
     the microbenchmark.
+  - **`train.cuda_graph` (opt-in, off by default, CUDA-only): capture the whole training step
+    into a CUDA graph and replay it.** See §11.2 #16 for the finding and #17 for the fused
+    kernel it composes with; mechanism/caveats are in `TrainConfig.cuda_graph`'s docstring. Real
+    end-to-end win on ETTh1 forecasting (6 arms, 3 seeds, through `python -m looptab.run`, not
+    just an isolated benchmark): **165s → 35s (4.71x)**, Δs match the eager run within seed noise.
+    Mutually exclusive with `amp` for now; standard train path only (curriculum/ACT/N_sup/
+    contraction raise, same guard pattern as `amp`).
 
 ### 11.2 Behaviour-changing conclusions (read before re-running anything)
 
@@ -698,6 +712,39 @@ file and one index row, not here.
     there so moot; mixer arms inherit baseline widths (up to 1.041, within ±5% spec); **disruption_w32 had a
     generator bug (gamma=14 copied from w24; the M24f w32 baseline + minimal-PSD margin require gamma=15) —
     fixed and re-run at gamma=15 so it reproduces M24f; the mixing-leg conclusion held at gamma=14 too.**
+16. **★ On SMALL configs (few cells/channels), the training step is launch-bound, not
+    compute-bound — CUDA graph capture (`train.cuda_graph`) is a bigger lever than `amp`/`compile`
+    there, reversing the earlier "CUDA graphs are a 1.00x no-op" finding.** Profiling ETTh1
+    forecasting (`trm_mixer`, batch=128, n_cells=7) found only ~4.5ms of a 21ms eager step was
+    actual GPU compute — the rest was ~590 kernel-launch dispatches/step. `torch.cuda.graph()`
+    capture of the whole step (zero-grad + forward + backward + optimizer step, `capturable=True`
+    AdamW) eliminates nearly all of that: **~4.9–5.3x isolated, 4.71x end-to-end through the real
+    runner** (165s→35s, 6 arms/3 seeds, Δs preserved within seed noise). This is shape-dependent,
+    not a universal win: the earlier speed-knob search rejected CUDA graphs as a 1.00x no-op at
+    SUDOKU scale (large GEMMs, already compute-bound) — both findings are correct, for different
+    shapes; measure per config, don't assume either direction. `torch.compile(mode=
+    "reduce-overhead")` gets most of the same win because it also uses CUDA graphs internally
+    (~6x there vs default mode's ~2x) — the lever is the graph capture, not Triton fusion.
+17. **On the SAME small-config regime, a custom kernel can still edge out `torch.compile`, but
+    only once BOTH are wrapped in a CUDA graph — and the win is small (~0–10%), not the headline.**
+    Isolated on ETTh1's shape: eager 21ms → `compile` default 10.6ms (2.0x) → `compile
+    reduce-overhead` OR eager+manual-graph ~3.2–4.0ms (~5–6x, both use CUDA graphs) →
+    fused-kernel+graph ~3.18ms (consistently the fastest of the four across 4 repeated runs, but by
+    single-digit percent over `compile`'s best mode, not an order of magnitude). Shipped as
+    `trm_mixer_fused` (`models/csrc/fused_token_mix.cu` + `models/_fused_token_mix_ext.py`),
+    composable with `train.cuda_graph` with no special-casing (the two are independent: cuda_graph
+    captures whatever the model's forward/backward produces). **Load-bearing correctness lesson,
+    generalizable beyond this kernel:** the first integration attempt trained "successfully" under
+    `cuda_graph` — no crash, no NaN, parameters visibly updating — but the loss oscillated instead
+    of converging. Root cause: the kernel launched via bare `<<<grid,block>>>` (the implicit legacy
+    default stream) instead of `at::cuda::getCurrentCUDAStream()`. This is invisible in eager use
+    (PyTorch's current stream is usually the default stream there) but `torch.cuda.graph()`
+    capture redirects "current stream" to a dedicated capture stream, so the kernel raced against
+    the rest of the captured graph instead of being ordered against it — a plausible-but-wrong
+    gradient, not a crash. **Any custom CUDA extension intended to be graph-capturable must launch
+    on the current PyTorch stream, not the implicit default one**; `tests/test_fused_mixer.py::
+    test_fused_kernel_composes_with_cuda_graph` guards against regressing this (asserts genuine
+    convergence under cuda_graph, not just "ran without error").
 
 ### 11.3 Open work
 

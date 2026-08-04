@@ -152,6 +152,33 @@ class TrainConfig(BaseModel):
     # toolchain can't support it.
     amp: bool = False
     compile: bool = False
+    # `cuda_graph`: capture the whole training step (zero-grad + forward + loss + backward +
+    # optimizer step, + EMA update if enabled) into a CUDA graph and replay it every batch,
+    # eliminating per-kernel-launch dispatch overhead. CUDA-only (silently inert on CPU).
+    # Supported on the STANDARD train path only (curriculum / ACT / N_sup / contraction raise).
+    # Mutually exclusive with `amp` for now — GradScaler's dynamic loss-scale logic needs
+    # host-side inf/nan checks that don't compose with a static replayed graph.
+    #
+    # Why this can be a much bigger lever than `amp`/`compile` on SMALL configs: profiling a
+    # tiny model (M26 ETTh1 forecasting: batch=128, n_cells=7) showed only ~4.5ms of a 21ms
+    # eager step was actual GPU compute — the rest was ~590 kernel-launch dispatches/step. CUDA
+    # graphs eliminate nearly all of that, measured ~4.9-5.3x end-to-end there (vs `compile`
+    # default mode's ~2x) — on a workload this small, replaying the whole step as a single
+    # pre-recorded launch beats kernel fusion. On a large-GEMM config (e.g. the M23 sudoku sweep)
+    # the earlier speed-knob search found CUDA graphs a 1.00x no-op (§11.3), because the GPU was
+    # already compute-bound there — this knob's payoff is shape-dependent, so measure per config.
+    #
+    # Correctness caveats, both handled internally, not the caller's problem:
+    #  - the last batch of an epoch is DROPPED if it's smaller than the graph's captured batch
+    #    size (a CUDA graph needs a fixed shape) — the standard `drop_last` tradeoff, applied only
+    #    under this flag.
+    #  - a few warmup steps run for real (on a side stream, required before capture) and are then
+    #    UNDONE (parameters/optimizer state/EMA shadow restored to their pre-warmup values) so
+    #    training starts from the true initial weights, not from post-warmup ones.
+    # Like `amp`/`compile`, NOT bit-identical when on (warmup can pick different cuDNN/cuBLAS
+    # algorithms than a pure eager run) — opt-in, and an experiment must set it uniformly across
+    # every arm.
+    cuda_graph: bool = False
 
 
 class SweepConfig(BaseModel):

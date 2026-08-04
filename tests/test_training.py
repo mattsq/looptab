@@ -315,6 +315,69 @@ def test_ema_invalid_nsup():
         train_deep_supervision(m, _small_loader(), n_sup=0, epochs=1, device="cpu")
 
 
+def test_cuda_graph_amp_mutually_exclusive_at_train_level():
+    """The amp+cuda_graph guard lives in train() itself (defense in depth beyond run.py's arm
+    dispatch check), and fires before any device dispatch — no CUDA needed to hit it."""
+    m = TRM(in_features=10, num_classes=2, hidden_dim=8, latent_dim=8, n_steps=2)
+    with pytest.raises(ValueError, match="cannot be combined"):
+        train(m, _small_loader(), epochs=1, device="cpu", amp=True, cuda_graph=True)
+
+
+def test_cuda_graph_is_inert_on_cpu():
+    """cuda_graph=True on a CPU device must silently take the eager path (no CUDAGraph calls),
+    same inertness contract as amp."""
+    torch.manual_seed(0)
+    m_ref = TRM(in_features=10, num_classes=2, hidden_dim=16, latent_dim=16, n_steps=2)
+    losses_ref = train(m_ref, _small_loader(), epochs=3, lr=1e-2, device="cpu", cuda_graph=False)
+    torch.manual_seed(0)
+    m_graph = TRM(in_features=10, num_classes=2, hidden_dim=16, latent_dim=16, n_steps=2)
+    losses_graph = train(m_graph, _small_loader(), epochs=3, lr=1e-2, device="cpu", cuda_graph=True)
+    assert losses_ref == losses_graph
+    for a, b in zip(m_ref.parameters(), m_graph.parameters()):
+        assert torch.equal(a, b)
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="needs CUDA")
+class TestCudaGraphOnGPU:
+    """`_small_loader()` (n=200, batch_size=64) has a ragged last batch of 8 — exactly the case
+    cuda_graph must drop rather than crash on, since a CUDA graph needs a fixed replay shape."""
+
+    def test_trains_without_crashing_and_learns(self):
+        torch.manual_seed(0)
+        m = TRM(in_features=10, num_classes=2, hidden_dim=16, latent_dim=16, n_steps=2)
+        before = [p.detach().clone() for p in m.parameters()]
+        losses = train(m, _small_loader(), epochs=10, lr=1e-2, device="cuda", cuda_graph=True)
+        assert len(losses) == 10
+        assert all(v == v for v in losses)  # no NaN
+        assert any(
+            not torch.equal(a, b.cpu()) for a, b in zip(before, m.parameters())
+        )  # weights actually moved
+
+    def test_roughly_matches_eager_trajectory(self):
+        """Not bit-identical (warmup can pick different algorithms), but should land in the same
+        ballpark as eager training on the same data/init — a real correctness signal beyond
+        'didn't crash', since a badly-broken capture (e.g. the stream bug found during the POC)
+        produces a plausible-looking but non-decreasing or wildly different loss curve."""
+        def _run(cuda_graph):
+            torch.manual_seed(0)
+            m = TRM(in_features=10, num_classes=2, hidden_dim=16, latent_dim=16, n_steps=2)
+            return train(m, _small_loader(), epochs=15, lr=1e-2, device="cuda",
+                         cuda_graph=cuda_graph)
+
+        eager_losses = _run(False)
+        graph_losses = _run(True)
+        assert graph_losses[-1] < graph_losses[0] * 0.6  # genuinely decreasing, not plateaued
+        assert abs(graph_losses[-1] - eager_losses[-1]) < 0.2  # same ballpark as eager
+
+    def test_works_with_ema(self):
+        torch.manual_seed(0)
+        m = TRM(in_features=10, num_classes=2, hidden_dim=16, latent_dim=16, n_steps=2)
+        losses = train(m, _small_loader(), epochs=8, lr=1e-2, device="cuda", ema_decay=0.9,
+                        cuda_graph=True)
+        assert len(losses) == 8
+        assert all(v == v for v in losses)
+
+
 def test_train_deep_supervision_carry_flag_matches_compute_changes_result():
     """carry=False (compute-matched control) runs, is deterministic, and differs from carry=True.
 

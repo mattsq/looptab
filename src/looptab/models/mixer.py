@@ -23,6 +23,8 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+from ._fused_token_mix_ext import SUPPORTED_SHAPES as _FUSED_KERNEL_SHAPES
+from ._fused_token_mix_ext import FusedTokenMix
 from .trm import RMSNorm
 
 
@@ -56,6 +58,7 @@ class TRMMixer(nn.Module):
         disable_token_mix: bool = False,
         shared_readout: bool = True,
         distinct_cell_weights: bool = False,
+        use_fused_kernel: bool = False,
     ):
         super().__init__()
         if out_features is None:
@@ -78,6 +81,28 @@ class TRMMixer(nn.Module):
 
         in_dim = self.cell_dim + latent_dim + num_classes  # per-cell input: [x_cell, z, a]
         token_hidden = token_hidden if token_hidden is not None else self.n_cells
+        # `use_fused_kernel` (opt-in, off by default ⇒ bit-identical): dispatch the token-mixing
+        # step to a hand-written CUDA kernel (models/csrc/fused_token_mix.cu) instead of the
+        # eager Sequential + transpose. Numerically exact, not an approximation (unlike AMP) — but
+        # the kernel is compiled for a CLOSED set of (n_cells, token_hidden) shapes (register-
+        # resident unrolling needs them at compile time), so an unsupported shape fails loudly at
+        # construction rather than silently falling back to eager or failing deep into training.
+        self.use_fused_kernel = use_fused_kernel
+        if use_fused_kernel:
+            if disable_token_mix:
+                raise ValueError(
+                    "use_fused_kernel=True has nothing to fuse when disable_token_mix=True."
+                )
+            shape = (self.n_cells, token_hidden)
+            if shape not in _FUSED_KERNEL_SHAPES:
+                raise ValueError(
+                    f"use_fused_kernel=True but (n_cells={self.n_cells}, token_hidden="
+                    f"{token_hidden}) is not a compiled kernel shape. Supported shapes: "
+                    f"{sorted(_FUSED_KERNEL_SHAPES)}. Add an entry to "
+                    "models/csrc/fused_token_mix.cu (FOR_EACH_SUPPORTED_SHAPE) and "
+                    "models/_fused_token_mix_ext.py (SUPPORTED_SHAPES) to support a new shape, "
+                    "and re-validate gradients (tests/test_fused_mixer.py) before trusting it."
+                )
         # `disable_token_mix` (M31 shared-readout control): OFF by default ⇒ the token-mix block is
         # built exactly as before (parameter order + forward path bit-identical to the committed
         # mixer). When ON, the cross-cell propagation operator is REMOVED (no token_mix params,
@@ -159,10 +184,18 @@ class TRMMixer(nn.Module):
                 inp = torch.cat([x_cells, z, a], dim=-1)  # (B, n_cells, in_dim)
                 # Token mixing across cells (residual, preserves in_dim), then channel MLP → latent.
                 # `disable_token_mix` drops the cross-cell step (cells never communicate) — the M31
-                # shared-readout control — while everything else stays identical.
-                mixed = inp if self.token_mix is None else (
-                    inp + self.token_mix(inp.transpose(1, 2)).transpose(1, 2)
-                )
+                # shared-readout control — while everything else stays identical. `use_fused_kernel`
+                # computes the identical residual+MLP in one CUDA kernel instead of transpose+
+                # Sequential+transpose (validated as a closed shape set at construction, §above).
+                if self.token_mix is None:
+                    mixed = inp
+                elif self.use_fused_kernel:
+                    mixed = FusedTokenMix.apply(
+                        inp, self.token_mix[0].weight, self.token_mix[0].bias,
+                        self.token_mix[2].weight, self.token_mix[2].bias,
+                    )
+                else:
+                    mixed = inp + self.token_mix(inp.transpose(1, 2)).transpose(1, 2)
                 # Channel MLP → latent. `distinct_cell_weights` applies a per-cell weight set via
                 # batched (block-diagonal) matmul instead of one shared nn.Sequential.
                 if self.channel is None:
@@ -255,6 +288,25 @@ class TRMMixerNoMixDistinctW(TRMMixer):
     def __init__(self, *args, disable_token_mix: bool = True, distinct_cell_weights: bool = True,
                  **kwargs):
         super().__init__(*args, disable_token_mix=True, distinct_cell_weights=True, **kwargs)
+
+
+class TRMMixerFused(TRMMixer):
+    """`trm_mixer` with the token-mixing step dispatched to the fused CUDA kernel.
+
+    Identical to ``TRMMixer`` in every axis (same forward, same params, same init) except HOW the
+    token-mixing computation runs — a hand-written CUDA kernel (models/csrc/fused_token_mix.cu)
+    instead of transpose + Sequential + transpose. Numerically exact on its supported shapes
+    (gradcheck-verified, tests/test_fused_mixer.py), not a precision tradeoff like AMP — the only
+    reason this is a separate arm rather than a `trm_mixer` flag is that the kernel only covers a
+    closed set of (n_cells, token_hidden) shapes (`_fused_token_mix_ext.SUPPORTED_SHAPES`):
+    construction raises loudly outside that set rather than silently falling back to eager.
+    CUDA-only — there is no CPU kernel, so running this arm on a CPU device raises at the first
+    forward call (a CUDA-extension-build error, or the kernel's own CUDA-tensor check); use
+    `trm_mixer` on CPU instead.
+    """
+
+    def __init__(self, *args, use_fused_kernel: bool = True, **kwargs):
+        super().__init__(*args, use_fused_kernel=True, **kwargs)
 
 
 class _MixerBlock(nn.Module):
