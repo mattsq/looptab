@@ -471,7 +471,14 @@ file and one index row, not here.
   block-diagonal readout) + `trm_mixer_nomix_distinctw` (`distinct_cell_weights=True` per-cell channel
   MLPs) — all off-by-default `TRMMixer` flags ⇒ byte-identical at defaults. M18 TRM-faithful
   knobs (`use_rmsnorm`, `n_latent`, `ema_decay`, `n_sup`) + `trm_faithful` arm; all
-  off-by-default ⇒ bit-identical.
+  off-by-default ⇒ bit-identical. `trm_mixer_fused` (`TRMMixerFused`): `trm_mixer` with the
+  token-mixing step dispatched to a hand-written CUDA kernel (`models/csrc/fused_token_mix.cu`)
+  instead of eager transpose+Sequential+transpose — numerically exact (gradcheck-verified), not a
+  precision tradeoff, but compiled for a CLOSED set of `(n_cells, token_hidden)` shapes (currently
+  the real configs' shapes: sudoku 36/64, ETTh1 7/8, weather 21/8, plus 6/6 for tests); an
+  unsupported shape raises loudly at construction. CUDA-only, needs a working extension build
+  toolchain (MSVC on Windows — see the global CLAUDE.md vcvars note); JIT-compiled lazily on first
+  use, so importing the package never requires the toolchain. See §11.2 #16.
 - **Training/eval** (`src/looptab/train/`, `src/looptab/eval/`): routines `train`,
   `train_curriculum`, `train_progressive`, `train_deep_supervision` (detached-carry DS —
   runs on `trm`/`trm_decoupled` and, since M29, `trm_mixer`), `train_act` (ACT halting,
@@ -487,6 +494,29 @@ file and one index row, not here.
 - **Configs/results:** experiment configs in `configs/experiments/`; tracked summaries in
   `results/`; milestone narratives indexed by `results/LOG.md`. `pad_to_label_multiple`
   (M25, off by default) right-pads X so `d % L == 0` for the mixer on real data.
+- **GPU (`train.device: cuda`).** Works, and is a large win on the 3-D-matmul arms (the M23
+  mixer sweep: 74m CPU → 9m GPU, ~8.3x; tiny/flat configs gain little — CUDA-context startup
+  dominates). Two things to know before running on GPU:
+  - The loader parks the dataset **on the device** (`make_loaders(..., device=...)`), so batches
+    are device-side gathers instead of a host→device copy each batch. Batches are
+    **bit-identical** (the permutation is still drawn on the CPU generator; only the gather
+    moves) — verified by `tests/test_dataset.py` and by reproducing committed run output
+    exactly. Sized honestly: the copies are ~0.9% of runtime, so this is **~1.02x** on the fp32
+    path (~1.10x under AMP) — small, but free, and it stops the copies becoming the floor if
+    compute ever gets cheaper.
+  - **`parallel_workers` still helps on GPU — keep it.** A microbenchmark that spawned a fresh
+    process per model suggested GPU workers were a *pessimisation* (0.40–0.51x), but that was an
+    artifact of paying CUDA-context startup per process; the runner's `ProcessPoolExecutor` keeps
+    workers alive across seeds. Clean A/B on the real M23 mixer sweep, same code both arms:
+    `parallel_workers: 3` = **8m26s** vs `1` = **9m37s** (1.14x). Trust the real-config A/B, not
+    the microbenchmark.
+  - **`train.cuda_graph` (opt-in, off by default, CUDA-only): capture the whole training step
+    into a CUDA graph and replay it.** See §11.2 #16 for the finding and #17 for the fused
+    kernel it composes with; mechanism/caveats are in `TrainConfig.cuda_graph`'s docstring. Real
+    end-to-end win on ETTh1 forecasting (6 arms, 3 seeds, through `python -m looptab.run`, not
+    just an isolated benchmark): **165s → 35s (4.71x)**, Δs match the eager run within seed noise.
+    Mutually exclusive with `amp` for now; standard train path only (curriculum/ACT/N_sup/
+    contraction raise, same guard pattern as `amp`).
 
 ### 11.2 Behaviour-changing conclusions (read before re-running anything)
 
@@ -682,6 +712,43 @@ file and one index row, not here.
     there so moot; mixer arms inherit baseline widths (up to 1.041, within ±5% spec); **disruption_w32 had a
     generator bug (gamma=14 copied from w24; the M24f w32 baseline + minimal-PSD margin require gamma=15) —
     fixed and re-run at gamma=15 so it reproduces M24f; the mixing-leg conclusion held at gamma=14 too.**
+16. **★ On SMALL configs (few cells/channels), the training step is launch-bound, not
+    compute-bound — CUDA graph capture (`train.cuda_graph`) is a bigger lever than `amp`/`compile`
+    there, reversing the earlier "CUDA graphs are a 1.00x no-op" finding.** Profiling ETTh1
+    forecasting (`trm_mixer`, batch=128, n_cells=7) found only ~4.5ms of a 21ms eager step was
+    actual GPU compute — the rest was ~590 kernel-launch dispatches/step. `torch.cuda.graph()`
+    capture of the whole step (zero-grad + forward + backward + optimizer step, `capturable=True`
+    AdamW) eliminates nearly all of that: **~4.9–5.3x isolated, 4.71x end-to-end through the real
+    runner** (165s→35s, 6 arms/3 seeds, Δs preserved within seed noise). This is shape-dependent,
+    not a universal win: the earlier speed-knob search rejected CUDA graphs as a 1.00x no-op at
+    SUDOKU scale (large GEMMs, already compute-bound) — both findings are correct, for different
+    shapes; measure per config, don't assume either direction. `torch.compile(mode=
+    "reduce-overhead")` gets most of the same win because it also uses CUDA graphs internally
+    (~6x there vs default mode's ~2x) — the lever is the graph capture, not Triton fusion.
+17. **On the SAME small-config regime, a custom kernel can still edge out `torch.compile`, but
+    only once BOTH are wrapped in a CUDA graph — and the win is small (~0–10%), not the headline.**
+    Isolated on ETTh1's shape: eager 21ms → `compile` default 10.6ms (2.0x) → `compile
+    reduce-overhead` OR eager+manual-graph ~3.2–4.0ms (~5–6x, both use CUDA graphs) →
+    fused-kernel+graph ~3.18ms (consistently the fastest of the four across 4 repeated runs, but by
+    single-digit percent over `compile`'s best mode, not an order of magnitude). Shipped as
+    `trm_mixer_fused` (`models/csrc/fused_token_mix.cu` + `models/_fused_token_mix_ext.py`),
+    composable with `train.cuda_graph` with no special-casing (the two are independent: cuda_graph
+    captures whatever the model's forward/backward produces). **Load-bearing correctness lesson,
+    generalizable beyond this kernel:** the first integration attempt trained "successfully" under
+    `cuda_graph` — no crash, no NaN, parameters visibly updating — but the loss oscillated instead
+    of converging. Root cause: the kernel launched via bare `<<<grid,block>>>` (the implicit legacy
+    default stream) instead of `at::cuda::getCurrentCUDAStream()`. This is invisible in eager use
+    (PyTorch's current stream is usually the default stream there) but `torch.cuda.graph()`
+    capture redirects "current stream" to a dedicated capture stream, so the kernel raced against
+    the rest of the captured graph instead of being ordered against it — a plausible-but-wrong
+    gradient, not a crash. **Any custom CUDA extension intended to be graph-capturable must launch
+    on the current PyTorch stream, not the implicit default one**; `tests/test_fused_mixer.py::
+    test_fused_kernel_composes_with_cuda_graph` guards against regressing this (asserts genuine
+    convergence under cuda_graph, not just "ran without error"). **Also incompatible with `amp`**
+    (PR #35 review): the extension hardcodes fp32 with no autocast registration, so under
+    `train.amp=true` it would train at a different precision than the other arms' autocast
+    `nn.Linear` ops — a per-arm precision difference smuggled into the reported Δ. `run.py` rejects
+    `trm_mixer_fused` + `amp=true` loudly (same guard pattern as the other amp incompatibilities).
 
 ### 11.3 Open work
 
@@ -705,6 +772,77 @@ file and one index row, not here.
   already shows non-recurrent mixing suffices); a convergent fixed-point task the mixer
   under-fits, to test the DS carry in its motivated regime (none found — the mixer fits them
   all). Neither is needed to interpret current evidence.
+- **Speed knobs `train.amp` / `train.compile` (BUILT, opt-in, off by default).** Compute is ~99%
+  of a run and the dominant channel-MLP GEMM already sits at ~94% of fp32 peak, so nothing is
+  left on the plumbing side. Measured and *rejected* as no-ops/harms: fused Adam (1.006x), CUDA
+  graphs (1.00x), uniform batch shapes (1.014x), dataloader work (0.9% of runtime),
+  `torch.func.vmap` seed-ensembling (**0.88x, slower**), and hand-written CUDA kernels (reached
+  1.68x but `torch.compile` beats them with no custom code — see the GPU memory note). What
+  works:
+  - **`amp: true`** — fp16 autocast + GradScaler on the STANDARD train path (raises on the
+    curriculum / ACT / N_sup / contraction routines rather than silently skipping). Training
+    only; **eval always runs fp32**, so metrics stay comparable. **RETESTED on the full M23
+    mixer sweep (3 difficulties × 6 seeds) and the conclusions are preserved:** Δ(trm_mixer −
+    ff_matched) = +0.1218 / +0.2371 / +0.3225 vs the fp32 +0.1219 / +0.2372 / +0.3224 — agreeing
+    to **±0.0001**, ~25× inside the seed std (±0.0025); EM within ±0.002 vs a ±0.016–0.02 std.
+    1.18x wall clock (7m08s vs 8m26s). CUDA-only (inert on CPU).
+  - **`compile: true`** — `torch.compile` per arm. Needs a torch supporting Dynamo on the running
+    interpreter (torch 2.2 + py3.12 does NOT) plus Triton, which has **no Windows wheels** (use
+    the community `triton-windows`; this box's system torch 2.13 + that package works). Costs a
+    compile warmup per process, but Inductor's on-disk cache amortises it across a sweep.
+    `_compile_model` fails loudly with this guidance.
+  - **Measured on the full M23 mixer sweep** (3 difficulties × 6 seeds, headline Δ@n_givens=14
+    and wall clock; the pinned torch-2.2.2 fp32 run is the reference):
+    | config | time | Δ(mixer−ff)@14 | EM@14 |
+    |---|---|---|---|
+    | torch 2.2.2 eager fp32 (reference) | 8m26s | +0.3224 | +0.8932 |
+    | torch 2.2.2 + amp | 7m08s (1.18x) | +0.3225 | +0.8952 |
+    | torch 2.13 eager fp32 | 8m10s | +0.3224 | +0.8932 |
+    | torch 2.13 + compile + amp | **4m50s (1.74x)** | +0.3224 | +0.8935 |
+    Accuracy Δ agrees to **±0.0001** (~25× inside the ±0.0025 seed std) and EM to ±0.002
+    (±0.016–0.02 std) in every cell. **A torch 2.13 vs 2.2.2 eager run is itself metric-identical
+    to 4 dp here** (only `coherence_excess` @18 moves in the 4th decimal), so the version bump is
+    far less disruptive than feared — but that is ONE config, not a licence to re-baseline
+    `results/` wholesale.
+  - **Neither is bit-identical**, so they are opt-in and an experiment must set them **uniformly
+    across every arm** — a uniform shift cancels in the Δ the repo reports, a per-arm one does not.
+  - **★ `amp` is NOT a free win — TIME IT on your config before using it.** Retested on M26 ETTh1
+    forecasting (regression/MSE, 6 arms, 10 backtest blocks): the **numerics are fine** — all 7 Δs
+    reproduce with signs intact, largest shift 0.0042 against ±0.027–0.074 seed stds — but AMP is
+    **~0.74x, i.e. 35% SLOWER** (6m22s → 8m49s; reproduced 95s vs 127/128s per seed with the run
+    order flipped). Per-arm isolation shows *every* arm neutral-or-slower, including the widest
+    (`trm_mixer` h224 0.86x, `trm_decoupled` 0.81x) — so it is **not** arm width. The plausible
+    driver is the GEMM row count `batch × n_cells`: sudoku runs 256×36 = **9216** rows and gains
+    1.18x, ETTh1 runs 128×7 = **896** (ETTh1 has only 7 variable-cells) and loses. Below some size
+    the fp32↔fp16 cast traffic costs more than Turing's tensor cores save. Two data points, so
+    treat the mechanism as a hypothesis and the *rule* as: **measure, don't assume.** The risk is
+    wasted wall clock, not wrong results.
+  - **`amp` on the multilabel-F1 path (yeast, 4 arms, 10-fold CV): numerics fine, also SLOWER.**
+    fp32 454s vs AMP 699s (**0.65x**) — a third data point for the "small GEMM ⇒ AMP loses" pattern
+    above (yeast's per-cell width is small). Three of four Δs move ≤0.001; one sign-test call
+    changes without reversing: `Δ(trm − ff_matched)` accuracy goes from a clean raw p=0.021 under
+    fp32 to a near-tie-flagged robust p=0.070 (2/10 near-ties) under AMP — a reminder that AMP's
+    fp16 rounding can nudge a result across the `sign_test_robust` near-tie threshold even when the
+    headline numbers look unchanged.
+  - **`compile` on ETTh1 forecasting (non-sudoku): works, and exposed a real Windows encoding bug,
+    now fixed.** The first attempt at this test produced silently EMPTY Δ output on the full 10-seed
+    sweep despite normal wall-clock completion — traced (not a compile/parallel-workers interaction)
+    to `UnicodeEncodeError: 'charmap' codec can't encode character 'Δ'`: Windows stdout falls
+    back to the ambient console codepage (cp1252, no Δ/±/−) instead of UTF-8 whenever piped/
+    redirected, and that fallback is NONDETERMINISTIC across otherwise-identical invocations
+    (depends on inherited shell/codepage state, not on the script). A crash mid-print silently drops
+    every remaining Δ line for the whole sweep. **Fixed in `run.py::main()`** by force-reconfiguring
+    `sys.stdout`/`sys.stderr` to UTF-8 at entry — unconditional, environment-independent, verified to
+    reproduce the same Δs as the `PYTHONUTF8=1` workaround (`tests/test_run.py` unaffected, 38/38
+    pass). With that fixed, `compile` on ETTh1 (regression/MSE, 6 arms, 10 backtest blocks, eager
+    reference 381s / Δ(trm_mixer−ff) +0.0908±0.0607 / Δ(trm_flat−trm_dec) +0.0328±0.0645):
+    **numerics fine** — compile-only Δs shift ≤0.0022 (+0.0917/+0.0306), compile+amp shift ≤0.0037
+    (+0.0945/+0.0311), both well inside the ±0.03–0.07 seed stds. **Speed is a wash, not a win:**
+    compile-only 368s (**1.04x**, barely above noise) and compile+amp 377s (**1.01x** — compile's
+    small gain roughly cancels AMP's ~0.74x loss from the point above). Consistent with the
+    small-GEMM hypothesis: ETTh1's 128×7-row matmuls don't give either optimization enough work to
+    pay for its own overhead, unlike sudoku's 256×36 mixer GEMMs (1.74x). Net: on this repo's
+    forecasting configs, `compile`/`amp` are not worth reaching for — measure per-config as always.
 
 ### 11.4 Closed levers — do not redo casually
 

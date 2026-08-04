@@ -4,6 +4,7 @@ from .models.controls import FFMatched, UntiedStack, UntiedStackMatched
 from .models.decoupled import TRMDecoupled
 from .models.mixer import (
     TRMMixer,
+    TRMMixerFused,
     TRMMixerNoMix,
     TRMMixerNoMixDistinctW,
     TRMMixerNoMixUnsharedRO,
@@ -17,6 +18,7 @@ MODEL_REGISTRY = {
     "trm": TRM,
     "trm_decoupled": TRMDecoupled,
     "trm_mixer": TRMMixer,
+    "trm_mixer_fused": TRMMixerFused,  # trm_mixer with token-mixing dispatched to a CUDA kernel
     "trm_mixer_nomix": TRMMixerNoMix,  # M31: shared-readout, non-mixing control
     # M32 controls: split M31's Δ(nomix−ff) into readout / channel-independence / weight-sharing.
     "trm_mixer_unsharedro": TRMMixerUnsharedRO,  # mix ON, UNSHARED readout (CD readout cross-check)

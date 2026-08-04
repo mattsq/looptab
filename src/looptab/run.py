@@ -12,6 +12,7 @@ import copy
 import csv
 import json
 import subprocess
+import sys
 import time
 from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
@@ -73,7 +74,7 @@ def _build_model(
     # variants that take the SAME knobs (rmsnorm/n_latent/token_hidden) and stay byte-identical to
     # `trm_mixer` at their default flags — only their hardwired flag (readout/weight-share) differs.
     mixer_family = (
-        "trm_mixer", "trm_mixer_nomix",
+        "trm_mixer", "trm_mixer_fused", "trm_mixer_nomix",
         "trm_mixer_unsharedro", "trm_mixer_nomix_unsharedro", "trm_mixer_nomix_distinctw",
     )
     # The TRM loop and both untied-stack controls (§4b) emit per-step readouts, so deep
@@ -100,6 +101,26 @@ def _build_model(
         kwargs["use_rmsnorm"] = arm.use_rmsnorm
         kwargs["token_hidden"] = arm.token_hidden
     return get_model(arm.name, **kwargs)
+
+
+def _compile_model(m):
+    """`torch.compile` an arm, failing loudly with actionable guidance if the toolchain can't.
+
+    Inductor's CUDA backend generates Triton kernels, so this needs (a) a torch new enough for
+    the running interpreter — torch 2.2 + Python 3.12 raises "Dynamo is not supported" — and
+    (b) Triton, which publishes no Windows wheels (the community `triton-windows` package fills
+    that gap). Both failures are environment problems with concrete fixes, so say so rather than
+    surfacing a bare RuntimeError from deep inside dynamo.
+    """
+    try:
+        return torch.compile(m)
+    except Exception as e:  # noqa: BLE001 - re-raised immediately with guidance attached
+        raise RuntimeError(
+            f"train.compile=true but torch.compile is unavailable here ({type(e).__name__}: {e}). "
+            f"Needs a torch supporting Dynamo on this interpreter (torch {torch.__version__} on "
+            "Python 3.12 does not if <2.4) plus Triton (on Windows: pip install triton-windows). "
+            "Set compile: false to run without it."
+        ) from e
 
 
 def _baselines(loader, *, want_exact_match: bool) -> dict[str, float]:
@@ -135,7 +156,9 @@ def run_point(cfg: ExperimentConfig, task_params: dict, seed: int) -> tuple[dict
         n_test=task_cfg.n_test,
         seed=seed,
     )
-    train_loader, test_loader = make_loaders(train_ds, test_ds, cfg.train.batch_size)
+    train_loader, test_loader = make_loaders(
+        train_ds, test_ds, cfg.train.batch_size, device=cfg.train.device
+    )
 
     X_sample, _ = train_ds[0]
     in_features = int(X_sample.shape[0])
@@ -182,7 +205,9 @@ def run_point(cfg: ExperimentConfig, task_params: dict, seed: int) -> tuple[dict
             n=task_cfg.n_train,
             T_max=curriculum.T_max,
         )
-        traj_loader, _ = make_loaders(traj_ds, traj_ds, cfg.train.batch_size)
+        traj_loader, _ = make_loaders(
+            traj_ds, traj_ds, cfg.train.batch_size, device=cfg.train.device
+        )
 
     device = cfg.train.device
     results = {}
@@ -192,6 +217,11 @@ def run_point(cfg: ExperimentConfig, task_params: dict, seed: int) -> tuple[dict
         # shuffle stream are identical across arms and independent of arm order.
         torch.manual_seed(seed)
         m = _build_model(arm, in_features, num_classes, out_features, n_steps=coupled_steps)
+        # `count_params` is read off the ORIGINAL module: torch.compile returns a wrapper, and
+        # the budget-parity check must measure the real parameter set either way.
+        m_orig = m
+        if cfg.train.compile:
+            m = _compile_model(m)
         stable = arm.jac_reg_weight > 0 or arm.fixed_point_weight > 0
         if regression and (curriculum is not None or arm.use_act or arm.n_sup > 1 or stable):
             # M26 regression uses the standard MSE train path only; the curriculum/ACT/N_sup/stable
@@ -201,6 +231,48 @@ def run_point(cfg: ExperimentConfig, task_params: dict, seed: int) -> tuple[dict
                 f"arm '{arm.resolved_label()}': regression (objective=regression) supports only "
                 "standard train path — curriculum / use_act / n_sup>1 / contraction-reg are "
                 "classification routines."
+            )
+        if cfg.train.amp and (curriculum is not None or arm.use_act or arm.n_sup > 1 or stable):
+            # AMP is wired into the STANDARD train path only. The curriculum / ACT / N_sup /
+            # contraction routines have their own loss and backward structure (and train_stable
+            # differentiates through a Jacobian probe, which fp16 would degrade). Fail loudly
+            # rather than silently training some arms in fp16 and others in fp32 — a per-arm
+            # precision difference would land directly in the reported Δ.
+            raise ValueError(
+                f"arm '{arm.resolved_label()}': train.amp=true is supported on the standard "
+                "train path only — curriculum / use_act / n_sup>1 / contraction-reg arms have "
+                "their own training routines. Set amp: false for this experiment."
+            )
+        if cfg.train.amp and arm.name == "trm_mixer_fused":
+            # The fused kernel's extension hardcodes fp32 (TORCH_CHECK requires it) and has no
+            # autocast registration, so under amp it would train in fp32 while every OTHER arm's
+            # nn.Linear ops autocast to fp16 — a per-arm precision difference smuggled into the
+            # reported Δ, defeating the whole point of the "amp must be uniform" contract (PR #35
+            # review). Fail loudly rather than silently comparing kernel-vs-eager confounded with
+            # fp32-vs-fp16.
+            raise ValueError(
+                f"arm '{arm.resolved_label()}': train.amp=true is not supported with "
+                "trm_mixer_fused — the fused kernel is fp32-only, so it would train at a "
+                "different precision than autocast arms. Use 'trm_mixer' under amp, or set "
+                "amp: false for this experiment."
+            )
+        cuda_graph_conflict = curriculum is not None or arm.use_act or arm.n_sup > 1 or stable
+        if cfg.train.cuda_graph and cuda_graph_conflict:
+            # cuda_graph is wired into the STANDARD train path only, same reasoning as amp above:
+            # the other routines run a variable inner-loop structure (curriculum depth sampling,
+            # ACT/N_sup detached-carry passes, the stable Jacobian probe) that a single fixed
+            # captured graph cannot represent. Fail loudly rather than silently falling back.
+            raise ValueError(
+                f"arm '{arm.resolved_label()}': train.cuda_graph=true is supported on the "
+                "standard train path only — curriculum / use_act / n_sup>1 / contraction-reg "
+                "arms have their own training routines. Set cuda_graph: false for this experiment."
+            )
+        if cfg.train.cuda_graph and cfg.train.amp:
+            # GradScaler's dynamic loss-scale logic needs host-side inf/nan checks each step;
+            # combining that with a statically replayed graph is unsupported for now (§11.3).
+            raise ValueError(
+                f"arm '{arm.resolved_label()}': train.cuda_graph and train.amp cannot be combined "
+                "yet. Set one of them false for this experiment."
             )
         if curriculum is not None and stable:
             # The M27 contraction penalty is a standard-train mechanism; combining it with the
@@ -340,6 +412,8 @@ def run_point(cfg: ExperimentConfig, task_params: dict, seed: int) -> tuple[dict
                 ema_decay=arm.ema_decay,
                 loss_type="mse" if regression else "ce",
                 device=device,
+                amp=cfg.train.amp,
+                cuda_graph=cfg.train.cuda_graph,
             )
         # M26 forecasting: MSE/MAE/R² from the raw regression readout (no argmax). `accuracy`
         # mirrors −mse so the generic curve/baseline plumbing stays meaningful; the reported
@@ -352,7 +426,7 @@ def run_point(cfg: ExperimentConfig, task_params: dict, seed: int) -> tuple[dict
             metrics = {
                 "accuracy": test_metrics["accuracy"],
                 "train_accuracy": train_acc,
-                "n_params": m.count_params(),
+                "n_params": m_orig.count_params(),
                 "mse": test_metrics["mse"],
                 "mae": test_metrics["mae"],
                 "r2": test_metrics["r2"],
@@ -387,7 +461,7 @@ def run_point(cfg: ExperimentConfig, task_params: dict, seed: int) -> tuple[dict
             # fails at high T with *low train acc too* is an optimization failure (Phase 2's
             # step-aligned DS may help), not a capacity verdict against the loop.
             "train_accuracy": train_acc,
-            "n_params": m.count_params(),
+            "n_params": m_orig.count_params(),
         }
         if arm.use_act and "avg_segments" in test_metrics:
             metrics["avg_segments"] = test_metrics["avg_segments"]  # adaptive-compute diagnostic
@@ -556,7 +630,9 @@ def run_extrapolation_point(
         n_test=task_cfg.n_test,
         seed=seed,
     )
-    _, test_loader = make_loaders(test_ds, test_ds, cfg.train.batch_size)
+    _, test_loader = make_loaders(
+        test_ds, test_ds, cfg.train.batch_size, device=cfg.train.device
+    )
     multi_output = test_ds.y.ndim > 1
 
     point_results = {}
@@ -769,6 +845,15 @@ def cv_sign_test_status(task_name: str, task_params: dict, seeds: list[int]) -> 
 
 
 def main():
+    # Windows console encoding is ambient, environment-dependent state (chcp / codepage), not a
+    # property of this script — stdout can silently be non-UTF-8 even under an otherwise-identical
+    # invocation. Report lines use Δ/±/− (outside cp1252), so an unlucky codepage raises
+    # UnicodeEncodeError mid-sweep and silently drops every Δ line printed after the crash. Force
+    # UTF-8 so output doesn't depend on how the shell happened to be started.
+    for stream in (sys.stdout, sys.stderr):
+        if hasattr(stream, "reconfigure"):
+            stream.reconfigure(encoding="utf-8", errors="backslashreplace")
+
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", required=True)
     parser.add_argument("--seed", type=int, default=None, help="override: run a single seed")

@@ -645,3 +645,129 @@ def test_extrapolation_harness_determinism():
     assert baseline == baseline_main
     assert extrap_out[("trm_ds", 3)]["accuracy"] == out_main["trm_ds"]["accuracy"]
     assert extrap_out[("trm_nods", 3)]["accuracy"] == out_main["trm_nods"]["accuracy"]
+
+
+# --- speed knobs: `amp` / `compile` (§11.1) ------------------------------------------------
+# Both change NUMERICS when on, so the contract is: (1) OFF is bit-identical to the pre-knob
+# runner, and (2) a configuration that cannot honour the knob FAILS LOUDLY rather than silently
+# training some arms differently — a per-arm precision difference would land in the reported Δ.
+
+
+def test_amp_off_is_bit_identical():
+    """amp=False must reproduce the pre-AMP path exactly (autocast/GradScaler disabled are
+    documented no-ops). Guards the wrapper itself, on whatever device the suite runs on."""
+    # Same train settings as the default _cfg; the ONLY difference is amp being stated explicitly.
+    ref_cfg = _cfg()
+    ref, _, _, _ = run_point(ref_cfg, ref_cfg.task.params, seed=0)
+    cfg = _cfg(train=dict(epochs=3, lr=1e-3, batch_size=128, device="cpu", amp=False))
+    got, _, _, _ = run_point(cfg, cfg.task.params, seed=0)
+    assert set(ref) == set(got)
+    for label in ref:
+        assert ref[label]["accuracy"] == got[label]["accuracy"]
+        assert ref[label]["n_params"] == got[label]["n_params"]
+
+
+def test_amp_defaults_off():
+    cfg = _cfg()
+    assert cfg.train.amp is False and cfg.train.compile is False
+
+
+def test_amp_rejects_non_standard_train_routines():
+    """AMP is wired into the standard train path only; n_sup>1 / use_act / contraction arms must
+    raise, not silently drop the flag."""
+    for arm_over in [
+        dict(n_sup=2),
+        dict(use_act=True),
+        dict(jac_reg_weight=0.1),
+    ]:
+        arm = dict(name="trm", label="a", hidden_dim=16, latent_dim=16, n_steps=3, **arm_over)
+        cfg = _cfg(
+            arms=[arm],
+            train=dict(epochs=1, lr=1e-3, weight_decay=1e-4, batch_size=64, amp=True),
+        )
+        with pytest.raises(ValueError, match="standard train path only"):
+            run_point(cfg, cfg.task.params, seed=0)
+
+
+def test_compile_failure_is_actionable():
+    """Where torch.compile can't run (old torch / no Triton), the error must name the fix rather
+    than surfacing a bare dynamo RuntimeError. Skipped where compile actually works."""
+    from looptab.run import _compile_model
+
+    try:
+        torch.compile(torch.nn.Linear(2, 2))
+    except Exception:
+        pass
+    else:
+        pytest.skip("torch.compile is available here; nothing to assert about the failure path")
+    with pytest.raises(RuntimeError, match="train.compile=true"):
+        _compile_model(torch.nn.Linear(2, 2))
+
+
+def test_cuda_graph_off_is_bit_identical():
+    """cuda_graph=False must reproduce the pre-cuda_graph path exactly (it's inert on CPU too,
+    but this guards the wrapper itself takes the untouched branch when the flag is off)."""
+    ref_cfg = _cfg()
+    ref, _, _, _ = run_point(ref_cfg, ref_cfg.task.params, seed=0)
+    cfg = _cfg(train=dict(epochs=3, lr=1e-3, batch_size=128, device="cpu", cuda_graph=False))
+    got, _, _, _ = run_point(cfg, cfg.task.params, seed=0)
+    assert set(ref) == set(got)
+    for label in ref:
+        assert ref[label]["accuracy"] == got[label]["accuracy"]
+        assert ref[label]["n_params"] == got[label]["n_params"]
+
+
+def test_cuda_graph_defaults_off():
+    cfg = _cfg()
+    assert cfg.train.amp is False and cfg.train.compile is False and cfg.train.cuda_graph is False
+
+
+def test_cuda_graph_rejects_non_standard_train_routines():
+    """cuda_graph is wired into the standard train path only; n_sup>1 / use_act / contraction
+    arms must raise, not silently drop the flag."""
+    for arm_over in [
+        dict(n_sup=2),
+        dict(use_act=True),
+        dict(jac_reg_weight=0.1),
+    ]:
+        arm = dict(name="trm", label="a", hidden_dim=16, latent_dim=16, n_steps=3, **arm_over)
+        cfg = _cfg(
+            arms=[arm],
+            train=dict(epochs=1, lr=1e-3, weight_decay=1e-4, batch_size=64, cuda_graph=True),
+        )
+        with pytest.raises(ValueError, match="standard train path only"):
+            run_point(cfg, cfg.task.params, seed=0)
+
+
+def test_cuda_graph_amp_mutually_exclusive():
+    cfg = _cfg(train=dict(epochs=1, lr=1e-3, batch_size=64, amp=True, cuda_graph=True))
+    with pytest.raises(ValueError, match="cannot be combined"):
+        run_point(cfg, cfg.task.params, seed=0)
+
+
+def test_trm_mixer_fused_rejects_amp():
+    """The fused kernel's extension is fp32-only with no autocast registration, so under amp it
+    would train at a different precision than the other arms' autocast nn.Linear ops — a per-arm
+    precision difference smuggled into the reported Δ (PR #35 review). Must raise, not silently
+    compare kernel-vs-eager confounded with fp32-vs-fp16. Needs a multi-output task (TRMMixer's
+    out_features = n_cells comes from the task's y shape, not an arm field) at a kernel-supported
+    (n_cells, token_hidden) shape — `iterated` with w=6, no distractors gives n_cells=6.
+    """
+    arm = dict(
+        name="trm_mixer_fused", label="a", hidden_dim=8, latent_dim=4, n_steps=2, token_hidden=6,
+    )
+    cfg = _cfg(
+        task=dict(
+            name="iterated",
+            params={"w": 6, "T": 2, "rule": 30, "distractors": 0},
+            n_train=100,
+            n_test=50,
+            task_seed=42,
+            train_sample_seed=1,
+            test_sample_seed=2,
+        ),
+        arms=[arm],
+        train=dict(epochs=1, lr=1e-3, weight_decay=1e-4, batch_size=32, amp=True),
+    )
+    with pytest.raises(ValueError, match="not supported with trm_mixer_fused"):
+        run_point(cfg, cfg.task.params, seed=0)

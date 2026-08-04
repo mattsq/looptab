@@ -19,7 +19,7 @@ def _predict(
         logits, _ = model(X, **kwargs)
         # argmax over the class dim handles both single-output (B, C) and multi-output (B, W, C).
         preds.append(logits.argmax(dim=-1).cpu().numpy())
-        targets.append(y.numpy())
+        targets.append(y.cpu().numpy())
     return np.concatenate(preds), np.concatenate(targets)
 
 
@@ -78,7 +78,7 @@ def act_predict(
                 break
         chosen[~halted] = logits[~halted]  # never-halted: last segment's answer
         preds.append(chosen.argmax(dim=-1).cpu().numpy())
-        targets.append(y.numpy())
+        targets.append(y.cpu().numpy())
         seg_counts.append(used.cpu().numpy())
     return (
         np.concatenate(preds),
@@ -225,7 +225,7 @@ def _predict_regression(
         X = X.to(device)
         out, _ = model(X, **kwargs)
         preds.append(out.cpu().numpy())
-        targets.append(y.numpy())
+        targets.append(y.cpu().numpy())
     return np.concatenate(preds), np.concatenate(targets)
 
 
@@ -255,9 +255,9 @@ def persistence_baseline_mse(loader: DataLoader, lookback: int, n_vars: int) -> 
     last observed value per variable is column ``i*lookback + (lookback-1)``."""
     all_y, all_last = [], []
     for X, y in loader:
-        Xr = X.numpy().reshape(len(X), n_vars, lookback)
+        Xr = X.cpu().numpy().reshape(len(X), n_vars, lookback)
         last = Xr[:, :, -1:]  # (N, M, 1) last observed value per variable
-        yb = y.numpy()  # (N, M, H)
+        yb = y.cpu().numpy()  # (N, M, H)
         all_y.append(yb)
         all_last.append(np.broadcast_to(last, yb.shape))
     if not all_y:
@@ -276,7 +276,7 @@ def majority_baseline(loader: DataLoader) -> float:
     """Compute token-level majority class baseline accuracy."""
     targets = []
     for _, y in loader:
-        targets.append(y.numpy())
+        targets.append(y.cpu().numpy())
     if not targets:
         return 0.0
     targets = np.concatenate(targets)
@@ -299,7 +299,7 @@ def subset_accuracy_baseline(loader: DataLoader) -> float:
     """
     targets = []
     for _, y in loader:
-        targets.append(y.numpy())
+        targets.append(y.cpu().numpy())
     if not targets:
         return 0.0
     targets = np.concatenate(targets)

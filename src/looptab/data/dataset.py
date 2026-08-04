@@ -201,7 +201,27 @@ class InMemoryLoader:
     ``BatchSampler``. Training trajectories are therefore unchanged.
     """
 
-    def __init__(self, X: torch.Tensor, y: torch.Tensor, batch_size: int, shuffle: bool):
+    def __init__(
+        self,
+        X: torch.Tensor,
+        y: torch.Tensor,
+        batch_size: int,
+        shuffle: bool,
+        device: str | None = None,
+    ):
+        # ``device`` (GPU-resident batching): the synthetic suite is ~10MB, so on CUDA the whole
+        # dataset is parked on the device ONCE and batches become device-side gathers, removing a
+        # host->device copy per batch. Honest sizing: the copies are only ~0.9% of runtime, so
+        # this is ~1.02x on the fp32 path the repo runs today (it measured ~1.10x under AMP,
+        # where compute is cheaper and the stalls matter more) — small, but free and bit-identical,
+        # and it stops the copies becoming the floor if the compute ever gets faster.
+        # Every train/eval routine already calls ``X.to(device)``, which is a no-op for tensors
+        # already resident, so nothing downstream changes. ``None``/"cpu" leaves the tensors
+        # exactly where they were (the pre-existing path, untouched).
+        self.device = device
+        if device is not None and torch.device(device).type != "cpu":
+            X = X.to(device)
+            y = y.to(device)
         self.X = X
         self.y = y
         self.batch_size = batch_size
@@ -217,22 +237,30 @@ class InMemoryLoader:
         _ = torch.empty((), dtype=torch.int64).random_()
         if self.shuffle:
             # (2) RandomSampler: one global-RNG int64 seed -> fresh generator -> randperm.
+            # Drawn on the CPU generator REGARDLESS of `device`, so the permutation — and hence
+            # every batch's composition — is bit-identical whether or not the data is resident.
             seed = int(torch.empty((), dtype=torch.int64).random_().item())
             gen = torch.Generator()
             gen.manual_seed(seed)
             perm = torch.randperm(self.n, generator=gen)
         else:
             perm = torch.arange(self.n)
+        if self.X.device.type != "cpu":
+            perm = perm.to(self.X.device)  # index on-device; same indices, same order
         for start in range(0, self.n, self.batch_size):
             idx = perm[start : start + self.batch_size]
             yield self.X[idx], self.y[idx]
 
 
-def make_loaders(train_ds, test_ds, batch_size: int, num_workers: int = 0):
+def make_loaders(
+    train_ds, test_ds, batch_size: int, num_workers: int = 0, device: str | None = None
+):
     # `num_workers` is accepted for call-site compatibility but unused: the data is already
     # resident in memory, so worker processes would only add IPC/serialization overhead.
+    # `device`: park the dataset on the accelerator once instead of copying every batch (see
+    # InMemoryLoader). Bit-identical batches; `None`/"cpu" is the pre-existing path.
     train_X, train_y = train_ds.tensors()
     test_X, test_y = test_ds.tensors()
-    train_loader = InMemoryLoader(train_X, train_y, batch_size, shuffle=True)
-    test_loader = InMemoryLoader(test_X, test_y, batch_size, shuffle=False)
+    train_loader = InMemoryLoader(train_X, train_y, batch_size, shuffle=True, device=device)
+    test_loader = InMemoryLoader(test_X, test_y, batch_size, shuffle=False, device=device)
     return train_loader, test_loader
