@@ -243,6 +243,19 @@ def run_point(cfg: ExperimentConfig, task_params: dict, seed: int) -> tuple[dict
                 "train path only — curriculum / use_act / n_sup>1 / contraction-reg arms have "
                 "their own training routines. Set amp: false for this experiment."
             )
+        if cfg.train.amp and arm.name == "trm_mixer_fused":
+            # The fused kernel's extension hardcodes fp32 (TORCH_CHECK requires it) and has no
+            # autocast registration, so under amp it would train in fp32 while every OTHER arm's
+            # nn.Linear ops autocast to fp16 — a per-arm precision difference smuggled into the
+            # reported Δ, defeating the whole point of the "amp must be uniform" contract (PR #35
+            # review). Fail loudly rather than silently comparing kernel-vs-eager confounded with
+            # fp32-vs-fp16.
+            raise ValueError(
+                f"arm '{arm.resolved_label()}': train.amp=true is not supported with "
+                "trm_mixer_fused — the fused kernel is fp32-only, so it would train at a "
+                "different precision than autocast arms. Use 'trm_mixer' under amp, or set "
+                "amp: false for this experiment."
+            )
         cuda_graph_conflict = curriculum is not None or arm.use_act or arm.n_sup > 1 or stable
         if cfg.train.cuda_graph and cuda_graph_conflict:
             # cuda_graph is wired into the STANDARD train path only, same reasoning as amp above:

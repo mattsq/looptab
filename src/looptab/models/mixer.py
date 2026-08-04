@@ -302,7 +302,9 @@ class TRMMixerFused(TRMMixer):
     construction raises loudly outside that set rather than silently falling back to eager.
     CUDA-only — there is no CPU kernel, so running this arm on a CPU device raises at the first
     forward call (a CUDA-extension-build error, or the kernel's own CUDA-tensor check); use
-    `trm_mixer` on CPU instead.
+    `trm_mixer` on CPU instead. Incompatible with `train.amp` (the kernel's extension hardcodes
+    fp32 and has no autocast registration, so it would train at a different precision than the
+    other arms' autocast `nn.Linear` ops) — `run.py` rejects that combination loudly.
     """
 
     def __init__(self, *args, use_fused_kernel: bool = True, **kwargs):

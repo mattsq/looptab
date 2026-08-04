@@ -744,7 +744,11 @@ file and one index row, not here.
     gradient, not a crash. **Any custom CUDA extension intended to be graph-capturable must launch
     on the current PyTorch stream, not the implicit default one**; `tests/test_fused_mixer.py::
     test_fused_kernel_composes_with_cuda_graph` guards against regressing this (asserts genuine
-    convergence under cuda_graph, not just "ran without error").
+    convergence under cuda_graph, not just "ran without error"). **Also incompatible with `amp`**
+    (PR #35 review): the extension hardcodes fp32 with no autocast registration, so under
+    `train.amp=true` it would train at a different precision than the other arms' autocast
+    `nn.Linear` ops — a per-arm precision difference smuggled into the reported Δ. `run.py` rejects
+    `trm_mixer_fused` + `amp=true` loudly (same guard pattern as the other amp incompatibilities).
 
 ### 11.3 Open work
 

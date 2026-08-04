@@ -743,3 +743,31 @@ def test_cuda_graph_amp_mutually_exclusive():
     cfg = _cfg(train=dict(epochs=1, lr=1e-3, batch_size=64, amp=True, cuda_graph=True))
     with pytest.raises(ValueError, match="cannot be combined"):
         run_point(cfg, cfg.task.params, seed=0)
+
+
+def test_trm_mixer_fused_rejects_amp():
+    """The fused kernel's extension is fp32-only with no autocast registration, so under amp it
+    would train at a different precision than the other arms' autocast nn.Linear ops — a per-arm
+    precision difference smuggled into the reported Δ (PR #35 review). Must raise, not silently
+    compare kernel-vs-eager confounded with fp32-vs-fp16. Needs a multi-output task (TRMMixer's
+    out_features = n_cells comes from the task's y shape, not an arm field) at a kernel-supported
+    (n_cells, token_hidden) shape — `iterated` with w=6, no distractors gives n_cells=6.
+    """
+    arm = dict(
+        name="trm_mixer_fused", label="a", hidden_dim=8, latent_dim=4, n_steps=2, token_hidden=6,
+    )
+    cfg = _cfg(
+        task=dict(
+            name="iterated",
+            params={"w": 6, "T": 2, "rule": 30, "distractors": 0},
+            n_train=100,
+            n_test=50,
+            task_seed=42,
+            train_sample_seed=1,
+            test_sample_seed=2,
+        ),
+        arms=[arm],
+        train=dict(epochs=1, lr=1e-3, weight_decay=1e-4, batch_size=32, amp=True),
+    )
+    with pytest.raises(ValueError, match="not supported with trm_mixer_fused"):
+        run_point(cfg, cfg.task.params, seed=0)
