@@ -12,6 +12,7 @@ import copy
 import csv
 import json
 import subprocess
+import sys
 import time
 from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
@@ -812,6 +813,15 @@ def cv_sign_test_status(task_name: str, task_params: dict, seeds: list[int]) -> 
 
 
 def main():
+    # Windows console encoding is ambient, environment-dependent state (chcp / codepage), not a
+    # property of this script — stdout can silently be non-UTF-8 even under an otherwise-identical
+    # invocation. Report lines use Δ/±/− (outside cp1252), so an unlucky codepage raises
+    # UnicodeEncodeError mid-sweep and silently drops every Δ line printed after the crash. Force
+    # UTF-8 so output doesn't depend on how the shell happened to be started.
+    for stream in (sys.stdout, sys.stderr):
+        if hasattr(stream, "reconfigure"):
+            stream.reconfigure(encoding="utf-8", errors="backslashreplace")
+
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", required=True)
     parser.add_argument("--seed", type=int, default=None, help="override: run a single seed")

@@ -766,7 +766,32 @@ file and one index row, not here.
     the fp32↔fp16 cast traffic costs more than Turing's tensor cores save. Two data points, so
     treat the mechanism as a hypothesis and the *rule* as: **measure, don't assume.** The risk is
     wasted wall clock, not wrong results.
-  - Still untested: `amp` on the multilabel-F1 path, and `compile` on anything but sudoku.
+  - **`amp` on the multilabel-F1 path (yeast, 4 arms, 10-fold CV): numerics fine, also SLOWER.**
+    fp32 454s vs AMP 699s (**0.65x**) — a third data point for the "small GEMM ⇒ AMP loses" pattern
+    above (yeast's per-cell width is small). Three of four Δs move ≤0.001; one sign-test call
+    changes without reversing: `Δ(trm − ff_matched)` accuracy goes from a clean raw p=0.021 under
+    fp32 to a near-tie-flagged robust p=0.070 (2/10 near-ties) under AMP — a reminder that AMP's
+    fp16 rounding can nudge a result across the `sign_test_robust` near-tie threshold even when the
+    headline numbers look unchanged.
+  - **`compile` on ETTh1 forecasting (non-sudoku): works, and exposed a real Windows encoding bug,
+    now fixed.** The first attempt at this test produced silently EMPTY Δ output on the full 10-seed
+    sweep despite normal wall-clock completion — traced (not a compile/parallel-workers interaction)
+    to `UnicodeEncodeError: 'charmap' codec can't encode character 'Δ'`: Windows stdout falls
+    back to the ambient console codepage (cp1252, no Δ/±/−) instead of UTF-8 whenever piped/
+    redirected, and that fallback is NONDETERMINISTIC across otherwise-identical invocations
+    (depends on inherited shell/codepage state, not on the script). A crash mid-print silently drops
+    every remaining Δ line for the whole sweep. **Fixed in `run.py::main()`** by force-reconfiguring
+    `sys.stdout`/`sys.stderr` to UTF-8 at entry — unconditional, environment-independent, verified to
+    reproduce the same Δs as the `PYTHONUTF8=1` workaround (`tests/test_run.py` unaffected, 38/38
+    pass). With that fixed, `compile` on ETTh1 (regression/MSE, 6 arms, 10 backtest blocks, eager
+    reference 381s / Δ(trm_mixer−ff) +0.0908±0.0607 / Δ(trm_flat−trm_dec) +0.0328±0.0645):
+    **numerics fine** — compile-only Δs shift ≤0.0022 (+0.0917/+0.0306), compile+amp shift ≤0.0037
+    (+0.0945/+0.0311), both well inside the ±0.03–0.07 seed stds. **Speed is a wash, not a win:**
+    compile-only 368s (**1.04x**, barely above noise) and compile+amp 377s (**1.01x** — compile's
+    small gain roughly cancels AMP's ~0.74x loss from the point above). Consistent with the
+    small-GEMM hypothesis: ETTh1's 128×7-row matmuls don't give either optimization enough work to
+    pay for its own overhead, unlike sudoku's 256×36 mixer GEMMs (1.74x). Net: on this repo's
+    forecasting configs, `compile`/`amp` are not worth reaching for — measure per-config as always.
 
 ### 11.4 Closed levers — do not redo casually
 
