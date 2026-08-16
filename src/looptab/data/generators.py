@@ -1,5 +1,7 @@
 """Canonical synthetic task generators. Treat as spec — match semantics exactly."""
 
+from functools import lru_cache
+
 import numpy as np
 
 
@@ -876,6 +878,22 @@ def _sudoku_full_grid(size: int, box_h: int, box_w: int, rng: np.random.Generato
     return grid
 
 
+@lru_cache(maxsize=None)
+def _sudoku_solver_topology(
+    size: int, box_h: int, box_w: int
+) -> tuple[tuple[int, ...], tuple[int, ...], tuple[int, ...]]:
+    """Static flat-position lookup tables shared by every uniqueness check of a geometry."""
+    total = size * size
+    n_stack = size // box_w
+    row_of = tuple(pos // size for pos in range(total))
+    col_of = tuple(pos % size for pos in range(total))
+    box_of = tuple(
+        (row_of[pos] // box_h) * n_stack + col_of[pos] // box_w
+        for pos in range(total)
+    )
+    return row_of, col_of, box_of
+
+
 def _count_sudoku_solutions(
     grid0: np.ndarray, size: int, box_h: int, box_w: int, limit: int = 2
 ) -> int:
@@ -885,63 +903,64 @@ def _count_sudoku_solutions(
     doubles as the uniqueness oracle for digging and the task's ground-truth solver. Bitmask
     candidates over digits make it fast enough for thousands of puzzles in the smoke regime.
     """
-    n_stack = size // box_w
     full = (1 << size) - 1
-    grid = grid0.copy()
+    total = size * size
+    # The uniqueness oracle dominates 9x9 generation.  Keep its recursive hot state in Python
+    # lists and precompute row/column/box lookup per flat position: repeated NumPy scalar indexing
+    # and `bidx()` calls are disproportionately expensive inside millions of MRV scans.  Flat
+    # row-major order is identical to the old nested r/c loops, so tie-breaking and puzzle bytes
+    # remain unchanged.
+    grid = grid0.reshape(-1).tolist()
+    row_of, col_of, box_of = _sudoku_solver_topology(size, box_h, box_w)
     rows = [0] * size
     cols = [0] * size
     boxes = [0] * size
 
-    def bidx(r: int, c: int) -> int:
-        return (r // box_h) * n_stack + c // box_w
-
-    for r in range(size):
-        for c in range(size):
-            v = int(grid[r, c])
-            if v:
-                bit = 1 << (v - 1)
-                rows[r] |= bit
-                cols[c] |= bit
-                boxes[bidx(r, c)] |= bit
+    for pos, v in enumerate(grid):
+        if v:
+            bit = 1 << (v - 1)
+            r, c, b = row_of[pos], col_of[pos], box_of[pos]
+            rows[r] |= bit
+            cols[c] |= bit
+            boxes[b] |= bit
 
     count = 0
 
     def solve() -> None:
         nonlocal count
         # Minimum-remaining-values: the empty cell with the fewest candidates (prunes hardest).
-        rbest = cbest = -1
+        pbest = -1
         avail_best = 0
         fewest = size + 1
-        for r in range(size):
-            for c in range(size):
-                if grid[r, c] == 0:
-                    avail = full & ~(rows[r] | cols[c] | boxes[bidx(r, c)])
-                    nc = bin(avail).count("1")
-                    if nc == 0:
-                        return  # dead end: this branch has no solution
-                    if nc < fewest:
-                        fewest, rbest, cbest, avail_best = nc, r, c, avail
-                        if nc == 1:
-                            break
-            if fewest == 1:
-                break
-        if rbest == -1:
+        for pos in range(total):
+            if grid[pos] == 0:
+                r, c, b = row_of[pos], col_of[pos], box_of[pos]
+                avail = full & ~(rows[r] | cols[c] | boxes[b])
+                # Python 3.11+'s integer popcount avoids allocating a temporary binary string.
+                nc = avail.bit_count()
+                if nc == 0:
+                    return  # dead end: this branch has no solution
+                if nc < fewest:
+                    fewest, pbest, avail_best = nc, pos, avail
+                    if nc == 1:
+                        break
+        if pbest == -1:
             count += 1  # no empty cell ⇒ a complete valid grid
             return
-        b = bidx(rbest, cbest)
+        r, c, b = row_of[pbest], col_of[pbest], box_of[pbest]
         m = avail_best
         while m:
             bit = m & (-m)
             m ^= bit
             d = bit.bit_length()  # bit == 1<<(d-1) ⇒ digit value d (1..size)
-            grid[rbest, cbest] = d
-            rows[rbest] |= bit
-            cols[cbest] |= bit
+            grid[pbest] = d
+            rows[r] |= bit
+            cols[c] |= bit
             boxes[b] |= bit
             solve()
-            grid[rbest, cbest] = 0
-            rows[rbest] &= ~bit
-            cols[cbest] &= ~bit
+            grid[pbest] = 0
+            rows[r] &= ~bit
+            cols[c] &= ~bit
             boxes[b] &= ~bit
             if count >= limit:
                 return

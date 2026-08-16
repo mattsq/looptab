@@ -1,0 +1,30 @@
+task:
+  name: electricity
+  objective: regression
+  params: {dataset: electricity, lookback: 96, horizon: 24, n_folds: 10, test_frac: 0.3}
+  n_train: 128
+  n_test: 64
+  task_seed: 0
+arms:
+  - name: trm_mixer
+    label: trm_mixer
+    hidden_dim: 1110
+    latent_dim: 1110
+    token_hidden: 8
+    n_steps: 8
+    use_rmsnorm: true
+    deep_supervision: true
+    microbatch_size: 64
+  - name: ff_matched
+    label: ff_matched
+    hidden_dim: 64
+    latent_dim: 64
+    n_steps: 8
+deltas: [[trm_mixer, ff_matched]]
+train:
+  epochs: 1
+  batch_size: 128
+  device: cuda
+  amp: true
+seeds: [0]
+results_dir: scratchpad/m34/results

@@ -165,3 +165,16 @@ def test_device_cuda_tensors_are_resident():
     for X, y in loader:
         assert X.device.type == "cuda" and y.device.type == "cuda"
         break
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="needs CUDA")
+def test_make_loaders_keeps_large_dataset_off_device():
+    """The auto-residency threshold protects activation headroom on M34-sized tables."""
+    from looptab.data.dataset import make_loaders
+
+    ds = _tabular(40, 6, multi_output=True, w=5)
+    train, test = make_loaders(
+        ds, ds, batch_size=8, device="cuda", device_resident_max_bytes=1
+    )
+    assert train.X.device.type == "cpu" and test.X.device.type == "cpu"
+    assert train.requested_device == "cuda"

@@ -1,0 +1,139 @@
++ cd /c/Users/scifi/looptab
++ mkdir -p scratchpad/m34/logs
++ PY=.venv/Scripts/python.exe
++ run converge_w64 configs/experiments/m34_converge_w64.yaml
++ name=converge_w64
++ cfg=configs/experiments/m34_converge_w64.yaml
+++ date
++ echo '=== START converge_w64 Sat Aug 15 11:08:32 AUSEST 2026 ==='
+=== START converge_w64 Sat Aug 15 11:08:32 AUSEST 2026 ===
++ .venv/Scripts/python.exe -m looptab.run --config configs/experiments/m34_converge_w64.yaml
+++ date
++ echo '=== END converge_w64 Sat Aug 15 11:34:16 AUSEST 2026 exit=0 ==='
+=== END converge_w64 Sat Aug 15 11:34:16 AUSEST 2026 exit=0 ===
++ run converge_w96 configs/experiments/m34_converge_w96.yaml
++ name=converge_w96
++ cfg=configs/experiments/m34_converge_w96.yaml
+++ date
++ echo '=== START converge_w96 Sat Aug 15 11:34:16 AUSEST 2026 ==='
+=== START converge_w96 Sat Aug 15 11:34:16 AUSEST 2026 ===
++ .venv/Scripts/python.exe -m looptab.run --config configs/experiments/m34_converge_w96.yaml
++ cd /c/Users/scifi/looptab
++ mkdir -p scratchpad/m34/logs
++ PY=.venv/Scripts/python.exe
++ run converge_w64 configs/experiments/m34_converge_w64.yaml
++ name=converge_w64
++ cfg=configs/experiments/m34_converge_w64.yaml
++ [[ -f scratchpad/m34/logs/converge_w64.done ]]
+++ date
++ echo '=== SKIP converge_w64 (already completed) Sat Aug 15 12:52:55 AUSEST 2026 ==='
+=== SKIP converge_w64 (already completed) Sat Aug 15 12:52:55 AUSEST 2026 ===
++ return 0
++ run converge_w96 configs/experiments/m34_converge_w96.yaml
++ name=converge_w96
++ cfg=configs/experiments/m34_converge_w96.yaml
++ [[ -f scratchpad/m34/logs/converge_w96.done ]]
+++ date
++ echo '=== START converge_w96 Sat Aug 15 12:52:55 AUSEST 2026 ==='
+=== START converge_w96 Sat Aug 15 12:52:55 AUSEST 2026 ===
++ .venv/Scripts/python.exe -m looptab.run --config configs/experiments/m34_converge_w96.yaml
++ status=0
++ [[ 0 -eq 0 ]]
+++ date -Iseconds
++ printf 'completed %s\n' 2026-08-15T13:25:43+10:00
+++ date
++ echo '=== END converge_w96 Sat Aug 15 13:25:43 AUSEST 2026 exit=0 ==='
+=== END converge_w96 Sat Aug 15 13:25:43 AUSEST 2026 exit=0 ===
++ run sudoku9 configs/experiments/m34_sudoku9.yaml
++ name=sudoku9
++ cfg=configs/experiments/m34_sudoku9.yaml
++ [[ -f scratchpad/m34/logs/sudoku9.done ]]
+++ date
++ echo '=== START sudoku9 Sat Aug 15 13:25:43 AUSEST 2026 ==='
+=== START sudoku9 Sat Aug 15 13:25:43 AUSEST 2026 ===
++ .venv/Scripts/python.exe -m looptab.run --config configs/experiments/m34_sudoku9.yaml
++ status=0
++ [[ 0 -eq 0 ]]
+++ date -Iseconds
++ printf 'completed %s\n' 2026-08-15T14:22:03+10:00
+++ date
++ echo '=== END sudoku9 Sat Aug 15 14:22:03 AUSEST 2026 exit=0 ==='
+=== END sudoku9 Sat Aug 15 14:22:03 AUSEST 2026 exit=0 ===
++ run etth2_h24 configs/experiments/m34_etth2_h24.yaml
++ name=etth2_h24
++ cfg=configs/experiments/m34_etth2_h24.yaml
++ [[ -f scratchpad/m34/logs/etth2_h24.done ]]
+++ date
++ echo '=== START etth2_h24 Sat Aug 15 14:22:03 AUSEST 2026 ==='
+=== START etth2_h24 Sat Aug 15 14:22:03 AUSEST 2026 ===
++ .venv/Scripts/python.exe -m looptab.run --config configs/experiments/m34_etth2_h24.yaml
++ status=0
++ [[ 0 -eq 0 ]]
+++ date -Iseconds
++ printf 'completed %s\n' 2026-08-15T14:25:44+10:00
+++ date
++ echo '=== END etth2_h24 Sat Aug 15 14:25:44 AUSEST 2026 exit=0 ==='
+=== END etth2_h24 Sat Aug 15 14:25:44 AUSEST 2026 exit=0 ===
++ run ettm1_h24 configs/experiments/m34_ettm1_h24.yaml
++ name=ettm1_h24
++ cfg=configs/experiments/m34_ettm1_h24.yaml
++ [[ -f scratchpad/m34/logs/ettm1_h24.done ]]
+++ date
++ echo '=== START ettm1_h24 Sat Aug 15 14:25:44 AUSEST 2026 ==='
+=== START ettm1_h24 Sat Aug 15 14:25:44 AUSEST 2026 ===
++ .venv/Scripts/python.exe -m looptab.run --config configs/experiments/m34_ettm1_h24.yaml
++ status=0
++ [[ 0 -eq 0 ]]
+++ date -Iseconds
++ printf 'completed %s\n' 2026-08-15T14:29:26+10:00
+++ date
++ echo '=== END ettm1_h24 Sat Aug 15 14:29:26 AUSEST 2026 exit=0 ==='
+=== END ettm1_h24 Sat Aug 15 14:29:26 AUSEST 2026 exit=0 ===
++ run ettm2_h24 configs/experiments/m34_ettm2_h24.yaml
++ name=ettm2_h24
++ cfg=configs/experiments/m34_ettm2_h24.yaml
++ [[ -f scratchpad/m34/logs/ettm2_h24.done ]]
+++ date
++ echo '=== START ettm2_h24 Sat Aug 15 14:29:26 AUSEST 2026 ==='
+=== START ettm2_h24 Sat Aug 15 14:29:26 AUSEST 2026 ===
++ .venv/Scripts/python.exe -m looptab.run --config configs/experiments/m34_ettm2_h24.yaml
++ status=0
++ [[ 0 -eq 0 ]]
+++ date -Iseconds
++ printf 'completed %s\n' 2026-08-15T14:33:08+10:00
+++ date
++ echo '=== END ettm2_h24 Sat Aug 15 14:33:08 AUSEST 2026 exit=0 ==='
+=== END ettm2_h24 Sat Aug 15 14:33:08 AUSEST 2026 exit=0 ===
++ run electricity_h24 configs/experiments/m34_electricity_h24.yaml
++ name=electricity_h24
++ cfg=configs/experiments/m34_electricity_h24.yaml
++ [[ -f scratchpad/m34/logs/electricity_h24.done ]]
+++ date
++ echo '=== START electricity_h24 Sat Aug 15 14:33:08 AUSEST 2026 ==='
+=== START electricity_h24 Sat Aug 15 14:33:08 AUSEST 2026 ===
++ .venv/Scripts/python.exe -m looptab.run --config configs/experiments/m34_electricity_h24.yaml
++ status=0
++ [[ 0 -eq 0 ]]
+++ date -Iseconds
++ printf 'completed %s\n' 2026-08-15T15:37:54+10:00
+++ date
++ echo '=== END electricity_h24 Sat Aug 15 15:37:54 AUSEST 2026 exit=0 ==='
+=== END electricity_h24 Sat Aug 15 15:37:54 AUSEST 2026 exit=0 ===
++ run traffic_h24 configs/experiments/m34_traffic_h24.yaml
++ name=traffic_h24
++ cfg=configs/experiments/m34_traffic_h24.yaml
++ [[ -f scratchpad/m34/logs/traffic_h24.done ]]
+++ date
++ echo '=== START traffic_h24 Sat Aug 15 15:37:54 AUSEST 2026 ==='
+=== START traffic_h24 Sat Aug 15 15:37:54 AUSEST 2026 ===
++ .venv/Scripts/python.exe -m looptab.run --config configs/experiments/m34_traffic_h24.yaml
++ status=0
++ [[ 0 -eq 0 ]]
+++ date -Iseconds
++ printf 'completed %s\n' 2026-08-15T20:16:43+10:00
+++ date
++ echo '=== END traffic_h24 Sat Aug 15 20:16:43 AUSEST 2026 exit=0 ==='
+=== END traffic_h24 Sat Aug 15 20:16:43 AUSEST 2026 exit=0 ===
+++ date
++ echo '=== ALL M34 RUNS COMPLETE Sat Aug 15 20:16:43 AUSEST 2026 ==='
+=== ALL M34 RUNS COMPLETE Sat Aug 15 20:16:43 AUSEST 2026 ===

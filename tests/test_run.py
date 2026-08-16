@@ -1,6 +1,8 @@
 """Tests for the run harness: arms, sweep, Δ reporting, and determinism."""
 
+import subprocess
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 import torch
@@ -8,7 +10,31 @@ import yaml
 
 from looptab.config import ExperimentConfig
 from looptab.eval.metrics import delta_report, evaluate
-from looptab.run import budget_audit, cv_sign_test_status, run_point
+from looptab.run import _git_sha, budget_audit, cv_sign_test_status, run_point
+
+
+def test_git_sha_marks_dirty_tree():
+    """§5.7: a run record's git_sha must not claim reproducibility from a dirty tree.
+
+    Mocked (not run against the real repo state) so this test is deterministic regardless of
+    whether the working tree happens to be clean when the suite runs.
+    """
+    with patch("subprocess.check_output") as mock_run:
+        mock_run.side_effect = [b"abc1234\n", b" M src/looptab/run.py\n"]
+        assert _git_sha() == "abc1234-dirty"
+
+    with patch("subprocess.check_output") as mock_run:
+        mock_run.side_effect = [b"abc1234\n", b""]
+        assert _git_sha() == "abc1234"
+
+
+def test_git_sha_fails_conservatively_when_status_check_errors():
+    """External review (post-M34): a swallowed `git status` failure must NOT silently report the
+    bare (clean-looking) sha -- that recreates the exact false-clean state the dirty guard exists
+    to prevent. It must report a distinct, honest "don't know" marker instead."""
+    with patch("subprocess.check_output") as mock_run:
+        mock_run.side_effect = [b"abc1234\n", subprocess.CalledProcessError(1, "git status")]
+        assert _git_sha() == "abc1234-status-unknown"
 
 
 def test_cv_sign_test_status_gates_on_unique_folds():

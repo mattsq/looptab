@@ -33,6 +33,43 @@ def test_train_ff_runs():
     assert len(losses) == 5
 
 
+def test_microbatch_preserves_effective_batch_update():
+    """Gradient accumulation keeps one optimizer update per loader batch and weights ragged
+    microbatches by their sample share, matching the full-batch mean up to matmul reduction
+    order."""
+    X, y = make_linear(n=128, d=10, task_seed=0, sample_seed=1)
+    loader = DataLoader(
+        torch.utils.data.TensorDataset(torch.from_numpy(X), torch.from_numpy(y)),
+        batch_size=64,
+        shuffle=False,
+    )
+
+    torch.manual_seed(7)
+    full = FFMatched(in_features=10, num_classes=2, hidden_dim=16, latent_dim=16, n_steps=2)
+    torch.manual_seed(7)
+    micro = FFMatched(in_features=10, num_classes=2, hidden_dim=16, latent_dim=16, n_steps=2)
+    train(full, loader, epochs=1, lr=1e-3, weight_decay=0.0, device="cpu")
+    train(
+        micro,
+        loader,
+        epochs=1,
+        lr=1e-3,
+        weight_decay=0.0,
+        device="cpu",
+        microbatch_size=24,
+    )
+    for a, b in zip(full.parameters(), micro.parameters()):
+        torch.testing.assert_close(a, b, rtol=2e-5, atol=2e-6)
+
+
+def test_microbatch_rejects_invalid_size_and_cuda_graph_combination():
+    m = FFMatched(in_features=10, num_classes=2, hidden_dim=8, latent_dim=8, n_steps=2)
+    with pytest.raises(ValueError, match="microbatch_size must be"):
+        train(m, _small_loader(), epochs=1, microbatch_size=0)
+    with pytest.raises(ValueError, match="microbatch_size and cuda_graph"):
+        train(m, _small_loader(), epochs=1, microbatch_size=8, cuda_graph=True)
+
+
 def test_accuracy_above_chance():
     """After 30 epochs on linear (easy), both models should beat 55% accuracy."""
     loader = _small_loader()

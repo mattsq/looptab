@@ -47,10 +47,32 @@ from .train.loop import (
 
 
 def _git_sha() -> str:
+    """The commit a run's code came from, with a ``-dirty`` suffix if the working tree has
+    uncommitted changes relative to that commit (or ``-status-unknown`` if that check itself
+    could not be performed — see below).
+
+    §5.7 requires every run record to write ``git_sha`` so a result can be reproduced from that
+    exact commit. A bare ``rev-parse HEAD`` silently lies whenever the tree is dirty (the common
+    case mid-development): the recorded SHA names a commit that does NOT contain whatever changes
+    produced this run. The ``-dirty`` marker doesn't recover the exact diff, but it stops a
+    dirty-tree run from being mistaken for one reproducible via `git checkout <sha>`. Fails
+    CONSERVATIVELY: if the dirty-check itself errors, this reports ``-status-unknown`` rather than
+    silently defaulting to "clean" — a swallowed failure there would recreate the exact false-clean
+    state this function exists to prevent.
+    """
     try:
-        return subprocess.check_output(["git", "rev-parse", "--short", "HEAD"]).decode().strip()
+        sha = subprocess.check_output(["git", "rev-parse", "--short", "HEAD"]).decode().strip()
     except Exception:
         return "unknown"
+    try:
+        dirty = bool(subprocess.check_output(["git", "status", "--porcelain"]).decode().strip())
+    except Exception:
+        # git present for rev-parse but status failed: fail CONSERVATIVELY. Silently reporting the
+        # bare sha here would recreate exactly the false-clean state this function exists to
+        # prevent (external review caught this: a swallowed status failure looked identical to a
+        # genuinely clean tree). Mark it as unknown rather than guess clean.
+        return f"{sha}-status-unknown"
+    return f"{sha}-dirty" if dirty else sha
 
 
 def _build_model(
@@ -138,6 +160,18 @@ def _regression_baselines(loader, *, lookback: int, n_vars: int) -> dict[str, fl
     return {"accuracy": -b["mse"], "mse": b["mse"], "mae": b["mae"], "r2": b["r2"]}
 
 
+def _empty_cuda_cache(device: str) -> None:
+    """Release dead training/evaluation workspaces before a differently shaped phase.
+
+    This is deliberately a runner-level phase boundary, not a per-batch operation.  On
+    memory-tight Windows/WDDM GPUs, cached AMP training buffers can otherwise coexist with
+    a larger fp32 evaluation batch and push the allocator into system-memory spill.  Live
+    tensors (model parameters and datasets) are unaffected by ``empty_cache``.
+    """
+    if torch.device(device).type == "cuda":
+        torch.cuda.empty_cache()
+
+
 def run_point(cfg: ExperimentConfig, task_params: dict, seed: int) -> tuple[dict, dict, dict]:
     """Train every arm for one (sweep-value, seed) point. Returns (results, models)."""
     task_cfg = cfg.task
@@ -220,6 +254,11 @@ def run_point(cfg: ExperimentConfig, task_params: dict, seed: int) -> tuple[dict
         # `count_params` is read off the ORIGINAL module: torch.compile returns a wrapper, and
         # the budget-parity check must measure the real parameter set either way.
         m_orig = m
+        microbatch_size = (
+            arm.microbatch_size
+            if arm.microbatch_size is not None
+            else cfg.train.microbatch_size
+        )
         if cfg.train.compile:
             m = _compile_model(m)
         stable = arm.jac_reg_weight > 0 or arm.fixed_point_weight > 0
@@ -242,6 +281,15 @@ def run_point(cfg: ExperimentConfig, task_params: dict, seed: int) -> tuple[dict
                 f"arm '{arm.resolved_label()}': train.amp=true is supported on the standard "
                 "train path only — curriculum / use_act / n_sup>1 / contraction-reg arms have "
                 "their own training routines. Set amp: false for this experiment."
+            )
+        if microbatch_size is not None and (
+            curriculum is not None or arm.use_act or arm.n_sup > 1 or stable
+        ):
+            raise ValueError(
+                f"arm '{arm.resolved_label()}': train.microbatch_size is supported on the "
+                "standard train path only — curriculum / use_act / n_sup>1 / contraction-reg "
+                "arms have their own training routines. Set microbatch_size: null for this "
+                "experiment."
             )
         if cfg.train.amp and arm.name == "trm_mixer_fused":
             # The fused kernel's extension hardcodes fp32 (TORCH_CHECK requires it) and has no
@@ -273,6 +321,11 @@ def run_point(cfg: ExperimentConfig, task_params: dict, seed: int) -> tuple[dict
             raise ValueError(
                 f"arm '{arm.resolved_label()}': train.cuda_graph and train.amp cannot be combined "
                 "yet. Set one of them false for this experiment."
+            )
+        if cfg.train.cuda_graph and microbatch_size is not None:
+            raise ValueError(
+                f"arm '{arm.resolved_label()}': train.cuda_graph and train.microbatch_size "
+                "cannot be combined yet. Set one of them off for this experiment."
             )
         if curriculum is not None and stable:
             # The M27 contraction penalty is a standard-train mechanism; combining it with the
@@ -414,7 +467,13 @@ def run_point(cfg: ExperimentConfig, task_params: dict, seed: int) -> tuple[dict
                 device=device,
                 amp=cfg.train.amp,
                 cuda_graph=cfg.train.cuda_graph,
+                microbatch_size=microbatch_size,
             )
+        # Training and evaluation have substantially different allocation shapes in the
+        # high-channel forecasting runs (AMP microbatches vs fp32 eval batches).  Free only
+        # inactive cached blocks at this phase boundary so the eval allocation does not spill
+        # into WDDM shared memory on 8GB cards.
+        _empty_cuda_cache(device)
         # M26 forecasting: MSE/MAE/R² from the raw regression readout (no argmax). `accuracy`
         # mirrors −mse so the generic curve/baseline plumbing stays meaningful; the reported
         # headline metrics are mse/mae/r2. Train "accuracy" here is −train-MSE (same diagnostic
@@ -422,7 +481,9 @@ def run_point(cfg: ExperimentConfig, task_params: dict, seed: int) -> tuple[dict
         if regression:
             want_f1 = False
             test_metrics = evaluate_regression(m, test_loader, device)
+            _empty_cuda_cache(device)
             train_acc = evaluate_regression(m, train_loader, device)["accuracy"]
+            _empty_cuda_cache(device)
             metrics = {
                 "accuracy": test_metrics["accuracy"],
                 "train_accuracy": train_acc,
@@ -445,6 +506,7 @@ def run_point(cfg: ExperimentConfig, task_params: dict, seed: int) -> tuple[dict
                 m, test_loader, max_segments=arm.n_sup, device=device,
                 want_exact_match=multi_output, n_steps=coupled_steps,
             )
+            _empty_cuda_cache(device)
             train_acc = evaluate_act(
                 m, train_loader, max_segments=arm.n_sup, device=device,
                 want_exact_match=False, n_steps=coupled_steps,
@@ -454,7 +516,9 @@ def run_point(cfg: ExperimentConfig, task_params: dict, seed: int) -> tuple[dict
             test_metrics = evaluate(
                 m, test_loader, device, want_exact_match=multi_output, want_f1=want_f1
             )
+            _empty_cuda_cache(device)
             train_acc = accuracy(m, train_loader, device)
+        _empty_cuda_cache(device)
         metrics = {
             "accuracy": test_metrics["accuracy"],
             # Train accuracy is the M3a optimization-vs-capacity diagnostic: a loop that
@@ -822,12 +886,17 @@ def cv_sign_test_status(task_name: str, task_params: dict, seeds: list[int]) -> 
     Computed from the **per-point** ``task_params`` (not the base config) so a sweep/grid that
     overrides ``n_folds`` is honoured.
     """
-    if task_name not in ("multilabel", "etth1"):
+    _FORECAST_TASKS = ("etth1", "weather", "etth2", "ettm1", "ettm2", "electricity", "traffic")
+    if task_name not in ("multilabel", *_FORECAST_TASKS):
         return True, "independent (fresh function + rows per seed)"
-    # M26 etth1: the expanding-window backtest maps seed → a DISJOINT chronological test block
-    # (fold = seed % n_folds), same validity condition as multilabel K-fold — and stronger, since
-    # each block's train set is its own past prefix (more independent than K-fold's shared train).
-    n_folds = task_params.get("n_folds", 10 if task_name == "etth1" else None)
+    # M26/M34 forecasting: the expanding-window backtest maps seed → a DISJOINT chronological test
+    # block (fold = seed % n_folds), same validity condition as multilabel K-fold — and stronger,
+    # since each block's train set is its own past prefix (more independent than K-fold's shared
+    # train). NOTE: this branch previously special-cased only "etth1" (missing "weather" and the
+    # other forecast tasks) — a latent gap that happened not to matter for any committed result,
+    # since every forecasting config to date used exactly n_folds=10 distinct seeds (0..9), so the
+    # collision check below would have passed either way.
+    n_folds = task_params.get("n_folds", 10 if task_name in _FORECAST_TASKS else None)
     if not n_folds:
         return False, "random real-data splits overlap and are not independent"
     folds = [s % int(n_folds) for s in seeds]
@@ -837,7 +906,11 @@ def cv_sign_test_status(task_name: str, task_params: dict, seeds: list[int]) -> 
             f"selected seeds map to {len(set(folds))} distinct fold(s) of {len(folds)} seeds "
             f"(seed % n_folds collides; need n_folds ≥ #seeds with distinct residues)",
         )
-    kind = "expanding-window backtest blocks" if task_name == "etth1" else "K-fold test sets"
+    kind = (
+        "expanding-window backtest blocks"
+        if task_name in _FORECAST_TASKS
+        else "K-fold test sets"
+    )
     return (
         True,
         f"DISJOINT {kind} (treat p as indicative, cf. Dietterich 1998)",

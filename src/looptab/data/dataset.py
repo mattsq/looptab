@@ -95,10 +95,11 @@ def make_splits(
             task_cfg=task_cfg, split_seed=task_seed, n_train=n_train, n_test=n_test, fold=seed
         )
 
-    # M26: multivariate-time-series forecasting (regression). Expanding-window backtest — the
+    # M26/M34: multivariate-time-series forecasting (regression). Expanding-window backtest — the
     # per-run `seed` selects the disjoint chronological test block (like multilabel's CV fold). The
-    # `dataset` param ("etth1"|"weather") picks the vendored series.
-    if task in ("etth1", "weather"):
+    # `dataset` param picks the vendored series (defaults to the task name, so e.g. task=etth2 with
+    # no explicit `dataset` override loads etth2 — see _FORECAST_SHA256 in data/real.py).
+    if task in ("etth1", "weather", "etth2", "ettm1", "ettm2", "electricity", "traffic"):
         from .real import make_forecast_splits
 
         params = {**task_cfg, "dataset": task_cfg.get("dataset", task)}
@@ -253,14 +254,42 @@ class InMemoryLoader:
 
 
 def make_loaders(
-    train_ds, test_ds, batch_size: int, num_workers: int = 0, device: str | None = None
+    train_ds,
+    test_ds,
+    batch_size: int,
+    num_workers: int = 0,
+    device: str | None = None,
+    device_resident_max_bytes: int = 256 * 2**20,
 ):
     # `num_workers` is accepted for call-site compatibility but unused: the data is already
     # resident in memory, so worker processes would only add IPC/serialization overhead.
-    # `device`: park the dataset on the accelerator once instead of copying every batch (see
-    # InMemoryLoader). Bit-identical batches; `None`/"cpu" is the pre-existing path.
+    # `device`: park SMALL datasets on the accelerator once instead of copying every batch (see
+    # InMemoryLoader).  M34 added forecasting tables large enough to invalidate the old "the suite
+    # is ~10MB" assumption: electricity's train+test tensors are ~1.0GiB and traffic's ~2.7GiB.
+    # Keeping those resident steals the activation headroom the 8GB GPU needs and can push WDDM
+    # into shared-memory oversubscription (multi-second steps) or a hard OOM.  Above the explicit
+    # threshold, retain the tensors on CPU and let the existing `.to(device)` batch staging path
+    # copy them.  Batch order/values stay bit-identical; only storage location changes.
     train_X, train_y = train_ds.tensors()
     test_X, test_y = test_ds.tensors()
-    train_loader = InMemoryLoader(train_X, train_y, batch_size, shuffle=True, device=device)
-    test_loader = InMemoryLoader(test_X, test_y, batch_size, shuffle=False, device=device)
+    total_bytes = sum(
+        t.numel() * t.element_size() for t in (train_X, train_y, test_X, test_y)
+    )
+    resident_device = device
+    if (
+        device is not None
+        and torch.device(device).type != "cpu"
+        and total_bytes > device_resident_max_bytes
+    ):
+        resident_device = None
+    train_loader = InMemoryLoader(
+        train_X, train_y, batch_size, shuffle=True, device=resident_device
+    )
+    test_loader = InMemoryLoader(
+        test_X, test_y, batch_size, shuffle=False, device=resident_device
+    )
+    train_loader.dataset_nbytes = total_bytes
+    test_loader.dataset_nbytes = total_bytes
+    train_loader.requested_device = device
+    test_loader.requested_device = device
     return train_loader, test_loader
