@@ -1,0 +1,117 @@
+# M34 — synthetic scale-up (direction A): push `converge` further past M9/M33's widest tested
+# point (w=48) to w=96 (2x this milestone's own w=64 point), now that `amp` makes
+# Sudoku/converge-shaped (large-GEMM, compute-bound — NOT launch-bound, so cuda_graph would be a
+# ~1.00x no-op per §11.2 #16) configs ~1.18x cheaper (`compile` needs the separate torch-2.13+
+# triton-windows fast lane, not the pinned torch this repo's committed results use — see
+# m34_converge_w64.yaml). Same 7-arm M33 decomposition recipe; widths
+# from scratchpad/m34/probe_budget_synth.py. Open question (CLAUDE.md §11.2 #15/M33): does the
+# mixing edge (Δ(trm_mixer−trm_mixer_nomix)) and the leg-1/P1 legs keep GROWING with width past
+# w=48, or plateau? M9/M11 found the analogous coherence edge grows with size on the flat loop;
+# M33 established mixing is ~the whole win at w<=48.
+#
+# POST-REVIEW CORRECTION: "width" here is `w`, a TASK parameter (ring length/cell count), and
+# every arm is re-widened to stay budget-matched at each w -- so this is a task-size sweep with a
+# matched model, NOT the model-capacity-at-fixed-task sweep M9/M11 ran. See
+# m34_converge_w64.yaml's matching note and results/log/m34.md's correction block.
+#
+# NOTE: trm_mixer_nomix_distinctw lands at ratio=0.8975 (>5% UNDER budget, coarse per-cell-weight
+# quantization at this width — same known artifact M33 flagged on binary w24/w32 cells). Kept
+# CONSERVATIVE/under rather than over; interpret that one arm's Δ with the budget caveat in mind.
+
+task:
+  name: converge
+  params:
+    rule: 78
+    distractors: 0
+    w: 96
+  n_train: 4000
+  n_test: 1000
+  task_seed: 42
+  train_sample_seed: 1
+  test_sample_seed: 2
+
+arms:
+  - name: trm_mixer
+    label: trm_mixer
+    hidden_dim: 142
+    latent_dim: 142
+    token_hidden: 48
+    n_steps: 8
+    n_latent: 1
+    use_rmsnorm: true
+    deep_supervision: true
+  - name: trm_mixer_nomix
+    label: trm_mixer_nomix
+    hidden_dim: 156
+    latent_dim: 156
+    token_hidden: 48
+    n_steps: 8
+    n_latent: 1
+    use_rmsnorm: true
+    deep_supervision: true
+  - name: trm_mixer_unsharedro
+    label: trm_mixer_unsharedro
+    hidden_dim: 108
+    latent_dim: 108
+    token_hidden: 48
+    n_steps: 8
+    n_latent: 1
+    use_rmsnorm: true
+    deep_supervision: true
+  - name: trm_mixer_nomix_unsharedro
+    label: trm_mixer_nomix_unsharedro
+    hidden_dim: 122
+    latent_dim: 122
+    token_hidden: 48
+    n_steps: 8
+    n_latent: 1
+    use_rmsnorm: true
+    deep_supervision: true
+  - name: trm_mixer_nomix_distinctw
+    label: trm_mixer_nomix_distinctw
+    hidden_dim: 16
+    latent_dim: 16
+    token_hidden: 48
+    n_steps: 8
+    n_latent: 1
+    use_rmsnorm: true
+    deep_supervision: true
+  - name: trm
+    label: trm_flat
+    hidden_dim: 96
+    latent_dim: 96
+    n_steps: 8
+    n_latent: 1
+    use_rmsnorm: true
+    deep_supervision: true
+  - name: ff_matched
+    label: ff_matched
+    hidden_dim: 96
+    latent_dim: 96
+    n_steps: 8
+
+deltas:
+  - [trm_mixer, trm_mixer_nomix]
+  - [trm_mixer_nomix, ff_matched]
+  - [trm_mixer_nomix, trm_mixer_nomix_unsharedro]
+  - [trm_mixer, trm_mixer_unsharedro]
+  - [trm_mixer_unsharedro, trm_mixer_nomix_unsharedro]
+  - [trm_mixer_nomix, trm_mixer_nomix_distinctw]
+  - [trm_mixer_nomix_unsharedro, ff_matched]
+  - [trm_mixer, ff_matched]
+  - [trm_flat, ff_matched]
+
+train:
+  epochs: 100
+  lr: 1e-3
+  weight_decay: 1e-4
+  batch_size: 256
+  device: cuda
+  amp: true
+
+budget_reference: trm_flat
+budget_tol: 0.05
+
+seeds: [0, 1, 2, 3, 4, 5, 6, 7]
+parallel_workers: 1
+results_dir: results

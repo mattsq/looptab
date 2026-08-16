@@ -134,10 +134,16 @@ whose update is a *flat MLP over the concatenated grid* is **≈ a feedforward n
 communicate, so "does iterative refinement help?" was systematically confounded with "does the update
 operator match the task structure?" for M0–M22. The thing that makes TRM *work* — constraint propagation,
 the hard-solving win — **is the cross-cell token-mixing update**, not the
-loop per se. **(EXCEPTION — real forecasting: M31/M32 showed the M26/M30 `etth1`/`weather` mixer win is NOT the
-mixing update; mixing is net HARMFUL there. The win is CHANNEL-INDEPENDENCE first (per-cell own-variable
-processing, dominant when channels are many) + a modest shared-readout second. The constraint-coupled
-SYNTHETIC wins below stand; forecasting is on the channel-INDEPENDENT side — §11.2 #13–#14.)** So **start every new recurrent experiment from `trm_mixer`; use the flat `trm` only as the
+loop per se. **(EXCEPTION — real forecasting AT THE CHANNEL COUNTS TESTED (M=7–21, `etth1`/`etth2`/
+`ettm1`/`ettm2`/`weather`): M31/M32 showed the M26/M30 mixer win is NOT the mixing update; mixing is
+net HARMFUL there. The win is CHANNEL-INDEPENDENCE first (per-cell own-variable processing, dominant
+when channels are many) + a modest shared-readout second. The constraint-coupled SYNTHETIC wins below
+stand; forecasting AT M=7–21 is on the channel-INDEPENDENT side — §11.2 #13–#14. **Do NOT generalize
+this to "forecasting" categorically**: M34 found the mixing-harmful sign trending toward helpful as
+channel count grows into the hundreds (M=321/862, `electricity`/`traffic`) — real and sign-consistent
+under a held recipe, but still exploratory (4 seeds) and NOT yet causally separated from dataset
+identity — see §11.2 #19's third round before citing a blanket "forecasting = channel-independent"
+rule at any untested channel count.)** So **start every new recurrent experiment from `trm_mixer`; use the flat `trm` only as the
 COMPARISON control** (the §4b "is it the mixing operator or just recurrence?" ablation — flat `trm` ≈ ff on
 structured tasks, so `Δ(trm_mixer − trm_flat)` is the operator's contribution). Do NOT default to flat
 `trm` as a "simplest starting point" — a null measured on it is a null about a feedforward-equivalent, not
@@ -146,9 +152,10 @@ about refinement (the §8 trap, one axis deeper). **Caveats that bound the defau
 columns are unsupported (use `distractors: 0` or `pad_to_label_multiple`); single-output tasks (e.g.
 scalar-`y` parity) have no mixer, use flat `trm` there. (2) The mixer helps only where outputs are
 **cross-cell COUPLED with a shared input/output cell topology** (rings/grids/graphs) — it is
-inert on **exchangeable** features (`multi_parity`, M24d), and on real **forecasting** the mixer's *apparent*
-win is channel-independence + shared readout, not coupling — mixing there is net HARMFUL (M31/M32, §11.2
-#13–#14), and on the **naive multi-label reshape** (no
+inert on **exchangeable** features (`multi_parity`, M24d), and on real **forecasting AT THE M=7–21
+DATASETS TESTED** the mixer's *apparent* win is channel-independence + shared readout, not coupling —
+mixing there is net HARMFUL (M31/M32, §11.2 #13–#14) — **but this is not confirmed at higher channel
+counts** (M34, §11.2 #19: the sign trends helpful by M=321/862, exploratory) — and on the **naive multi-label reshape** (no
 input↔output correspondence, M25), where a plain MLP is best; a mixer null there is expected, not a
 refinement null. (3) 3-D matmul ⇒ pin `num_threads=1` for bit-repro. When in doubt, run `trm_mixer` AND
 flat `trm` AND `ff_matched` together (the M24 lean triple) so the operator's contribution is always visible.
@@ -457,8 +464,10 @@ file and one index row, not here.
   attractor), `mixed_converge` (per-position non-uniform CA), `nested_converge` (Task C
   two-timescale fixed point), `disruption` (airline ops threshold net), `sudoku` (the one
   multi-CLASS task — forced `num_classes` inference in `run.py`), real `multilabel`
-  (`emotions`/`yeast`/`scene`, EM = subset accuracy), and real forecasting `etth1`/`weather`
-  (multivariate time series = coupled multi-target REGRESSION).
+  (`emotions`/`yeast`/`scene`, EM = subset accuracy), and real forecasting
+  `etth1`/`etth2`/`ettm1`/`ettm2`/`weather`/`electricity`/`traffic` (multivariate time series =
+  coupled multi-target REGRESSION; M34 added the last 5 to build a channel-count spread from
+  M=7 to M=862 — see §11.2 #19).
 - **Models/arms** (`src/looptab/models/`, registered in `registry.py`): **⭐ default recurrent
   arm = `trm_mixer`** (cross-cell token-mixing loop — see §4); **flat `trm`** is the
   comparison control (feedforward-equivalent on structured tasks); `ff_matched` (§4a),
@@ -496,14 +505,17 @@ file and one index row, not here.
   (M25, off by default) right-pads X so `d % L == 0` for the mixer on real data.
 - **GPU (`train.device: cuda`).** Works, and is a large win on the 3-D-matmul arms (the M23
   mixer sweep: 74m CPU → 9m GPU, ~8.3x; tiny/flat configs gain little — CUDA-context startup
-  dominates). Two things to know before running on GPU:
-  - The loader parks the dataset **on the device** (`make_loaders(..., device=...)`), so batches
-    are device-side gathers instead of a host→device copy each batch. Batches are
+  dominates). Things to know before running on GPU:
+  - The loader parks **small** datasets **on the device** (`make_loaders(..., device=...)`), so
+    batches are device-side gathers instead of a host→device copy each batch. Batches are
     **bit-identical** (the permutation is still drawn on the CPU generator; only the gather
     moves) — verified by `tests/test_dataset.py` and by reproducing committed run output
     exactly. Sized honestly: the copies are ~0.9% of runtime, so this is **~1.02x** on the fp32
     path (~1.10x under AMP) — small, but free, and it stops the copies becoming the floor if
-    compute ever gets cheaper.
+    compute ever gets cheaper. **M34 update:** tables whose combined train/test tensors exceed
+    256MiB now stay on CPU instead (electricity ~1.0GiB, traffic ~2.7GiB) — device residency was
+    stealing activation headroom on 8GB cards; batch values/order stay bit-identical, only
+    storage location changes (`device_resident_max_bytes` in `make_loaders`).
   - **`parallel_workers` still helps on GPU — keep it.** A microbenchmark that spawned a fresh
     process per model suggested GPU workers were a *pessimisation* (0.40–0.51x), but that was an
     artifact of paying CUDA-context startup per process; the runner's `ProcessPoolExecutor` keeps
@@ -516,7 +528,17 @@ file and one index row, not here.
     end-to-end win on ETTh1 forecasting (6 arms, 3 seeds, through `python -m looptab.run`, not
     just an isolated benchmark): **165s → 35s (4.71x)**, Δs match the eager run within seed noise.
     Mutually exclusive with `amp` for now; standard train path only (curriculum/ACT/N_sup/
-    contraction raise, same guard pattern as `amp`).
+    contraction raise, same guard pattern as `amp`). **Do NOT use on high-channel-count configs**
+    (electricity/traffic-scale) — its private memory pool competes with activations and is
+    actively HARMFUL there (18.5s/step vs 6.3s eager, measured on electricity) — see §11.2 #18.
+  - **`train.microbatch_size` (opt-in, M34): exact effective-batch gradient accumulation.** For
+    shapes where even fp16 can't fit the configured `batch_size` in one pass (traffic's h1760
+    mixer), slice each batch into microbatches, weight each microbatch's loss by its share of the
+    full batch, accumulate gradients, and take exactly one optimizer/EMA update per original
+    batch — mathematically the same effective batch and update count, just bounded activation
+    memory. Per-arm override available (`ModelConfig.microbatch_size`) since budget-matched
+    controls can differ in width by 40x at the same task. Mutually exclusive with `cuda_graph`.
+    See §11.2 #18.
 
 ### 11.2 Behaviour-changing conclusions (read before re-running anything)
 
@@ -749,6 +771,148 @@ file and one index row, not here.
     `train.amp=true` it would train at a different precision than the other arms' autocast
     `nn.Linear` ops — a per-arm precision difference smuggled into the reported Δ. `run.py` rejects
     `trm_mixer_fused` + `amp=true` loudly (same guard pattern as the other amp incompatibilities).
+18. **On HIGH-CHANNEL-COUNT configs (M≥300ish), activation memory dominates, not launch latency
+    — the #16/#17 CUDA-graph lever REVERSES sign, and a new lever (microbatched gradient
+    accumulation) is needed instead** (M34's electricity/traffic path, `infra-2.md` §6). Full-step
+    fp32 CUDA graphs were built for launch-bound small-cell shapes (#16); at electricity's scale
+    (M=321, hidden up to 1110) the graph's private memory pool competes with activations on an 8GB
+    card and is actively HARMFUL — **18.5s/step vs 6.3s eager**, the opposite of #16's win. AMP is
+    the right precision lever here, but even fp16 can't fit traffic's widest arm (h1760) at
+    batch=128. `train.microbatch_size` (new, opt-in) slices each batch into microbatches, weights
+    each microbatch loss by its sample share, accumulates gradients, and takes exactly ONE
+    optimizer/EMA update per original batch — the effective batch and update count are unchanged,
+    only peak activation memory is bounded. Measured ~0.52s/effective-batch on electricity,
+    ~2.5s on traffic's largest arm (vs OOM/allocator-spill unsliced). Two more contributing fixes:
+    dataset device-residency is now capacity-aware (>256MiB stays on CPU, protecting activation
+    headroom — §11.1) and the runner clears dead allocator blocks at train/eval phase boundaries
+    (traffic smoke: 73s→9.4s, 7.8x — cached AMP training buffers were otherwise coexisting with a
+    differently-shaped fp32 eval batch and forcing Windows-WDDM shared-memory spill). Net:
+    electricity's single-seed wall-clock went from **2+ hours to ~16 minutes**. **Dispatch rule is
+    shape-specific, same lesson as #16: measure per config** — CUDA graphs for small-cell
+    launch-bound jobs, AMP+microbatching (no graph) for high-channel jobs. Sudoku's 9x9 uniqueness
+    generation also got a ~3–4x speedup in this pass (flat-list solver state + precomputed
+    row/col/box lookup instead of repeated NumPy scalar indexing; byte-identical output).
+19. **★ TWICE-CORRECTED after external review — M34's original claims, AND the first round of
+    "cheap follow-up" fixes, both had overclaims; see the two correction blocks at the top of
+    `results/log/m34.md` for the full verified critiques (11 findings total across both passes,
+    each checked against the raw JSON/CSV/paired-seed data before acting on it).** What survives:
+    - **`etth2`/`ettm1`/`ettm2` (M=7, full 10 seeds, same recipe as `etth1`): only the CI-beats-ff
+      leg replicates cleanly** (10/0, read as *indicative* per the repo's own nested-folds caveat,
+      not exact significance) — extends #13/#14 to 3 new same-channel-count datasets, solid. **The
+      mixing-harmful leg does NOT cleanly replicate**: present on etth2 (9/1) but a genuine NULL
+      on ettm1/ettm2 (6/4, 5/5 — a 5/5 split is a null result, not weak directional evidence;
+      calling it "directionally consistent" because the mean happened to be positive was an
+      overclaim). May be etth-family-specific (hourly sampling) rather than a clean M=7 property.
+    - **`electricity` (M=321) / `traffic` (M=862) — EXPLORATORY, 4 seeds — show
+      Δ(mixer−nomix) MSE negative (mixing HELPS, 4/0 both), the opposite direction from every
+      M=7–21 config.** Real and sign-consistent, but **NOT established as a channel-count
+      effect** — confounded with training recipe (15 vs 25 epochs, AMP+microbatch vs
+      full-fp32/cuda_graph) and which test data was seen (seeds 0–3 = the FIRST four of ten
+      chronological blocks, not random). **Correct scope: "mixing helped on the four earliest
+      chronological blocks under the AMP/15-epoch recipe" — not "mixing depends on channel
+      count."** A causal test needs channel-subsampled draws from the SAME high-M dataset at
+      several sizes, one held recipe, all ten (or an equal random subset of) blocks.
+      **Two cheap follow-up probes ran (results/log/m34.md "Follow-up experiments"), and the
+      SECOND review pass corrected both of their initial write-ups:**
+      (i) Matching electricity/traffic's AMP+15-epoch recipe on `etth2` weakens the mixing-harmful
+      signal (9/1 → 6/4 coin flip) but does NOT flip its sign — **narrowly** shows epochs+precision
+      alone isn't sufficient on ONE low-M dataset; does NOT rule out recipe×channel-count
+      interactions or the untested microbatching component as drivers of the electricity/traffic
+      reversal (the etth2 probe's widths never trigger `microbatch_size`, so it never actually
+      exercises that part of the real recipe).
+      (ii) Tripling epochs (15→45) on `ff_matched`/`nomix`/`trm_flat` (3 seeds): electricity's
+      `ff_matched` converges reliably and the CI gap narrows but persists (a clean
+      partial-undertraining story). **Traffic's story is NOT "optimization instability"** — the
+      original claim compared one seed's 45-epoch value to the old CROSS-SEED MEAN and concluded
+      training didn't help; paired correctly (15ep→45ep, same seed), `ff_matched` improves on
+      EVERY seed (0.400→0.314, 0.811→0.772, 0.527→0.401) while remaining far more seed-sensitive
+      than `nomix`/`trm_flat` (which stay tight, 0.009/0.001 range). Because `seed` sets BOTH model
+      init AND the chronological data fold in this codebase (`fold = seed % n_folds`), this
+      experiment cannot separate init-sensitivity from fold-difficulty from an
+      architecture×time-period interaction — isolating the mechanism needs multiple inits on ONE
+      fixed fold, not run here. `nomix`/`trm_flat` remain the trustworthy reference points on
+      traffic regardless of which mechanism it turns out to be.
+      **Third round (results/log/m34.md "Third round"), THEN CORRECTED AGAIN on a third review
+      pass (search m34.md for "CORRECTED (third review pass)" / "v2, properly controlled") — two
+      of the three round-3 conclusions were themselves overstated, now fixed:**
+      (a) **Multi-init-at-fixed-fold, v2 (RNG-isolated + control arm + run record).**
+      v1 (`scratchpad/m34/traffic_ff_multiinit.py`) set `torch.manual_seed(init_seed)` once, but
+      `InMemoryLoader` draws its per-epoch shuffle from the GLOBAL RNG every epoch — so v1 varied
+      minibatch order along with initialization and never isolated what it claimed to; it also
+      had no matched control arm and wrote no run record (§5.7 gap). v2 resets the RNG to a FIXED
+      value before `train()` (only weights vary now) and adds `trm_flat` as a control under the
+      identical protocol: `ff_matched` std=0.3146 vs. `trm_flat` std=0.0004 (essentially perfectly
+      stable) — properly isolated this time (only weights vary, not shuffle order). **Fourth
+      review pass caught that "~700x" was outlier-driven**: one of five inits (seed 103, 1.021)
+      dominates `ff_matched`'s std; excluding it, std=0.0599 (~150x `trm_flat`, not ~786x). The
+      fold (`fold=1`) was also post-hoc selected as the hardest fold from an earlier experiment,
+      so this establishes init-driven, `ff_matched`-specific sensitivity ON THIS FOLD/RECIPE, not
+      a fold-general architectural property (untested: multiple folds × multiple inits).
+      (b) Forcing `microbatch_size` onto `etth2` arms that don't need it for memory shows no
+      meaningful shift (Δ(mixer−nomix) MSE +0.0038→+0.0011, both noise-level nulls, identical
+      robust p) — rules out gradient accumulation itself as a hidden recipe driver. This one held
+      up on review.
+      (c) **The "4-point dose-response curve" and "recipe×channel-count interaction" claims did
+      NOT hold up and are retracted.** The dose-response table (`etth2` +0.0038 → `weather`
+      −0.0029 → `electricity` −0.0271 → `traffic` −0.0450, all AMP) remains an ECOLOGICAL
+      comparison — 4 different datasets, not one dataset at 4 channel counts, so dataset identity/
+      correlation structure/sampling frequency stay confounded with M exactly as before; the two
+      low-M points are individually NULL (etth2 6/4 p=.75, weather 5/5 p=1.0), so the apparent
+      "attenuation" was a wobble between two noise estimates, not a trend. The proposed
+      recipe×channel-count interaction has no statistical support once computed properly: DiD =
+      −0.0095 ± 0.0115 (SE), 95% CI ≈[−0.032,+0.013] — comfortably crosses zero.
+      **Fourth round — channel-subsampling attempted within a dataset (5 seeds, held AMP recipe),
+      run, extended, THEN CORRECTED on a fourth review pass (results/log/m34.md "Fourth round" —
+      search "CORRECTED, fourth review pass"): it does NOT isolate channel count, and the
+      cross-dataset "generalizes to traffic" claim used the wrong statistic.** Channel composition
+      is not nested across M (only 3 of 7 electricity M=7 channels also appear in the M=64 draw),
+      model width scales ~100x with M by budget-matching design (224/96→500/500→1110/1110→
+      1760/1760), and the full-dataset endpoints use `microbatch_size` while the subsamples don't
+      — so this is an M-associated trend under jointly-varying composition/capacity/mechanics, not
+      a causal isolation. Properly paired per-seed contrasts (does the mixing benefit GROW between
+      M values, seed-for-seed — the statistic the hypothesis concerns) show `electricity`'s
+      M=7→M=64 contrast directionally consistent (5/0 on two independent M=64 draws, p=.0625 each,
+      not significant) but `traffic`'s is NOT: M=7→M=64 is a weak 4/1 (p=.375) and M=64→full is an
+      EXACT 2/2 (p=1.0) — a dead null once paired, despite the raw per-M means being ordered the
+      "expected" way. **Net, honestly scoped: electricity offers suggestive (not proven, not
+      isolated) within-dataset support for a channel-count-associated trend; traffic offers none
+      once measured correctly. This remains consistent with — not contradicting — the §4 caveat
+      above ("NOT yet causally separated from dataset identity"); no claim here has actually
+      closed that gap.**
+    - **The `converge` width sweep is NOT a capacity experiment** — `w` is the task's ring
+      length/cell count, and every arm was re-widened to stay budget-matched at each `w`, so cell
+      count, model width, and parameter budget all changed together (a task-size sweep with a
+      matched model, not a model-capacity-at-fixed-task sweep like M11's). The defensible result:
+      **per-cell Δ(mixer−nomix) accuracy stayed close to ~0.29 as ring length grew from 24→96
+      cells (M33 + M34 combined) under jointly-scaled, budget-matched models.** EM instead
+      declined (0.988→0.809) — arithmetic, not a new mechanism: raising a ~99.8%→99.6% per-cell
+      rate to a higher power (more simultaneously-correct cells needed) amplifies a tiny per-cell
+      drift into a large whole-row-EM one; whether that drift itself is an undertraining artifact
+      (100 epochs at every `w`) is not established either. **Retracted: "capacity-invariant",
+      "asymptote", and the M11 capacity-growing-legs comparison** — no arm here held the task fixed
+      and varied only model width, so nothing about model capacity was tested.
+    - **`sudoku9` (first classic 9x9 run, 5 seeds, exploratory): mixing replicates M33's magnitude
+      (+0.40–0.43 accuracy), but `trm_mixer_nomix`'s whole-grid accuracy is statistically
+      indistinguishable from the TRIVIAL "copy givens, guess blanks uniformly" baseline** (0.4401
+      observed vs 0.4403 computed at n_givens=30) — it is not constraint-solving at all, exactly
+      as §11.2 #8's coupled-vs-CI line predicts. `trm_mixer` itself IS doing real work (blank-only
+      accuracy ~68–79% vs nomix's ~11% chance rate) but rarely solves the WHOLE grid (exact-match
+      2.56% at the easiest point, ~0% harder) — a real prediction-quality win, not a "9x9 solved"
+      result; don't conflate per-cell accuracy with solving on multi-cell exact-match tasks.
+    See `results/log/m34.md` for full tables and the verified numbers behind every claim above.
+20. **Run-record reproducibility: `git_sha` didn't detect a dirty working tree (fixed).** Every
+    M34 run recorded a `git_sha` naming a commit that did NOT contain the code that produced it —
+    all M34 support was uncommitted at run time, and `_git_sha()` in `run.py` only called
+    `git rev-parse HEAD`, never checking working-tree state (found by the same external review
+    that flagged #19's overclaims). Now appends a `-dirty` suffix whenever `git status --porcelain`
+    is non-empty, so a dirty-tree run's record can no longer be mistaken for one reproducible via
+    `git checkout <sha>` (`tests/test_run.py::test_git_sha_marks_dirty_tree`). Does not recover the
+    exact diff for already-completed runs — commit code changes together with the results that
+    depend on them, or expect `-dirty`-suffixed SHAs in future run records mid-development.
+    **Second review pass caught a fail-open bug in the first fix**: if `git status` itself errored,
+    the old code silently fell back to reporting the bare (clean-looking) SHA — exactly the
+    false-clean state the fix exists to prevent. Now reports `-status-unknown` in that case instead
+    of guessing clean (`tests/test_run.py::test_git_sha_fails_conservatively_when_status_check_errors`).
 
 ### 11.3 Open work
 
@@ -758,16 +922,56 @@ file and one index row, not here.
   fails all three (data is the lever, M18j/M28).
 - **Forecasting frontier (M26 scope limits):** the horizon sweep (M30), the shared-readout control
   (M31), and the ingredient decomposition (M32) are **DONE — the mixer win is channel-INDEPENDENCE
-  first, the shared readout a modest second, mixing net HARMFUL (§11.2 #13–#14)**. Still open, in
-  priority order: (1) **more datasets** (ETTh2/ETTm/electricity/traffic — needs a one-time out-of-band
-  fetch + hash + determinism test per §9.4, then replicate the M32 recipe; would test whether the
-  CI-leads / shared-readout / CI-beats-CD pattern generalizes). (2) **benchmark-scale models** where
-  channel-independence is known to win (M31/M32's `nomix` already points that way at tiny scale; M30's
-  CD>CI held only at tiny CPU scale and lost M26's significance — the CD>CI finding may not survive
-  scale, and M32 further weakens it: mixing is net harmful). (3) OPTIONAL, to name the single active
-  ingredient *within* the channel-independent parameterization even more finely (own-variable input vs
-  per-cell tokenization vs recurrence) — M32 already settles the readout/CI/weight-share/mixing split;
-  this is only for a recurrence-clean CI-vs-CD flip (a feedforward CI arm), low priority.
+  first, the shared readout a modest second, mixing net HARMFUL (§11.2 #13–#14)**. **The "more
+  datasets" item is PARTIALLY done (M34, §11.2 #19, CORRECTED after review).**
+  ETTh2/ETTm1/ETTm2 (M=7, same recipe as etth1) cleanly extend #13/#14. electricity/traffic
+  (M=321/862) showed mixing reversing to helpful, but that run **confounded channel count with
+  training recipe (15 vs 25 epochs, AMP+microbatch vs full-fp32/cuda_graph) and which chronological
+  blocks were sampled (seeds 0–3 = the FIRST four of ten blocks, not a random sample)** — it does
+  NOT establish a channel-count effect. **A channel-subsampling attempt at the causal test was
+  made and then CORRECTED on a fourth review pass (M34 "Fourth round", §11.2 #19) — it is
+  informative but does NOT close this gap.** Channel-subsampling within `electricity` AND
+  `traffic` (M=7/64 subsamples, 5 seeds each, one held AMP recipe; the pre-existing full-dataset
+  anchor points are the ORIGINAL 4-seed electricity/traffic runs, NOT 5 — the two are different
+  seed counts, not one uniform "5-seed" curve) does NOT isolate channel count: the M=7/M=64
+  channel sets are not nested (only 3/7 overlap), model width scales ~100x with M by
+  budget-matching design, and the subsampled points don't use the microbatching the full-dataset
+  points do. Properly paired per-seed contrasts show `electricity`'s M=7→M=64 step is
+  directionally consistent across two independent M=64 draws (5/0 both, p=.0625, not significant)
+  but `traffic`'s is NOT — its M=64→full contrast is an exact 2/2 null (p=1.0) once paired,
+  despite the raw means looking ordered. **Net: electricity offers suggestive, unisolated support;
+  traffic offers none once measured correctly — consistent with, not superseding, the §4 caveat
+  that this is "NOT yet causally separated from dataset identity."** Still open: (a) a genuinely
+  isolating design (fixed model width across M, nested channel subsets, matched training
+  mechanics throughout — none of which the current probe achieved); (b) traffic's M=7→M=64 and
+  M=64→full contrasts need more seeds/draws to distinguish real-but-weak from noise; (c) more M
+  points and multiple channel draws at each would characterize the curve's shape, not just check
+  one step's direction; (d) more seeds per point (5 is exploratory; ≥8 would allow a
+  significance-capable call, §5.2); (e) using more of each dataset's ten chronological blocks
+  rather than just the first several (the temporal-sampling caveat from the dataset-level
+  comparisons applies here too, in miniature); (f) the full 7-arm decomposition (CI-vs-ff,
+  readout, weight-share) has not been repeated at any subsampled size — only the mixing-sign leg
+  (`trm_mixer` vs `trm_mixer_nomix`) was tested. Still open beyond that,
+  in priority order:
+  (1) **benchmark-scale models** where
+  channel-independence is known to win (M31/M32's `nomix` already points that way at tiny scale;
+  M30's CD>CI held only at tiny CPU scale and lost M26's significance — the CD>CI finding may not
+  survive scale, and M32 further weakens it: mixing is net harmful at low M, though M34's
+  unconfirmed high-M signal complicates a blanket claim). (2) OPTIONAL, to name the single active
+  ingredient *within* the channel-independent parameterization even more finely (own-variable
+  input vs per-cell tokenization vs recurrence) — M32 already settles the
+  readout/CI/weight-share/mixing split; this is only for a recurrence-clean CI-vs-CD flip (a
+  feedforward CI arm), low priority.
+- **Does the M33 synthetic mixing edge hold up as `converge`'s task scales? DONE for the axis
+  actually tested (M34, §11.2 #19, CORRECTED after review)** — `converge` w∈{64,96} extends M33's
+  w∈{24,32,48}: per-cell Δ(mixer−nomix) accuracy stays close to ~0.29 across the whole w=24→96
+  ring-length range under jointly-scaled, budget-matched models. **This is a task-size sweep, NOT
+  a model-capacity sweep** (cell count, model width, and budget all changed together at each `w`)
+  — do not cite it as a capacity-saturation finding. A genuine "does the mixing mechanism need
+  more model capacity" test on `converge` (fixed `w`, only `hidden_dim`/`latent_dim` swept, the
+  way M11 tested a different task) has NOT been run and remains open, low priority (leg-1/leg-2
+  already showed capacity-growing behavior on other tasks in M11; this would just check whether
+  mixing specifically also grows, is flat, or shrinks with capacity at fixed task size).
 - **Low-priority:** a stricter single-pass feedforward-mixer §4a control (the untied mixer
   already shows non-recurrent mixing suffices); a convergent fixed-point task the mixer
   under-fits, to test the DS carry in its motivated regime (none found — the mixer fits them
@@ -861,7 +1065,18 @@ or the readout/CI/weight-share ingredient split, and do not credit forecasting t
 operator again — §11.2 #13–#14); and the SAME decomposition on the SYNTHETIC mixer-win tasks (M33 —
 Sudoku/`converge`/`hopfield`/`disruption`/`mixed_converge`: mixing is ~the ENTIRE win, channel-
 independence is HARMFUL, shared readout/weight-share exactly 0.000; do not re-run — the attribution
-flips vs forecasting exactly as #8's coupled-vs-CI line predicts — §11.2 #15).
+flips vs forecasting exactly as #8's coupled-vs-CI line predicts — §11.2 #15); and the M33
+mixing-edge-vs-ring-length question on `converge` (M34 — per-cell accuracy edge flat across
+w=24→96, a TASK-SIZE not model-capacity sweep — do not re-run this specific w-sweep on this task;
+a genuine fixed-task capacity sweep on `converge` remains open and separate, low priority, §11.3
+— §11.2 #19). **NOT closed, despite M31/M32/M33's "mixing net HARMFUL in forecasting" phrasing
+above:** that conclusion is now known to be scoped to the M=7–21 channel range M31/M32/M33
+tested — a 4-seed M34 run on `electricity`/`traffic` (M=321/862) showed mixing helping instead,
+but that run confounded channel count with training recipe and which chronological blocks were
+sampled, so it does NOT establish a channel-count effect (§11.2 #19, CORRECTED after review).
+Don't cite either "mixing is harmful in forecasting, channel-count-independent" or "mixing
+reverses at high channel count" as established — both need the causal channel-subsampling design
+in §11.3, not another read of M31/M32/M34.
 
 ## 12. References
 

@@ -1,0 +1,9 @@
+config,delta,metric,delta_mean,delta_std,n_seeds,sign_pos,sign_neg,sign_p,n_near_tie,sign_p_robust
+single,trm_mixer_nomix-ff_matched,accuracy,0.0796726072827975,0.02582367413922013,3,3,0,0.25,0,0.25
+single,trm_mixer_nomix-ff_matched,mse,-0.0796726072827975,0.02582367413922013,3,0,3,0.25,0,0.25
+single,trm_mixer_nomix-ff_matched,mae,-0.0996910532315572,0.02532569750672843,3,0,3,0.25,0,0.25
+single,trm_mixer_nomix-ff_matched,r2,0.09582876165619732,0.03783409076547847,3,3,0,0.25,0,0.25
+single,trm_flat-ff_matched,accuracy,0.01815807322661082,0.01548661638280601,3,3,0,0.25,0,0.25
+single,trm_flat-ff_matched,mse,-0.01815807322661082,0.01548661638280601,3,0,3,0.25,0,0.25
+single,trm_flat-ff_matched,mae,-0.013022621472676596,0.013108737882138111,3,1,2,1.0,0,1.0
+single,trm_flat-ff_matched,r2,0.023186561387540272,0.020478128781903016,3,3,0,0.25,0,0.25

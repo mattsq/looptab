@@ -1,0 +1,108 @@
+# M34 — forecasting-breadth: port the M31/M32 shared-readout / channel-independence DECOMPOSITION
+# to a NEW dataset (ETTh2, same schema/geometry as etth1: M=7 vars, hourly) at H=24 (the M26
+# BASELINE horizon -- never decomposed before; M31/M32 only covered H in {192,336,720}). Widths
+# from scratchpad/m34/probe_budget.py: trm_mixer/trm_flat/ff_matched reuse M26's LOCKED etth1-h24
+# widths UNCHANGED (geometry is dataset-content-independent, only shape M/L/H matters), the four
+# new M31/M32 control arms are freshly solved for H=24. Tests whether the M31/M32 "mixing is net
+# harmful, channel-independence + shared-readout leads" pattern generalizes off etth1/weather.
+# device=cuda + cuda_graph=true: this is exactly the small-GEMM, launch-bound shape §11.2 #16
+# measured a ~4.7x end-to-end win on (batch=128, n_cells=7).
+
+task:
+  name: etth2
+  objective: regression
+  params:
+    dataset: etth2
+    lookback: 96
+    horizon: 24
+    n_folds: 10                 # seeds 0..9 = the 10 DISJOINT chronological backtest blocks
+    test_frac: 0.3
+  n_train: 6000
+  n_test: 1000
+  task_seed: 0
+
+arms:
+  - name: trm_mixer
+    label: trm_mixer            # cross-VARIABLE mixing loop (M26 etth1-h24 width, matches trm_flat)
+    hidden_dim: 224
+    latent_dim: 96
+    token_hidden: 8
+    n_steps: 8
+    n_latent: 1
+    use_rmsnorm: true
+    deep_supervision: true
+  - name: trm_mixer_nomix
+    label: trm_mixer_nomix      # SHARED readout, token-mixing REMOVED (channel-independent)
+    hidden_dim: 156
+    latent_dim: 156
+    token_hidden: 8
+    n_steps: 8
+    n_latent: 1
+    use_rmsnorm: true
+    deep_supervision: true
+  - name: trm_mixer_unsharedro
+    label: trm_mixer_unsharedro  # mix ON, UNSHARED per-cell readout (readout isolation, CD body)
+    hidden_dim: 130
+    latent_dim: 130
+    token_hidden: 8
+    n_steps: 8
+    n_latent: 1
+    use_rmsnorm: true
+    deep_supervision: true
+  - name: trm_mixer_nomix_unsharedro
+    label: trm_mixer_nomix_unsharedro  # mix OFF, UNSHARED readout (readout isolation, CI body)
+    hidden_dim: 130
+    latent_dim: 130
+    token_hidden: 8
+    n_steps: 8
+    n_latent: 1
+    use_rmsnorm: true
+    deep_supervision: true
+  - name: trm_mixer_nomix_distinctw
+    label: trm_mixer_nomix_distinctw   # mix OFF, per-cell DISTINCT channel weights (weight-share)
+    hidden_dim: 48
+    latent_dim: 48
+    token_hidden: 8
+    n_steps: 8
+    n_latent: 1
+    use_rmsnorm: true
+    deep_supervision: true
+  - name: trm
+    label: trm_flat              # flat loop (channel-dependent, UNSHARED M*H readout) — budget ref
+    hidden_dim: 64
+    latent_dim: 64
+    n_steps: 8
+    n_latent: 1
+    use_rmsnorm: true
+    deep_supervision: true
+  - name: ff_matched
+    label: ff_matched            # §4a param-matched shallow joint MLP (UNSHARED M*H readout) — anchor
+    hidden_dim: 64
+    latent_dim: 64
+    n_steps: 8
+
+deltas:
+  - [trm_mixer_nomix, trm_mixer_nomix_unsharedro]        # ingredient i: shared readout, CI body
+  - [trm_mixer, trm_mixer_unsharedro]                    # ingredient i: shared readout, CD cross-check
+  - [trm_mixer, trm_mixer_nomix]                         # ingredient ii: mixing at a held shared readout
+  - [trm_mixer_unsharedro, trm_mixer_nomix_unsharedro]   # ingredient ii: mixing, unshared-RO cross-check
+  - [trm_mixer_nomix, trm_mixer_nomix_distinctw]         # ingredient iii: weight-sharing
+  - [trm_mixer_nomix, ff_matched]                        # M31 headline
+  - [trm_mixer_nomix_unsharedro, ff_matched]             # per-cell CI vs joint MLP, unshared RO
+  - [trm_mixer, ff_matched]                              # M26/M30 headline (context)
+  - [trm_flat, ff_matched]                               # context
+
+budget_reference: trm_flat
+budget_tol: 0.05
+
+train:
+  epochs: 25
+  lr: 1e-3
+  weight_decay: 1e-4
+  batch_size: 128
+  device: cuda
+  cuda_graph: true
+
+seeds: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
+parallel_workers: 1
+results_dir: results

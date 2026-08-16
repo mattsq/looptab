@@ -1,0 +1,8 @@
+config,arm,n_params,ref_params,ratio,role,within_tol
+single,trm_mixer,64458,65088,0.9903,matched,True
+single,trm_mixer_nomix,64898,65088,0.9971,matched,True
+single,trm_mixer_unsharedro,64632,65088,0.9930,matched,True
+single,trm_mixer_nomix_unsharedro,65828,65088,1.0114,matched,True
+single,trm_mixer_nomix_distinctw,58418,65088,0.8975,matched,False
+single,trm_flat,65088,65088,1.0000,reference,True
+single,ff_matched,65016,65088,0.9989,matched,True

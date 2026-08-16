@@ -152,6 +152,7 @@ def train(
     device: str = "cpu",
     amp: bool = False,
     cuda_graph: bool = False,
+    microbatch_size: int | None = None,
     verbose: bool = False,
 ) -> list[float]:
     """Train model; return per-epoch train losses.
@@ -175,6 +176,10 @@ def train(
     """
     if amp and cuda_graph:
         raise ValueError("train(): amp and cuda_graph cannot be combined yet.")
+    if microbatch_size is not None and microbatch_size < 1:
+        raise ValueError(f"microbatch_size must be >= 1, got {microbatch_size}")
+    if microbatch_size is not None and cuda_graph:
+        raise ValueError("train(): microbatch_size and cuda_graph cannot be combined yet.")
     model = model.to(device)
     use_cuda_graph = cuda_graph and torch.device(device).type == "cuda"
     opt = torch.optim.AdamW(
@@ -193,6 +198,15 @@ def train(
     for epoch in range(epochs):
         model.train()
         epoch_loss = 0.0
+        # The graph and microbatch paths are explicitly opt-in, so keep their diagnostic loss
+        # accumulation on-device and synchronize only once per epoch.  Calling `.item()` after
+        # every graph replay serializes the CPU and GPU, throwing away much of graph replay's
+        # launch-ahead benefit.  float64 accumulation reproduces Python's sum of float32 losses.
+        async_epoch_loss = (
+            torch.zeros((), dtype=torch.float64, device=device)
+            if use_cuda_graph or microbatch_size is not None
+            else None
+        )
         n_batches = 0
         for X, y in train_loader:
             X, y = X.to(device), y.to(device)
@@ -203,7 +217,37 @@ def train(
                     )
                 if X.shape[0] != captured.batch_size:
                     continue  # drop the ragged last batch — the graph's shape is fixed
-                loss_val = captured.run(X, y).item()
+                loss_tensor = captured.run(X, y).detach()
+                async_epoch_loss.add_(loss_tensor.to(torch.float64))
+                loss_val = None
+            elif microbatch_size is not None and microbatch_size < X.shape[0]:
+                # Exact effective-batch gradient accumulation: each microbatch mean is weighted
+                # by its share of the full batch, so the summed gradient equals the full-batch
+                # mean mathematically.  This keeps the experiment's configured batch size (and
+                # one optimizer/EMA update per batch) while bounding activation memory.
+                opt.zero_grad()
+                batch_n = int(X.shape[0])
+                batch_loss = torch.zeros((), dtype=torch.float64, device=device)
+                for start in range(0, batch_n, microbatch_size):
+                    stop = min(start + microbatch_size, batch_n)
+                    X_mb, y_mb = X[start:stop], y[start:stop]
+                    weight = (stop - start) / batch_n
+                    with torch.autocast(device_type="cuda", dtype=torch.float16, enabled=use_amp):
+                        logits, all_logits = model(X_mb)
+                        loss = _loss_fn(logits, y_mb, loss_type)
+                        if all_logits is not None and deep_supervision_weight > 0:
+                            ds_loss = sum(
+                                _loss_fn(sl, y_mb, loss_type) for sl in all_logits
+                            ) / len(all_logits)
+                            loss = loss + deep_supervision_weight * ds_loss
+                    scaler.scale(loss * weight).backward()
+                    batch_loss.add_(loss.detach().to(torch.float64), alpha=weight)
+                scaler.step(opt)
+                scaler.update()
+                if ema is not None:
+                    ema.update(model)
+                async_epoch_loss.add_(batch_loss)
+                loss_val = None
             else:
                 opt.zero_grad()
                 with torch.autocast(device_type="cuda", dtype=torch.float16, enabled=use_amp):
@@ -220,8 +264,11 @@ def train(
                 if ema is not None:
                     ema.update(model)
                 loss_val = loss.item()
-            epoch_loss += loss_val
+            if loss_val is not None:
+                epoch_loss += loss_val
             n_batches += 1
+        if async_epoch_loss is not None:
+            epoch_loss += async_epoch_loss.item()  # one synchronization per epoch, not per batch
         avg = epoch_loss / max(n_batches, 1)
         losses.append(avg)
         if verbose and (epoch % 10 == 0 or epoch == epochs - 1):

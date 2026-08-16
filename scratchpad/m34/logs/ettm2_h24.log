@@ -1,0 +1,35 @@
+
+=== single ===
+  [seed=0] trm_mixer=-0.067  trm_mixer_nomix=-0.068  trm_mixer_unsharedro=-0.070  trm_mixer_nomix_unsharedro=-0.065  trm_mixer_nomix_distinctw=-0.067  trm_flat=-0.105  ff_matched=-0.099 (baseline=-0.100)
+  [seed=1] trm_mixer=-0.066  trm_mixer_nomix=-0.077  trm_mixer_unsharedro=-0.067  trm_mixer_nomix_unsharedro=-0.074  trm_mixer_nomix_distinctw=-0.185  trm_flat=-0.121  ff_matched=-0.108 (baseline=-0.132)
+  [seed=2] trm_mixer=-0.250  trm_mixer_nomix=-0.228  trm_mixer_unsharedro=-0.295  trm_mixer_nomix_unsharedro=-0.212  trm_mixer_nomix_distinctw=-0.269  trm_flat=-0.409  ff_matched=-0.467 (baseline=-0.216)
+  [seed=3] trm_mixer=-0.094  trm_mixer_nomix=-0.076  trm_mixer_unsharedro=-0.101  trm_mixer_nomix_unsharedro=-0.092  trm_mixer_nomix_distinctw=-0.089  trm_flat=-0.142  ff_matched=-0.106 (baseline=-0.131)
+  [seed=4] trm_mixer=-0.064  trm_mixer_nomix=-0.080  trm_mixer_unsharedro=-0.088  trm_mixer_nomix_unsharedro=-0.098  trm_mixer_nomix_distinctw=-0.097  trm_flat=-0.109  ff_matched=-0.178 (baseline=-0.096)
+  [seed=5] trm_mixer=-0.080  trm_mixer_nomix=-0.082  trm_mixer_unsharedro=-0.082  trm_mixer_nomix_unsharedro=-0.084  trm_mixer_nomix_distinctw=-0.089  trm_flat=-0.107  ff_matched=-0.137 (baseline=-0.119)
+  [seed=6] trm_mixer=-0.103  trm_mixer_nomix=-0.108  trm_mixer_unsharedro=-0.100  trm_mixer_nomix_unsharedro=-0.103  trm_mixer_nomix_distinctw=-0.113  trm_flat=-0.103  ff_matched=-0.196 (baseline=-0.124)
+  [seed=7] trm_mixer=-0.068  trm_mixer_nomix=-0.042  trm_mixer_unsharedro=-0.115  trm_mixer_nomix_unsharedro=-0.051  trm_mixer_nomix_distinctw=-0.069  trm_flat=-0.225  ff_matched=-0.257 (baseline=-0.078)
+  [seed=8] trm_mixer=-0.083  trm_mixer_nomix=-0.065  trm_mixer_unsharedro=-0.091  trm_mixer_nomix_unsharedro=-0.081  trm_mixer_nomix_distinctw=-0.081  trm_flat=-0.361  ff_matched=-0.784 (baseline=-0.100)
+  [seed=9] trm_mixer=-0.057  trm_mixer_nomix=-0.052  trm_mixer_unsharedro=-0.056  trm_mixer_nomix_unsharedro=-0.054  trm_mixer_nomix_distinctw=-0.056  trm_flat=-0.081  ff_matched=-0.078 (baseline=-0.094)
+  majority_baseline: acc -0.1191 ± 0.0384
+         trm_mixer: acc -0.0933 ± 0.0570
+   trm_mixer_nomix: acc -0.0878 ± 0.0524
+  trm_mixer_unsharedro: acc -0.1064 ± 0.0686
+  trm_mixer_nomix_unsharedro: acc -0.0913 ± 0.0460
+  trm_mixer_nomix_distinctw: acc -0.1115 ± 0.0661
+          trm_flat: acc -0.1764 ± 0.1173
+        ff_matched: acc -0.2410 ± 0.2225
+  Δ(trm_mixer_nomix − trm_mixer_nomix_unsharedro) = +0.0036 ± 0.0111  [MSE -0.0036 ± 0.0111]  [MAE -0.0044 ± 0.0089]  [R2 +0.0089 ± 0.0207]
+  Δ(trm_mixer − trm_mixer_unsharedro) = +0.0131 ± 0.0188  [MSE -0.0131 ± 0.0188]  [MAE -0.0100 ± 0.0163]  [R2 +0.0239 ± 0.0366]
+  Δ(trm_mixer − trm_mixer_nomix) = -0.0055 ± 0.0144  [MSE +0.0055 ± 0.0144]  [MAE +0.0108 ± 0.0173]  [R2 -0.0066 ± 0.0277]
+  Δ(trm_mixer_unsharedro − trm_mixer_nomix_unsharedro) = -0.0150 ± 0.0318  [MSE +0.0150 ± 0.0318]  [MAE +0.0164 ± 0.0246]  [R2 -0.0217 ± 0.0525]
+  Δ(trm_mixer_nomix − trm_mixer_nomix_distinctw) = +0.0237 ± 0.0321  [MSE -0.0237 ± 0.0321]  [MAE -0.0184 ± 0.0244]  [R2 +0.0378 ± 0.0435]
+  Δ(trm_mixer_nomix − ff_matched) = +0.1532 ± 0.2132  [MSE -0.1532 ± 0.2132]  [MAE -0.1112 ± 0.0962]  [R2 +0.2779 ± 0.3697]
+  Δ(trm_mixer_nomix_unsharedro − ff_matched) = +0.1496 ± 0.2104  [MSE -0.1496 ± 0.2104]  [MAE -0.1068 ± 0.0921]  [R2 +0.2690 ± 0.3616]
+  Δ(trm_mixer − ff_matched) = +0.1477 ± 0.2066  [MSE -0.1477 ± 0.2066]  [MAE -0.1005 ± 0.0873]  [R2 +0.2713 ± 0.3587]
+  Δ(trm_flat − ff_matched) = +0.0646 ± 0.1324  [MSE -0.0646 ± 0.1324]  [MAE -0.0262 ± 0.0416]  [R2 +0.1272 ± 0.2299]
+
+Results : results\m34_ettm2_h24_20260815T143308.json
+Curve   : results\m34_ettm2_h24_20260815T143308_curve.csv
+Deltas  : results\m34_ettm2_h24_20260815T143308_deltas.csv
+Params  : results\m34_ettm2_h24_20260815T143308_params.csv
+  ✓ BUDGET PARITY: all matched arms within ±5% per cell.

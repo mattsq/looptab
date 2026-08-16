@@ -227,7 +227,15 @@ def test_pad_to_label_multiple_determinism():
 
 
 # --- M26: multivariate time-series forecasting (regression bridge) --------------------------------
-_FORECAST_SHAPES = {"etth1": (17420, 7), "weather": (52696, 21)}
+_FORECAST_SHAPES = {
+    "etth1": (17420, 7),
+    "etth2": (17420, 7),
+    "ettm1": (69680, 7),
+    "ettm2": (69680, 7),
+    "weather": (52696, 21),
+    "electricity": (26304, 321),
+    "traffic": (17544, 862),
+}
 _have_forecast = {ds: (_CACHE_DIR / f"{ds}.npz").exists() for ds in _FORECAST_SHAPES}
 _forecast_params = [
     pytest.param(ds, marks=pytest.mark.skipif(not have, reason=f"datasets/{ds}.npz absent"))
@@ -253,10 +261,22 @@ def test_forecast_windows_shapes_and_divisibility(dataset):
     M = _FORECAST_SHAPES[dataset][1]
     L, H = 96, 24
     cfg = {"dataset": dataset, "lookback": L, "horizon": H, "n_folds": 10, "test_frac": 0.3}
-    tr, te = make_forecast_splits(cfg, split_seed=0, fold=0)
+    tr, te = make_forecast_splits(cfg, split_seed=0, fold=0, n_train=128, n_test=32)
     assert tr.X.shape[1] == M * L and tr.X.shape[1] % M == 0  # divisible ⇒ mixer-compatible
     assert tr.y.shape[1:] == (M, H) and te.y.shape[1:] == (M, H)  # M variable-cells × horizon
     assert tr.X.dtype == np.float32 and tr.y.dtype == np.float32
+
+
+def test_forecast_selected_windows_match_full_materialization():
+    """The M34 memory optimization changes only which rows are materialized, not their bytes."""
+    from looptab.data.real import _forecast_windows, _forecast_windows_at
+
+    series = np.arange(80 * 3, dtype=np.float32).reshape(80, 3)
+    starts = np.array([17, 0, 42, 9], dtype=np.int64)
+    Xall, yall = _forecast_windows(series, lookback=12, horizon=5)
+    Xsel, ysel = _forecast_windows_at(series, starts, lookback=12, horizon=5)
+    np.testing.assert_array_equal(Xsel, Xall[starts])
+    np.testing.assert_array_equal(ysel, yall[starts])
 
 
 @pytest.mark.parametrize("dataset", _forecast_params)
@@ -264,10 +284,12 @@ def test_forecast_determinism_and_seed_maps_to_fold(dataset):
     from looptab.data.real import make_forecast_splits
 
     cfg = {"dataset": dataset, "lookback": 96, "horizon": 24, "n_folds": 10, "test_frac": 0.3}
-    a = make_forecast_splits(cfg, split_seed=0, fold=3)
-    b = make_forecast_splits(cfg, split_seed=0, fold=3)
+    a = make_forecast_splits(cfg, split_seed=0, fold=3, n_train=128, n_test=32)
+    b = make_forecast_splits(cfg, split_seed=0, fold=3, n_train=128, n_test=32)
     assert np.array_equal(a[1].X, b[1].X) and np.array_equal(a[1].y, b[1].y)
-    c = make_forecast_splits(cfg, split_seed=0, fold=4)  # different fold ⇒ disjoint block
+    c = make_forecast_splits(
+        cfg, split_seed=0, fold=4, n_train=128, n_test=32
+    )  # different fold ⇒ disjoint block
     assert not np.array_equal(a[1].y[:3], c[1].y[:3])
 
 
@@ -275,36 +297,48 @@ def test_forecast_determinism_and_seed_maps_to_fold(dataset):
 def test_forecast_no_lookahead_leakage(dataset):
     # Every TRAIN window must end strictly before the test block's first input (expanding-window
     # backtest with a purge gap). Raw (unstandardized) windows compared to the source series.
-    from looptab.data.real import _forecast_windows, load_forecast_series, make_forecast_splits
+    from looptab.data.real import _forecast_windows_at, load_forecast_series, make_forecast_splits
 
     M = _FORECAST_SHAPES[dataset][1]
     L, H = 96, 24
     cfg = {"dataset": dataset, "lookback": L, "horizon": H, "n_folds": 10, "test_frac": 0.3,
            "standardize": False}
-    tr, te = make_forecast_splits(cfg, split_seed=0, fold=5)
-    Xall, _ = _forecast_windows(load_forecast_series(dataset), L, H)  # (N, M, L)
-    first_test = te.X[0].reshape(M, L)
-    test_origin = int(np.where((Xall == first_test).all(axis=(1, 2)))[0][0])
-    last_train = tr.X[-1].reshape(M, L)
-    last_train_start = int(np.where((Xall == last_train).all(axis=(1, 2)))[0][0])
+    tr, te = make_forecast_splits(
+        cfg, split_seed=0, fold=5, n_train=128, n_test=32
+    )
+    series = load_forecast_series(dataset)
+    N = len(series) - L - H + 1
+    test_region_start = int(round(0.7 * N))
+    block = max(1, (N - test_region_start) // 10)
+    test_origin = test_region_start + 5 * block
+    last_train_start = test_origin - (L + H - 1) - 1
+    Xcheck, _ = _forecast_windows_at(
+        series, np.array([test_origin, last_train_start]), L, H
+    )
+    np.testing.assert_array_equal(te.X[0].reshape(M, L), Xcheck[0])
+    np.testing.assert_array_equal(tr.X[-1].reshape(M, L), Xcheck[1])
     assert last_train_start + L + H - 1 < test_origin  # train window ends before the test origin
 
 
 @pytest.mark.parametrize("dataset", _forecast_params)
 def test_forecast_standardization_no_leakage(dataset):
     # M26-review m-1: the z-score stats must come ONLY from series strictly before the test block.
-    from looptab.data.real import _forecast_windows, load_forecast_series, make_forecast_splits
+    from looptab.data.real import load_forecast_series, make_forecast_splits
 
     M = _FORECAST_SHAPES[dataset][1]
     L, H = 96, 24
     cfg = {"dataset": dataset, "lookback": L, "horizon": H, "n_folds": 10, "test_frac": 0.3,
            "standardize": True}
     series = load_forecast_series(dataset)
-    te = make_forecast_splits(cfg, split_seed=0, fold=5)[1]
-    Xall, _ = _forecast_windows(series, L, H)
-    raw_te = make_forecast_splits({**cfg, "standardize": False}, split_seed=0, fold=5)[1]
+    te = make_forecast_splits(cfg, split_seed=0, fold=5, n_train=128, n_test=32)[1]
+    raw_te = make_forecast_splits(
+        {**cfg, "standardize": False}, split_seed=0, fold=5, n_train=128, n_test=32
+    )[1]
     raw = raw_te.X[0].reshape(M, L)
-    origin = int(np.where((Xall == raw).all(axis=(1, 2)))[0][0])
+    N = len(series) - L - H + 1
+    test_region_start = int(round(0.7 * N))
+    block = max(1, (N - test_region_start) // 10)
+    origin = test_region_start + 5 * block
     mu, sd = series[:origin].mean(axis=0), series[:origin].std(axis=0)
     sd = np.where(sd < 1e-8, 1.0, sd)
     expected = ((raw - mu[:, None]) / sd[:, None]).astype(np.float32)

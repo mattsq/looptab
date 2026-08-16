@@ -21,6 +21,7 @@ determined by (config, seed) as §5 requires.
 from __future__ import annotations
 
 import hashlib
+from functools import lru_cache
 from pathlib import Path
 
 import numpy as np
@@ -38,11 +39,18 @@ _GOLDEN_SHA256 = {
 # datasets/ sits at the repo root, two levels up from this file (src/looptab/data/real.py).
 _CACHE_DIR = Path(__file__).resolve().parents[3] / "datasets"
 
-# M26 — multivariate-time-series forecasting caches. Content sha256 = sha256(series.tobytes());
+# M26/M34 — multivariate-time-series forecasting caches. Content sha256 = sha256(series.tobytes());
 # see scratchpad/fetch_forecast.py. Each `{dataset}.npz` holds a (T,M) float32 chronological series.
+# M34 adds a channel-count spread (7 -> 21 -> 321 -> 862) to dose-response-test the M32 channel-
+# independence-share finding (CLAUDE.md §11.2 #14) across more than two datasets.
 _FORECAST_SHA256 = {
-    "etth1": "8fec12c3e12d38424e0b03cdff21909ef67b92609ba3d76b64f3937ac481e93a",   # (17420, 7)
-    "weather": "8e6d8069ecea5a05ede434b930c9fada115f998d9a67455e86995bfabe5b3e30",  # (52696, 21)
+    "etth1": "8fec12c3e12d38424e0b03cdff21909ef67b92609ba3d76b64f3937ac481e93a",
+    "etth2": "0c3b296810a8a7f6b8e3c6591ca606800ed0780aba7ee754c1dbba454d1ced43",
+    "ettm1": "f967e71ba1c947625325e320cb7d7736537b4f5963cec71ff0a3c489fb04ed8b",
+    "ettm2": "9353c9658fa58736c778002858638405a525af914f62bde1156739fc3af5211e",
+    "weather": "8e6d8069ecea5a05ede434b930c9fada115f998d9a67455e86995bfabe5b3e30",
+    "electricity": "5fd5636660ed370c8cdf4c2a738eb3e8ef46f1fb904efcc49563b729ebde7a98",
+    "traffic": "4e6930f039344a7010b28461ee46a0c73a855c200f58ec5a902fdbb501ee43b2",
 }
 
 
@@ -220,6 +228,7 @@ def make_multilabel_splits(
 
 # --- M26: multivariate time-series forecasting (multi-target REGRESSION bridge) ---
 
+@lru_cache(maxsize=None)
 def load_forecast_series(dataset: str = "etth1") -> np.ndarray:
     """Load a vendored forecasting series ``(T, M)`` float32 and verify its content hash (§5)."""
     if dataset not in _FORECAST_SHA256:
@@ -252,10 +261,22 @@ def _forecast_windows(series: np.ndarray, lookback: int, horizon: int):
     N = T - lookback - horizon + 1
     if N <= 0:
         raise ValueError(f"lookback+horizon ({lookback}+{horizon}) exceeds series length {T}.")
-    # (N, L, M) input / (N, H, M) target via strided views, then move the variable axis to be the
-    # CELL axis so X is (N, M, L) and y is (N, M, H) — variable i is cell i on both sides (the
-    # shared input/output topology the mixer needs; M25's multi-label reshape LACKED this).
-    idx = np.arange(N)[:, None]
+    return _forecast_windows_at(series, np.arange(N), lookback, horizon)
+
+
+def _forecast_windows_at(
+    series: np.ndarray, starts: np.ndarray, lookback: int, horizon: int
+):
+    """Materialize only selected window starts, in the supplied order.
+
+    M26's original helper built every possible window and only then sliced the requested
+    train/test rows.  That was harmless at 7–21 variables, but traffic's temporary full window
+    tensor is ~7GiB even though an experiment retains only 7,000 rows.  Selecting starts first is
+    byte-equivalent and cuts both construction time and peak host memory dramatically.
+    """
+    # (N, L, M) input / (N, H, M) target via indexed gathers, then move the variable axis to be
+    # the CELL axis so X is (N, M, L) and y is (N, M, H).
+    idx = np.asarray(starts, dtype=np.int64)[:, None]
     Xin = series[idx + np.arange(lookback)[None, :]]       # (N, L, M)
     Ytg = series[idx + lookback + np.arange(horizon)[None, :]]  # (N, H, M)
     X = np.transpose(Xin, (0, 2, 1))                        # (N, M, L)
@@ -296,8 +317,10 @@ def make_forecast_splits(
     standardize = bool(task_cfg.get("standardize", True))
 
     series = load_forecast_series(dataset)
-    X, y = _forecast_windows(series, lookback, horizon)   # (N, M, L), (N, M, H)
-    N, M, _ = X.shape
+    T, M = series.shape
+    N = T - lookback - horizon + 1
+    if N <= 0:
+        raise ValueError(f"lookback+horizon ({lookback}+{horizon}) exceeds series length {T}.")
 
     which = split_seed if fold is None else fold
     k = int(which) % n_folds
@@ -315,8 +338,8 @@ def make_forecast_splits(
     if n_test is not None:
         test_idx = test_idx[:n_test]
 
-    Xtr, ytr = X[train_idx], y[train_idx]
-    Xte, yte = X[test_idx], y[test_idx]
+    Xtr, ytr = _forecast_windows_at(series, train_idx, lookback, horizon)
+    Xte, yte = _forecast_windows_at(series, test_idx, lookback, horizon)
 
     if standardize:
         # Per-variable stats from the raw series STRICTLY BEFORE the test block (no leakage).

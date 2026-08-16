@@ -20,6 +20,7 @@ class TaskConfig(BaseModel):
     name: Literal[
         "linear", "parity", "multi_parity", "iterated", "converge", "hopfield", "mixed_converge",
         "nested_converge", "disruption", "multilabel", "sudoku", "etth1", "weather",
+        "etth2", "ettm1", "ettm2", "electricity", "traffic",
     ]
     # "classification" (default; all M0–M25 tasks) trains with cross-entropy and reports
     # accuracy/EM/F1. "regression" (M26 forecasting) trains with MSE and reports MSE/MAE/R².
@@ -41,6 +42,11 @@ class ModelConfig(BaseModel):
     hidden_dim: int = 64
     latent_dim: int = 64
     n_steps: int = 4
+    # Optional per-arm override for TrainConfig.microbatch_size.  Activation memory varies by
+    # orders of magnitude across budget-matched parameterizations (M34 traffic: h1760 mixer vs
+    # h44 distinct-weight control), so forcing the most constrained microbatch on every arm wastes
+    # launches.  The effective optimizer batch remains TrainConfig.batch_size in every arm.
+    microbatch_size: Optional[int] = None
     # `deep_supervision` toggles whether the TRM loop emits per-step readouts.
     # `deep_supervision_weight` is the per-arm training weight on those readouts.
     # Decoupling these (per arm) is what lets us ablate deep supervision separately
@@ -124,6 +130,13 @@ class TrainConfig(BaseModel):
     lr: float = 1e-3
     weight_decay: float = 1e-4
     batch_size: int = 256
+    # Optional activation-memory bound while preserving `batch_size` as the EFFECTIVE optimizer
+    # batch.  The standard train path slices each loader batch into microbatches, weights each
+    # mean loss by microbatch_size/full_batch_size, accumulates gradients, then performs exactly
+    # one optimizer/EMA update.  This is essential for M34's high-channel forecasting shapes on
+    # the 8GB RTX 2070: traffic batch=128 does not fit even under fp16, while microbatch=16 does.
+    # None = the pre-existing one-pass batch path.  Incompatible with cuda_graph for now.
+    microbatch_size: Optional[int] = None
     device: str = "cpu"
     # CPU intra-op thread count (applied once by the runner). The models here are tiny, so
     # their matmuls fall below torch's parallelization threshold: extra threads add only

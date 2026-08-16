@@ -1,0 +1,64 @@
+# M34-followup — FF-CONVERGENCE PROBE (post-review, CLAUDE.md §11.2 #19 correction). On traffic,
+# ff_matched's own TRAIN mse (0.685) was worse than nomix's TEST mse (0.377) at epochs=15 --
+# looks underfit, not just architecturally worse than nomix. This probe triples epochs (15->45)
+# on JUST the three arms this question needs (ff_matched, trm_mixer_nomix, trm_flat as budget
+# reference) -- cheaper than a full 7-arm rerun, and directly tests whether ff's train MSE catches
+# up with more epochs. 3 seeds only (purely diagnostic, not a claim-grade run). Same AMP+
+# microbatch recipe/widths as m34_traffic_h24.yaml so epochs is the only new variable.
+
+task:
+  name: traffic
+  objective: regression
+  params:
+    dataset: traffic
+    lookback: 96
+    horizon: 24
+    n_folds: 10
+    test_frac: 0.3
+  n_train: 6000
+  n_test: 1000
+  task_seed: 0
+
+arms:
+  - name: trm_mixer_nomix
+    label: trm_mixer_nomix
+    hidden_dim: 1760
+    latent_dim: 1760
+    token_hidden: 8
+    n_steps: 8
+    n_latent: 1
+    use_rmsnorm: true
+    deep_supervision: true
+    microbatch_size: 16
+  - name: trm
+    label: trm_flat
+    hidden_dim: 64
+    latent_dim: 64
+    n_steps: 8
+    n_latent: 1
+    use_rmsnorm: true
+    deep_supervision: true
+  - name: ff_matched
+    label: ff_matched
+    hidden_dim: 64
+    latent_dim: 64
+    n_steps: 8
+
+deltas:
+  - [trm_mixer_nomix, ff_matched]
+  - [trm_flat, ff_matched]
+
+budget_reference: trm_flat
+budget_tol: 0.05
+
+train:
+  epochs: 45
+  lr: 1e-3
+  weight_decay: 1e-4
+  batch_size: 128
+  device: cuda
+  amp: true
+
+seeds: [0, 1, 2]
+parallel_workers: 1
+results_dir: results

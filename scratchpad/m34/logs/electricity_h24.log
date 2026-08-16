@@ -1,0 +1,29 @@
+
+=== single ===
+  [seed=0] trm_mixer=-0.115  trm_mixer_nomix=-0.143  trm_mixer_unsharedro=-0.111  trm_mixer_nomix_unsharedro=-0.127  trm_mixer_nomix_distinctw=-0.139  trm_flat=-0.207  ff_matched=-0.229 (baseline=-1.503)
+  [seed=1] trm_mixer=-0.092  trm_mixer_nomix=-0.115  trm_mixer_unsharedro=-0.109  trm_mixer_nomix_unsharedro=-0.112  trm_mixer_nomix_distinctw=-0.117  trm_flat=-0.189  ff_matched=-0.252 (baseline=-1.260)
+  [seed=2] trm_mixer=-0.110  trm_mixer_nomix=-0.141  trm_mixer_unsharedro=-0.108  trm_mixer_nomix_unsharedro=-0.133  trm_mixer_nomix_distinctw=-0.141  trm_flat=-0.184  ff_matched=-0.212 (baseline=-1.269)
+  [seed=3] trm_mixer=-0.108  trm_mixer_nomix=-0.135  trm_mixer_unsharedro=-0.100  trm_mixer_nomix_unsharedro=-0.124  trm_mixer_nomix_distinctw=-0.135  trm_flat=-0.201  ff_matched=-0.211 (baseline=-1.348)
+  majority_baseline: acc -1.3450 ± 0.1124
+         trm_mixer: acc -0.1062 ± 0.0097
+   trm_mixer_nomix: acc -0.1333 ± 0.0126
+  trm_mixer_unsharedro: acc -0.1072 ± 0.0049
+  trm_mixer_nomix_unsharedro: acc -0.1242 ± 0.0091
+  trm_mixer_nomix_distinctw: acc -0.1332 ± 0.0110
+          trm_flat: acc -0.1952 ± 0.0108
+        ff_matched: acc -0.2260 ± 0.0190
+  Δ(trm_mixer_nomix − trm_mixer_nomix_unsharedro) = -0.0091 ± 0.0052  [MSE +0.0091 ± 0.0052]  [MAE +0.0082 ± 0.0041]  [R2 -0.0103 ± 0.0048]
+  Δ(trm_mixer − trm_mixer_unsharedro) = +0.0010 ± 0.0110  [MSE -0.0010 ± 0.0110]  [MAE +0.0002 ± 0.0051]  [R2 +0.0018 ± 0.0139]
+  Δ(trm_mixer − trm_mixer_nomix) = +0.0271 ± 0.0034  [MSE -0.0271 ± 0.0034]  [MAE -0.0216 ± 0.0023]  [R2 +0.0320 ± 0.0051]
+  Δ(trm_mixer_unsharedro − trm_mixer_nomix_unsharedro) = +0.0170 ± 0.0106  [MSE -0.0170 ± 0.0106]  [MAE -0.0135 ± 0.0057]  [R2 +0.0199 ± 0.0132]
+  Δ(trm_mixer_nomix − trm_mixer_nomix_distinctw) = -0.0001 ± 0.0025  [MSE +0.0001 ± 0.0025]  [MAE -0.0071 ± 0.0043]  [R2 +0.0001 ± 0.0027]
+  Δ(trm_mixer_nomix − ff_matched) = +0.0926 ± 0.0298  [MSE -0.0926 ± 0.0298]  [MAE -0.1038 ± 0.0307]  [R2 +0.1108 ± 0.0443]
+  Δ(trm_mixer_nomix_unsharedro − ff_matched) = +0.1018 ± 0.0271  [MSE -0.1018 ± 0.0271]  [MAE -0.1120 ± 0.0291]  [R2 +0.1211 ± 0.0403]
+  Δ(trm_mixer − ff_matched) = +0.1197 ± 0.0269  [MSE -0.1197 ± 0.0269]  [MAE -0.1253 ± 0.0286]  [R2 +0.1428 ± 0.0432]
+  Δ(trm_flat − ff_matched) = +0.0307 ± 0.0229  [MSE -0.0307 ± 0.0229]  [MAE -0.0215 ± 0.0178]  [R2 +0.0378 ± 0.0311]
+
+Results : results\m34_electricity_h24_20260815T153753.json
+Curve   : results\m34_electricity_h24_20260815T153753_curve.csv
+Deltas  : results\m34_electricity_h24_20260815T153753_deltas.csv
+Params  : results\m34_electricity_h24_20260815T153753_params.csv
+  ✓ BUDGET PARITY: all matched arms within ±5% per cell.
