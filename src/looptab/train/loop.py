@@ -1,6 +1,7 @@
 """Training loop. Supports deep supervision for TRM-style models."""
 
 import math
+import time
 
 import torch
 import torch.nn as nn
@@ -76,8 +77,8 @@ class _GraphedStepBase:
     - **Optional fp16 autocast with a STATIC loss scale.** ``GradScaler``'s dynamic scale needs
       a host-side inf/nan check every step, which a replayed graph cannot do. A fixed scale
       (multiply the loss, divide the grads in-graph) is the standard graph-compatible AMP
-      recipe; overflow shows up as a non-finite epoch loss, checked once per epoch by the
-      caller. Weights stay fp32 masters exactly as in eager AMP.
+      recipe; overflow is detected from the loss and post-update gradient/parameter/optimizer/
+      EMA state, checked once per epoch by the caller. Weights stay fp32 masters as in eager AMP.
     - **A shared memory pool**, so multiple graphs (tail-shape graph, fresh/carry pass graphs)
       coexist without each reserving its own private pool — the #18 memory-competition failure
       mode on 8GB cards is per-pool, so sharing keeps the footprint at one pool per arm.
@@ -186,6 +187,35 @@ class _GraphedStepBase:
         return captured
 
 
+@torch.no_grad()
+def _training_state_is_finite(model: nn.Module, opt, ema: EMA | None = None) -> bool:
+    """Check every tensor mutated by a captured optimizer step with one host sync.
+
+    A captured AMP step uses a static loss scale, so it cannot run GradScaler's per-step
+    non-finite check. Looking only at the reported loss is insufficient: the loss is computed
+    *before* ``opt.step()``, and an overflow on the final replay can therefore corrupt parameters
+    or Adam moments while leaving the epoch loss finite. Accumulating the checks into one device
+    scalar keeps the graph path at one synchronization per epoch while covering that final step.
+    """
+    params = [p for p in model.parameters() if p.requires_grad]
+    tensors = list(params)
+    tensors.extend(p.grad for p in params if p.grad is not None)
+    tensors.extend(
+        value
+        for state in opt.state.values()
+        for value in state.values()
+        if torch.is_tensor(value)
+    )
+    if ema is not None:
+        tensors.extend(ema.shadow.values())
+    if not tensors:
+        return True
+    finite = torch.ones((), dtype=torch.bool, device=tensors[0].device)
+    for value in tensors:
+        finite.logical_and_(torch.isfinite(value).all())
+    return bool(finite.item())
+
+
 class _CapturedStep(_GraphedStepBase):
     """A training step (zero-grad + forward + loss + backward + opt.step [+ EMA]) captured as a
     CUDA graph, replayable against new batches via ``.run(X, y)``.
@@ -230,6 +260,110 @@ class _CapturedStep(_GraphedStepBase):
         return self.static_loss
 
 
+def benchmark_train_steps(
+    model: nn.Module,
+    train_loader: DataLoader,
+    *,
+    warmup_steps: int = 2,
+    probe_steps: int = 8,
+    lr: float = 1e-3,
+    weight_decay: float = 1e-4,
+    deep_supervision_weight: float = 1.0,
+    ema_decay: float | None = None,
+    loss_type: str = "ce",
+    device: str = "cpu",
+    amp: bool = False,
+    cuda_graph: bool = False,
+    amp_static_loss_scale: float = 8192.0,
+) -> float:
+    """Time a fixed number of standard-path optimizer steps after a fixed warmup.
+
+    This is the bounded primitive behind ``train.speed=auto``. Unlike calling ``train`` twice,
+    it creates exactly one optimizer and (when requested) one CUDA graph, excludes graph capture
+    and allocator setup from the timed interval, and interprets ``probe_steps`` as *batches*, not
+    epochs. All candidates use the loader's first/full batch shape; ragged tails are skipped so a
+    graph candidate and an eager candidate time identical work.
+    """
+    if warmup_steps < 0 or probe_steps < 1:
+        raise ValueError("warmup_steps must be >= 0 and probe_steps must be >= 1")
+    model = model.to(device)
+    use_graph = cuda_graph and torch.device(device).type == "cuda"
+    use_amp = amp and torch.device(device).type == "cuda"
+    opt = torch.optim.AdamW(
+        model.parameters(), lr=lr, weight_decay=weight_decay, capturable=use_graph
+    )
+    ema = EMA(model, ema_decay) if ema_decay is not None else None
+    scaler = torch.cuda.amp.GradScaler(enabled=use_amp and not use_graph)
+    captured: _CapturedStep | None = None
+    batch_iter = iter(train_loader)
+    full_batch_size: int | None = None
+
+    def _next_full_batch() -> tuple[torch.Tensor, torch.Tensor]:
+        nonlocal batch_iter, full_batch_size
+        while True:
+            try:
+                X, y = next(batch_iter)
+            except StopIteration:
+                batch_iter = iter(train_loader)
+                try:
+                    X, y = next(batch_iter)
+                except StopIteration as exc:
+                    raise ValueError("cannot benchmark an empty train_loader") from exc
+            if full_batch_size is None:
+                full_batch_size = int(X.shape[0])
+            if int(X.shape[0]) == full_batch_size:
+                return X.to(device), y.to(device)
+
+    def _step() -> None:
+        nonlocal captured
+        X, y = _next_full_batch()
+        if use_graph:
+            if captured is None:
+                captured = _CapturedStep(
+                    model,
+                    opt,
+                    ema,
+                    X,
+                    y,
+                    deep_supervision_weight,
+                    loss_type,
+                    amp=use_amp,
+                    amp_static_loss_scale=amp_static_loss_scale,
+                )
+            captured.run(X, y)
+            return
+        opt.zero_grad()
+        with torch.autocast(device_type="cuda", dtype=torch.float16, enabled=use_amp):
+            logits, all_logits = model(X)
+            loss = _loss_fn(logits, y, loss_type)
+            if all_logits is not None and deep_supervision_weight > 0:
+                ds_loss = sum(_loss_fn(sl, y, loss_type) for sl in all_logits) / len(all_logits)
+                loss = loss + deep_supervision_weight * ds_loss
+        scaler.scale(loss).backward()
+        scaler.step(opt)
+        scaler.update()
+        if ema is not None:
+            ema.update(model)
+
+    model.train()
+    for _ in range(warmup_steps):
+        _step()
+    if torch.device(device).type == "cuda":
+        torch.cuda.synchronize()
+    started = time.perf_counter()
+    for _ in range(probe_steps):
+        _step()
+    if torch.device(device).type == "cuda":
+        torch.cuda.synchronize()
+    elapsed = time.perf_counter() - started
+    if use_amp and use_graph and not _training_state_is_finite(model, opt, ema):
+        raise RuntimeError(
+            "benchmark_train_steps(): non-finite training state under amp+cuda_graph; lower "
+            "amp_static_loss_scale or use dynamic AMP without graph capture."
+        )
+    return elapsed
+
+
 class _CapturedPassStep(_GraphedStepBase):
     """One deep-supervision PASS (zero-grad + forward-from-state + loss + backward + opt.step
     [+ EMA] [+ ACT halt loss]) captured as CUDA graphs, replayed ``n_sup`` times per batch.
@@ -253,7 +387,7 @@ class _CapturedPassStep(_GraphedStepBase):
     """
 
     def __init__(self, model, opt, ema, X0, y0, *, n_steps, carry, n_sup,
-                 deep_supervision_weight, halt_weight=None, warmup_iters=5,
+                 deep_supervision_weight, loss_type="ce", halt_weight=None, warmup_iters=5,
                  amp=False, amp_static_loss_scale=8192.0, pool=None):
         super().__init__(
             model, opt, ema, amp=amp, amp_static_loss_scale=amp_static_loss_scale,
@@ -286,10 +420,10 @@ class _CapturedPassStep(_GraphedStepBase):
                 logits, all_logits, (z, a) = model(
                     self.static_X, n_steps=n_steps, init_state=init_state, return_state=True
                 )
-                loss = _loss_fn(logits, self.static_y)
+                loss = _loss_fn(logits, self.static_y, loss_type)
                 if all_logits is not None and deep_supervision_weight > 0:
                     ds_loss = sum(
-                        _loss_fn(sl, self.static_y) for sl in all_logits
+                        _loss_fn(sl, self.static_y, loss_type) for sl in all_logits
                     ) / len(all_logits)
                     loss = loss + deep_supervision_weight * ds_loss
                 if halt_weight is not None:
@@ -380,9 +514,10 @@ def train(
 
     ``amp`` + ``cuda_graph`` TOGETHER (opt-in): the captured step runs under fp16 autocast with
     the STATIC loss scale ``amp_static_loss_scale`` — ``GradScaler``'s dynamic scale needs a
-    host-side inf check per step, which replay can't do. Overflow therefore surfaces as a
-    non-finite epoch loss, checked once per epoch here (raises with guidance to lower the
-    scale). ``amp=False, cuda_graph=False`` is bit-identical to the pre-AMP routine.
+    host-side inf check per step, which replay can't do. Overflow is therefore checked once per
+    epoch from both the loss and post-update gradient/parameter/optimizer/EMA state, raising with
+    guidance to lower the scale. ``amp=False, cuda_graph=False`` is bit-identical to the pre-AMP
+    routine.
     """
     if microbatch_size is not None and microbatch_size < 1:
         raise ValueError(f"microbatch_size must be >= 1, got {microbatch_size}")
@@ -491,9 +626,15 @@ def train(
             n_batches += 1
         if async_epoch_loss is not None:
             epoch_loss += async_epoch_loss.item()  # one synchronization per epoch, not per batch
-        if use_amp and use_cuda_graph and not math.isfinite(epoch_loss):
+        state_finite = (
+            _training_state_is_finite(model, opt, ema) if use_amp and use_cuda_graph else True
+        )
+        if use_amp and use_cuda_graph and (
+            not math.isfinite(epoch_loss) or not state_finite
+        ):
             raise RuntimeError(
-                f"train(): non-finite epoch loss at epoch {epoch} under amp+cuda_graph. The "
+                f"train(): non-finite loss or post-update training state at epoch {epoch} under "
+                "amp+cuda_graph. The "
                 f"static loss scale ({amp_static_loss_scale:g}) has overflowed fp16 gradients "
                 "— lower train.amp_static_loss_scale (e.g. halve it) or run amp without "
                 "cuda_graph to get dynamic loss scaling."
@@ -520,9 +661,11 @@ def train_deep_supervision(
     weight_decay: float = 1e-4,
     deep_supervision_weight: float = 1.0,
     ema_decay: float | None = None,
+    loss_type: str = "ce",
     device: str = "cpu",
     amp: bool = False,
     cuda_graph: bool = False,
+    cuda_graph_tail: bool = False,
     amp_static_loss_scale: float = 8192.0,
     verbose: bool = False,
 ) -> list[float]:
@@ -555,8 +698,9 @@ def train_deep_supervision(
     ``amp`` autocasts each pass's forward/loss to fp16 (GradScaler; weights stay fp32 masters).
     ``cuda_graph`` captures the PASS as a pair of graphs (fresh-init + carried-state — see
     ``_CapturedPassStep``) and replays them; combined with ``amp`` the pass uses the static loss
-    scale ``amp_static_loss_scale`` (non-finite epoch loss raises with guidance). The ragged
-    last batch is dropped under ``cuda_graph`` (fixed replay shape, same as ``train``). With
+    scale ``amp_static_loss_scale`` (non-finite training state raises with guidance). The ragged
+    last batch is dropped under ``cuda_graph`` unless ``cuda_graph_tail`` captures a second
+    fresh/carry pair for that shape on the same memory pool, matching ``train``. With
     both flags off this routine is bit-identical to the pre-flag one (disabled autocast/scaler
     are documented no-ops; the loss bookkeeping accumulates in float64 on-device, which reproduces
     Python's float sum of float32 losses bit-for-bit while synchronizing once per epoch instead
@@ -572,7 +716,7 @@ def train_deep_supervision(
     )
     ema = EMA(model, ema_decay) if ema_decay is not None else None
     scaler = torch.cuda.amp.GradScaler(enabled=use_amp and not use_graph)
-    captured: _CapturedPassStep | None = None
+    captured_steps: dict[int, _CapturedPassStep] = {}
     losses = []
 
     for epoch in range(epochs):
@@ -586,13 +730,21 @@ def train_deep_supervision(
         for X, y in train_loader:
             X, y = X.to(device), y.to(device)
             if use_graph:
-                if captured is None:
+                B = int(X.shape[0])
+                captured = captured_steps.get(B)
+                if captured is None and (not captured_steps or cuda_graph_tail):
+                    shared_pool = (
+                        next(iter(captured_steps.values())).pool if captured_steps else None
+                    )
                     captured = _CapturedPassStep(
                         model, opt, ema, X, y, n_steps=n_steps, carry=carry, n_sup=n_sup,
                         deep_supervision_weight=deep_supervision_weight,
+                        loss_type=loss_type,
                         amp=use_amp, amp_static_loss_scale=amp_static_loss_scale,
+                        pool=shared_pool,
                     )
-                if int(X.shape[0]) != captured.batch_size:
+                    captured_steps[B] = captured
+                if captured is None:
                     continue  # drop the ragged last batch — the graphs' shape is fixed
                 loss = captured.replay_fresh(X, y)
                 async_epoch_loss.add_(loss.detach().to(torch.float64))
@@ -611,9 +763,11 @@ def train_deep_supervision(
                     logits, all_logits, state = model(
                         X, n_steps=n_steps, init_state=state, return_state=True
                     )
-                    loss = _loss_fn(logits, y)
+                    loss = _loss_fn(logits, y, loss_type)
                     if all_logits is not None and deep_supervision_weight > 0:
-                        ds_loss = sum(_loss_fn(sl, y) for sl in all_logits) / len(all_logits)
+                        ds_loss = sum(
+                            _loss_fn(sl, y, loss_type) for sl in all_logits
+                        ) / len(all_logits)
                         loss = loss + deep_supervision_weight * ds_loss
                 scaler.scale(loss).backward()
                 scaler.step(opt)
@@ -635,9 +789,13 @@ def train_deep_supervision(
                 async_epoch_loss.add_(loss.detach().to(torch.float64))
                 n_passes += 1
         epoch_loss = async_epoch_loss.item()  # the single per-epoch synchronization
-        if use_amp and use_graph and not math.isfinite(epoch_loss):
+        state_finite = _training_state_is_finite(model, opt, ema) if use_amp and use_graph else True
+        if use_amp and use_graph and (
+            not math.isfinite(epoch_loss) or not state_finite
+        ):
             raise RuntimeError(
-                f"train_deep_supervision(): non-finite epoch loss at epoch {epoch} under "
+                f"train_deep_supervision(): non-finite loss or post-update training state at "
+                f"epoch {epoch} under "
                 f"amp+cuda_graph. The static loss scale ({amp_static_loss_scale:g}) has "
                 "overflowed fp16 gradients — lower train.amp_static_loss_scale (e.g. halve "
                 "it) or run amp without cuda_graph to get dynamic loss scaling."
@@ -667,6 +825,7 @@ def train_act(
     device: str = "cpu",
     amp: bool = False,
     cuda_graph: bool = False,
+    cuda_graph_tail: bool = False,
     amp_static_loss_scale: float = 8192.0,
     verbose: bool = False,
 ) -> list[float]:
@@ -703,7 +862,7 @@ def train_act(
     )
     ema = EMA(model, ema_decay) if ema_decay is not None else None
     scaler = torch.cuda.amp.GradScaler(enabled=use_amp and not use_graph)
-    captured: _CapturedPassStep | None = None
+    captured_steps: dict[int, _CapturedPassStep] = {}
     losses = []
     bce = nn.functional.binary_cross_entropy_with_logits
 
@@ -716,15 +875,22 @@ def train_act(
         for X, y in train_loader:
             X, y = X.to(device), y.to(device)
             if use_graph:
-                if captured is None:
+                B = int(X.shape[0])
+                captured = captured_steps.get(B)
+                if captured is None and (not captured_steps or cuda_graph_tail):
+                    shared_pool = (
+                        next(iter(captured_steps.values())).pool if captured_steps else None
+                    )
                     captured = _CapturedPassStep(
                         model, opt, ema, X, y, n_steps=n_steps, carry=True,
                         n_sup=max_segments,
                         deep_supervision_weight=deep_supervision_weight,
                         halt_weight=halt_weight,
                         amp=use_amp, amp_static_loss_scale=amp_static_loss_scale,
+                        pool=shared_pool,
                     )
-                if int(X.shape[0]) != captured.batch_size:
+                    captured_steps[B] = captured
+                if captured is None:
                     continue  # drop the ragged last batch — the graphs' shape is fixed
                 loss = captured.replay_fresh(X, y)
                 async_epoch_loss.add_(loss.detach().to(torch.float64))
@@ -765,9 +931,13 @@ def train_act(
                 async_epoch_loss.add_(loss.detach().to(torch.float64))
                 n_passes += 1
         epoch_loss = async_epoch_loss.item()  # the single per-epoch synchronization
-        if use_amp and use_graph and not math.isfinite(epoch_loss):
+        state_finite = _training_state_is_finite(model, opt, ema) if use_amp and use_graph else True
+        if use_amp and use_graph and (
+            not math.isfinite(epoch_loss) or not state_finite
+        ):
             raise RuntimeError(
-                f"train_act(): non-finite epoch loss at epoch {epoch} under amp+cuda_graph. The "
+                f"train_act(): non-finite loss or post-update training state at epoch {epoch} "
+                "under amp+cuda_graph. The "
                 f"static loss scale ({amp_static_loss_scale:g}) has overflowed fp16 gradients — "
                 "lower train.amp_static_loss_scale (e.g. halve it) or run amp without cuda_graph "
                 "to get dynamic loss scaling."

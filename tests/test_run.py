@@ -816,6 +816,25 @@ def test_speed_mode_is_recorded_in_results():
         assert out[label]["speed_mode"] == "eager"
 
 
+def test_speed_mode_is_recorded_for_regression_results():
+    """The regression branch must not continue before attaching speed provenance."""
+    cfg = ExperimentConfig(
+        task=dict(
+            name="etth1",
+            objective="regression",
+            params={"lookback": 12, "horizon": 3, "n_folds": 10, "test_frac": 0.3},
+            n_train=64,
+            n_test=32,
+            task_seed=0,
+        ),
+        arms=[dict(name="ff_matched", label="ff", hidden_dim=8, latent_dim=8, n_steps=2)],
+        train=dict(epochs=1, lr=1e-3, batch_size=32, device="cpu"),
+        seeds=[0],
+    )
+    out, _, _, _ = run_point(cfg, cfg.task.params, seed=0)
+    assert out["ff"]["speed_mode"] == "eager"
+
+
 def test_speed_auto_is_inert_on_cpu():
     """`speed: auto` on CPU has nothing to choose between (both knobs are inert there), so it must
     resolve to eager and reproduce the manual run exactly rather than burning probe time."""
@@ -874,6 +893,10 @@ def test_autotune_probe_returns_a_mode_and_timings():
     assert all(t < float("inf") for t in timings.values())
     # One throwaway model per candidate — probing must never train the arm's real weights.
     assert len(built) == len(candidates)
+    # CPU candidates are the same eager path, so restored RNG + identical batches must leave
+    # their trained weights exactly equal; only the requested speed mode may vary.
+    for a, b in zip(built[0].parameters(), built[1].parameters()):
+        assert torch.equal(a, b)
 
 
 def test_autotune_probe_leaves_rng_recoverable():

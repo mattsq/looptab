@@ -9,7 +9,13 @@ from looptab.data.generators import make_linear
 from looptab.eval.metrics import accuracy, delta_report, evaluate_act
 from looptab.models.controls import FFMatched
 from looptab.models.trm import TRM
-from looptab.train.loop import train, train_act, train_curriculum, train_progressive
+from looptab.train.loop import (
+    benchmark_train_steps,
+    train,
+    train_act,
+    train_curriculum,
+    train_progressive,
+)
 
 
 def _small_loader():
@@ -31,6 +37,27 @@ def test_train_ff_runs():
     loader = _small_loader()
     losses = train(m, loader, epochs=5, lr=1e-3, device="cpu")
     assert len(losses) == 5
+
+
+def test_benchmark_train_steps_counts_batches_not_epochs():
+    """The autotune primitive's public unit is a step, independent of loader length."""
+
+    class CountingModel(torch.nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.linear = torch.nn.Linear(10, 2)
+            self.forward_count = 0
+
+        def forward(self, X):
+            self.forward_count += 1
+            return self.linear(X), None
+
+    model = CountingModel()
+    elapsed = benchmark_train_steps(
+        model, _small_loader(), warmup_steps=2, probe_steps=5, device="cpu"
+    )
+    assert elapsed >= 0
+    assert model.forward_count == 7
 
 
 def test_microbatch_preserves_effective_batch_update():
@@ -535,13 +562,12 @@ class TestCudaGraphOnGPU:
         assert losses[-1] < losses[0] * 0.6
 
     def test_amp_static_scale_overflow_raises_actionably(self):
-        """An absurd static scale overflows fp16 gradients; because a replayed graph cannot do
-        GradScaler's host-side inf check, the routine must catch it at the epoch boundary and say
-        which knob to turn — not train silently on NaN weights."""
+        """Catch an overflow on the final optimizer step, when the pre-update loss stays finite."""
         torch.manual_seed(0)
         m = TRM(in_features=10, num_classes=2, hidden_dim=16, latent_dim=16, n_steps=2)
+        one_batch = [next(iter(_small_loader()))]
         with pytest.raises(RuntimeError, match="amp_static_loss_scale"):
-            train(m, _small_loader(), epochs=3, lr=1e-2, device="cuda", amp=True,
+            train(m, one_batch, epochs=1, lr=1e-2, device="cuda", amp=True,
                   cuda_graph=True, amp_static_loss_scale=1e30)
 
 
@@ -583,6 +609,56 @@ class TestDeepSupervisionGraphsOnGPU:
                                         device="cuda", ema_decay=0.9, amp=True, cuda_graph=True)
         assert all(v == v for v in losses)
         assert losses[-1] < losses[0] * 0.6
+
+    def test_ds_tail_graph_covers_ragged_batch(self):
+        """DS capture must honor the config-level tail flag, not silently drop the last rows."""
+
+        def _run(tail):
+            torch.manual_seed(0)
+            m = TRM(in_features=10, num_classes=2, hidden_dim=16, latent_dim=16, n_steps=3)
+            losses = train_deep_supervision(
+                m,
+                _small_loader(),
+                n_sup=2,
+                epochs=4,
+                lr=1e-2,
+                device="cuda",
+                cuda_graph=True,
+                cuda_graph_tail=tail,
+            )
+            return losses, [p.detach().cpu().clone() for p in m.parameters()]
+
+        dropped_losses, dropped_params = _run(False)
+        tail_losses, tail_params = _run(True)
+        assert all(v == v for v in tail_losses)
+        assert tail_losses != dropped_losses
+        assert any(not torch.equal(a, b) for a, b in zip(dropped_params, tail_params))
+
+    def test_act_tail_graph_covers_ragged_batch(self):
+        """The ACT-specific halt-loss graph pair must also support the ragged shape."""
+        base = _multi_loader().dataset
+        loader = DataLoader(torch.utils.data.Subset(base, range(200)), batch_size=64)
+
+        def _run(tail):
+            torch.manual_seed(0)
+            m = _act_trm()
+            losses = train_act(
+                m,
+                loader,
+                max_segments=2,
+                epochs=3,
+                lr=1e-2,
+                device="cuda",
+                cuda_graph=True,
+                cuda_graph_tail=tail,
+            )
+            return losses, [p.detach().cpu().clone() for p in m.parameters()]
+
+        dropped_losses, dropped_params = _run(False)
+        tail_losses, tail_params = _run(True)
+        assert all(v == v for v in tail_losses)
+        assert tail_losses != dropped_losses
+        assert any(not torch.equal(a, b) for a, b in zip(dropped_params, tail_params))
 
 
 def test_train_deep_supervision_carry_flag_matches_compute_changes_result():

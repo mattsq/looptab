@@ -188,13 +188,13 @@ class TrainConfig(BaseModel):
     # the earlier speed-knob search found CUDA graphs a 1.00x no-op (§11.3), because the GPU was
     # already compute-bound there — this knob's payoff is shape-dependent, so measure per config.
     #
-    # GPU-VERIFIED DANGER ZONE (results/log/m35.md): on a WIDE (hidden_dim ~1000+), HIGH-
-    # in_features arm (e.g. a TRMMixer sized like electricity's h1110 widest arm, in_features in
-    # the tens of thousands) DS-family capture (two graphs: fresh + carry) measured 2.76x SLOWER
-    # than eager (7.58s/pass -> 20.93s/pass) and used MORE peak memory (11.37GB -> 11.99GB) on an
-    # 8GB card, mirroring #18's standard-path finding, only worse. Eager ALONE already exceeded
-    # the card's memory at this shape, so the fix there is amp + microbatch_size, never
-    # cuda_graph, regardless of DS-family or standard path.
+    # HIGH-CHANNEL CAUTION (results/log/m35.md §5a): standard-path graph capture is already
+    # measured harmful at electricity scale (#18). DS-family capture at that shape was RETRACTED
+    # at 2.76x (wrong proxy batch size) and reran at the corrected shape: only 1.36x slower, both
+    # modes fitting comfortably in 8GB — a real but modest loss, not a catastrophic one. Still
+    # hypothetical either way (regression rejects n_sup>1; graphs can't compose with the real
+    # effective-batch microbatch accumulation), so continue to avoid graphs on real high-channel
+    # configs based on #18, not on this proxy.
     #
     # Correctness caveats, both handled internally, not the caller's problem:
     #  - the last batch of an epoch is DROPPED if it's smaller than the graph's captured batch
@@ -208,18 +208,20 @@ class TrainConfig(BaseModel):
     # every arm.
     cuda_graph: bool = False
     # `cuda_graph_tail`: capture a SECOND graph for the ragged final batch instead of dropping it,
-    # so graphed runs cover exactly the rows an eager run does. The two graphs share one memory
-    # pool, so this does not double the graph memory footprint that §11.2 #18 found harmful at
-    # high channel counts. Off by default because dropping the tail is what every committed
-    # `cuda_graph` result did — turning this on changes which rows are trained on, so it is a
-    # numerical change, not a pure speed knob. Ignored unless `cuda_graph` is on.
+    # so graphed runs cover exactly the rows an eager run does. On DS/ACT paths this means a second
+    # fresh/carry graph pair. All graphs share one memory pool, so this does not multiply the graph
+    # pool footprint that §11.2 #18 found harmful at high channel counts. Off by default because
+    # dropping the tail is what every committed `cuda_graph` result did — turning this on changes
+    # which rows are trained on, so it is a numerical change, not a pure speed knob. Ignored unless
+    # `cuda_graph` is on.
     cuda_graph_tail: bool = False
     # `amp_static_loss_scale`: the fixed fp16 loss scale used when `amp` and `cuda_graph` are BOTH
     # on. GradScaler's dynamic scale needs a host-side inf/nan check every step, which a replayed
     # graph cannot perform; a fixed scale (multiply the loss, divide the grads, both inside the
-    # captured region) is the standard graph-compatible AMP recipe. Overflow cannot be caught
-    # per-step, so it surfaces as a non-finite EPOCH loss and raises with instructions to lower
-    # this value. Unused when the two flags are not combined (plain `amp` keeps dynamic scaling).
+    # captured region) is the standard graph-compatible AMP recipe. Overflow cannot be acted on
+    # per-step, so loss plus post-update gradient/parameter/optimizer/EMA state are checked once
+    # per epoch and raise with instructions to lower this value. Unused when the two flags are not
+    # combined (plain `amp` keeps dynamic scaling).
     # Default 8192 (2**13), not GradScaler's usual 65536 init: on real GPU testing, 65536
     # overflowed fp16 gradients on the deep-supervision multi-pass captured path (n_sup=3,
     # carry=True) at epoch 1, while the single-pass standard path was fine at that value —
@@ -239,21 +241,20 @@ class TrainConfig(BaseModel):
     # the "set knobs uniformly across arms" contract — the modes are numerically equivalent up to
     # fp16 rounding, but a Δ measured under mixed modes carries a per-arm precision difference.
     # Use it for exploration/timing; pin the winning mode manually for a result you will publish.
-    # `speed_probe_steps` sets how many timed steps each candidate gets (after warmup).
+    # `speed_probe_steps` is exactly the number of full-size loader batches timed per candidate,
+    # after two untimed steps on the same optimizer/graph instance. It does not scale with dataset
+    # length and does not include graph capture/setup.
     #
-    # ★ GPU-VERIFIED FINDING (results/log/m35.md, CLAUDE.md §11.2 #21): "auto" is NOT currently
-    # recommended for a real run. Two concrete problems, not hypothetical: (1) the autotuner only
-    # probes through the standard `train()` path, so it silently gives NO autotuning to DS-family
-    # arms (`n_sup>1` / `use_act` / curriculum / `train_stable`) — falls back to the configured
-    # flags (default: plain eager) — which is exactly backwards, since DS-family arms are where
-    # `cuda_graph` gives its biggest measured win (2.25x on `m18e_compute_matched`). (2) at real
-    # config scale (`electricity`, M=321) the probe's own cost dwarfed what the chosen modes
-    # saved: total wall clock was ~5x SLOWER than just pinning `amp: true` manually, even though
-    # every autotuned choice was individually sensible. Prefer manually setting `amp`/`cuda_graph`
-    # per §11.2 #16/#18/#21's measured dispatch rules (small launch-bound cells → `cuda_graph`;
-    # high channel count → `amp`+`microbatch_size`, no graph) over reaching for `auto`.
+    # LIMITATION: the autotuner only covers the standard `train()` path. DS-family arms
+    # (`n_sup>1` / `use_act` / curriculum / `train_stable`) fall back to configured flags and are
+    # labelled "auto n/a here". A first electricity run measured ~5x slower, but that used a buggy
+    # probe that counted full epochs instead of `speed_probe_steps` batches; rerun with the fix
+    # (results/log/m35.md §5b): 64m30s, statistically identical to a freshly-timed manual-pinned
+    # baseline (64m53.9s) — auto is NOT meaningfully slower once the probe is bounded correctly.
+    # Auto remains an exploration tool because it can choose different numerical modes per arm and
+    # skips DS-family arms entirely; pin one uniform mode before publishing a Δ.
     speed: str = "manual"
-    speed_probe_steps: int = 8
+    speed_probe_steps: int = Field(default=8, ge=1)
 
     @field_validator("speed")
     @classmethod

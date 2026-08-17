@@ -1,5 +1,13 @@
 # GPU benchmark checklist (M35 speed substrate)
 
+> **Post-review status (2026-08-17): PARTIALLY COMPLETE, not closed.** The first pass violated
+> this document's two-run timing rule, its autotuner counted full epochs rather than the advertised
+> steps, regression records omitted speed provenance, DS/ACT ignored `cuda_graph_tail`, and the
+> high-channel proxy changed the real readout/loss/batch shape. Those implementation defects are
+> fixed; see the correction block at the top of `results/log/m35.md`. The old speed ratios are
+> provisional, the old 5x autotune-overhead conclusion is retracted pending a corrected rerun, and
+> the high-channel DS conclusion is withdrawn.
+
 The M35 knobs were built and correctness-tested in a **CPU-only** container. Everything here is
 about turning "built" into "measured" on the RTX 2070, so §11.2 can gain a real entry instead of
 the hypotheses currently parked in §11.3.
@@ -27,7 +35,8 @@ they execute. In particular these three must pass before any timing matters:
 | `TestCudaGraphOnGPU::test_tail_graph_covers_the_ragged_batch` | mid-training capture is corrupting optimizer state |
 
 `test_amp_static_scale_overflow_raises_actionably` should also pass; it deliberately overflows fp16
-to prove the epoch-boundary check catches what `GradScaler` normally would.
+on the **final step of a one-batch/one-epoch run** to prove the post-update state check catches the
+case a pre-update loss-only check misses.
 
 ## 1. Timing protocol (applies to every row below)
 
@@ -81,6 +90,8 @@ uv run python -m looptab.run --config configs/experiments/m18e_compute_matched.y
 ```
 
 Check the `[speed:auto]` lines and the `speed_modes` field in the run record against your 2a table.
+Do this for a regression run too: classification and regression records must both contain the
+per-arm mode and timings.
 
 **Verify the re-seed while you are here.** Probing trains throwaway models, which consumes the
 global RNG that `InMemoryLoader` draws each epoch's shuffle from; `run_point` re-seeds and rebuilds

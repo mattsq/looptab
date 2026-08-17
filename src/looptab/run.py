@@ -37,6 +37,7 @@ from .eval.metrics import (
 )
 from .registry import get_model
 from .train.loop import (
+    benchmark_train_steps,
     train,
     train_act,
     train_curriculum,
@@ -156,6 +157,8 @@ def _autotune_speed_mode(
     deep_supervision_weight: float,
     loss_type: str,
     probe_steps: int,
+    ema_decay: float | None = None,
+    amp_static_loss_scale: float = 8192.0,
 ) -> tuple[tuple[bool, bool], dict[str, float]]:
     """Time each ``(amp, cuda_graph)`` candidate on real steps; return the fastest and the timings.
 
@@ -168,40 +171,47 @@ def _autotune_speed_mode(
 
     Fidelity choices that make the measurement trustworthy:
       - each candidate gets a FRESH model (``build_model()``) and a fresh optimizer, so probing
-        never touches the weights the real run will train;
-      - the timed steps are genuine ``train`` calls on the real loader, so per-shape effects
-        (activation pressure, launch counts, tail-batch handling) are all in scope;
-      - warmup runs first and is excluded, so one-time capture/compile costs are not charged to
-        steady-state throughput — except that a candidate must SURVIVE its warmup, so an OOM or a
-        capture failure disqualifies it rather than crashing the run;
+        never touches the weights the real run will train; CPU/CUDA RNG state is restored before
+        each candidate so they see identical initialization and loader shuffles;
+      - the timed steps execute the standard training step on batches from the real loader, so
+        model shape, activation pressure and launch counts are in scope;
+      - two real optimizer steps warm up the same optimizer/graph instance that is then timed;
+        one-time capture/allocator costs are excluded, while a warmup OOM/capture failure still
+        disqualifies the candidate;
+      - ``probe_steps`` counts actual full-size loader batches, independent of dataset length;
       - CUDA timing is synchronized before and after (``torch.cuda.synchronize``), otherwise the
         launch-bound candidates would look artificially fast by measuring queue time only.
     """
     timings: dict[str, float] = {}
     best, best_time = None, float("inf")
+    cpu_rng_state = torch.random.get_rng_state()
+    cuda_rng_states = (
+        torch.cuda.get_rng_state_all() if torch.device(device).type == "cuda" else None
+    )
     for amp, graph in candidates:
         label = _speed_mode_label(amp, graph)
         probe = None  # bound before the try so the finally-clause cleanup is always safe
         try:
+            # Identical initialization and loader-shuffle stream for every candidate. Timing
+            # should vary only the speed mode, not the weights or batches it happens to see.
+            torch.random.set_rng_state(cpu_rng_state)
+            if cuda_rng_states is not None:
+                torch.cuda.set_rng_state_all(cuda_rng_states)
             probe = build_model().to(device)
-            # Warmup epoch (excluded from the timing): pays capture/allocator/cuDNN one-time
-            # costs so the measured epoch reflects steady-state replay, not setup.
-            train(
-                probe, train_loader, epochs=1, lr=lr, weight_decay=weight_decay,
+            elapsed = benchmark_train_steps(
+                probe,
+                train_loader,
+                warmup_steps=2,
+                probe_steps=probe_steps,
+                lr=lr,
+                weight_decay=weight_decay,
                 deep_supervision_weight=deep_supervision_weight, loss_type=loss_type,
-                device=device, amp=amp, cuda_graph=graph,
+                ema_decay=ema_decay,
+                device=device,
+                amp=amp,
+                cuda_graph=graph,
+                amp_static_loss_scale=amp_static_loss_scale,
             )
-            if torch.device(device).type == "cuda":
-                torch.cuda.synchronize()
-            t0 = time.perf_counter()
-            train(
-                probe, train_loader, epochs=max(1, probe_steps // 4), lr=lr,
-                weight_decay=weight_decay, deep_supervision_weight=deep_supervision_weight,
-                loss_type=loss_type, device=device, amp=amp, cuda_graph=graph,
-            )
-            if torch.device(device).type == "cuda":
-                torch.cuda.synchronize()
-            elapsed = time.perf_counter() - t0
         except (RuntimeError, torch.cuda.OutOfMemoryError) as e:  # noqa: PERF203
             # A candidate that cannot run here (OOM under a graph's private pool, a capture
             # failure, fp16 overflow) is disqualified, not fatal — that IS the measurement.
@@ -465,8 +475,10 @@ def run_point(cfg: ExperimentConfig, task_params: dict, seed: int) -> tuple[dict
                     lr=cfg.train.lr,
                     weight_decay=cfg.train.weight_decay,
                     deep_supervision_weight=arm.deep_supervision_weight,
+                    ema_decay=arm.ema_decay,
                     loss_type="mse" if regression else "ce",
                     probe_steps=cfg.train.speed_probe_steps,
+                    amp_static_loss_scale=cfg.train.amp_static_loss_scale,
                 )
                 speed_mode_used = _speed_mode_label(arm_amp, arm_cuda_graph)
                 best_s = speed_timings[speed_mode_used]
@@ -540,6 +552,7 @@ def run_point(cfg: ExperimentConfig, task_params: dict, seed: int) -> tuple[dict
                 device=device,
                 amp=arm_amp,
                 cuda_graph=arm_cuda_graph,
+                cuda_graph_tail=cfg.train.cuda_graph_tail,
                 amp_static_loss_scale=cfg.train.amp_static_loss_scale,
             )
         elif arm.n_sup > 1:
@@ -571,6 +584,7 @@ def run_point(cfg: ExperimentConfig, task_params: dict, seed: int) -> tuple[dict
                 device=device,
                 amp=arm_amp,
                 cuda_graph=arm_cuda_graph,
+                cuda_graph_tail=cfg.train.cuda_graph_tail,
                 amp_static_loss_scale=cfg.train.amp_static_loss_scale,
             )
         elif stable:
@@ -638,7 +652,10 @@ def run_point(cfg: ExperimentConfig, task_params: dict, seed: int) -> tuple[dict
                 "mse": test_metrics["mse"],
                 "mae": test_metrics["mae"],
                 "r2": test_metrics["r2"],
+                "speed_mode": speed_mode_used,
             }
+            if speed_timings is not None:
+                metrics["speed_timings_s"] = speed_timings
             results[arm.resolved_label()] = metrics
             models[arm.resolved_label()] = m
             continue
