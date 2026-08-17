@@ -1,0 +1,38 @@
+# Safety probe (M35 follow-up): DS-family capture (n_sup>1) is structurally restricted to
+# CLASSIFICATION routines (run.py raises for regression), so it can never actually be combined
+# with electricity/traffic (regression-only) -- that specific open question is untestable as
+# posed. This probes the underlying MECHANISM instead: does the two-graph DS-family capture
+# (fresh-init + carried-state, one shared pool) blow up memory/time worse than the already-
+# measured single-graph standard path at electricity's widest arm's hidden_dim (1110), using a
+# synthetic classification task (`converge`) at the same hidden_dim/latent_dim so the per-layer
+# matrix sizes match the real #18 danger-zone shape.
+task:
+  name: converge
+  params: {T: 6, distractors: 8}
+  n_train: 256
+  n_test: 64
+  task_seed: 42
+  train_sample_seed: 1
+  test_sample_seed: 2
+grid:
+  params:
+    rule: [78]
+    w: [24]
+arms:
+  - name: trm
+    label: trm_nsup_h1110
+    hidden_dim: 1110
+    latent_dim: 1110
+    n_steps: 6
+    deep_supervision: false
+    n_sup: 4
+    n_sup_carry: true
+deltas: []
+train:
+  epochs: 2
+  lr: 1e-3
+  batch_size: 128
+  device: cuda
+  cuda_graph: true
+seeds: [0]
+results_dir: scratchpad/m35/results

@@ -145,6 +145,97 @@ def _compile_model(m):
         ) from e
 
 
+def _autotune_speed_mode(
+    build_model,
+    train_loader,
+    *,
+    candidates: list[tuple[bool, bool]],
+    device: str,
+    lr: float,
+    weight_decay: float,
+    deep_supervision_weight: float,
+    loss_type: str,
+    probe_steps: int,
+) -> tuple[tuple[bool, bool], dict[str, float]]:
+    """Time each ``(amp, cuda_graph)`` candidate on real steps; return the fastest and the timings.
+
+    This is `train.speed: auto` (see `TrainConfig.speed`). The repo's hardest-won infrastructure
+    lesson is that every speed knob here flips sign with the config's shape — CUDA graphs are
+    ~5x on small-cell launch-bound shapes (§11.2 #16) and ~3x SLOWER at high channel counts
+    (#18); AMP is 1.18x on sudoku's 256x36 GEMMs and 0.74x on ETTh1's 128x7 ones (§11.3). Rather
+    than asking every future agent to re-derive that per config, measure it: a few real steps per
+    candidate cost seconds, against runs that cost minutes to hours.
+
+    Fidelity choices that make the measurement trustworthy:
+      - each candidate gets a FRESH model (``build_model()``) and a fresh optimizer, so probing
+        never touches the weights the real run will train;
+      - the timed steps are genuine ``train`` calls on the real loader, so per-shape effects
+        (activation pressure, launch counts, tail-batch handling) are all in scope;
+      - warmup runs first and is excluded, so one-time capture/compile costs are not charged to
+        steady-state throughput — except that a candidate must SURVIVE its warmup, so an OOM or a
+        capture failure disqualifies it rather than crashing the run;
+      - CUDA timing is synchronized before and after (``torch.cuda.synchronize``), otherwise the
+        launch-bound candidates would look artificially fast by measuring queue time only.
+    """
+    timings: dict[str, float] = {}
+    best, best_time = None, float("inf")
+    for amp, graph in candidates:
+        label = _speed_mode_label(amp, graph)
+        probe = None  # bound before the try so the finally-clause cleanup is always safe
+        try:
+            probe = build_model().to(device)
+            # Warmup epoch (excluded from the timing): pays capture/allocator/cuDNN one-time
+            # costs so the measured epoch reflects steady-state replay, not setup.
+            train(
+                probe, train_loader, epochs=1, lr=lr, weight_decay=weight_decay,
+                deep_supervision_weight=deep_supervision_weight, loss_type=loss_type,
+                device=device, amp=amp, cuda_graph=graph,
+            )
+            if torch.device(device).type == "cuda":
+                torch.cuda.synchronize()
+            t0 = time.perf_counter()
+            train(
+                probe, train_loader, epochs=max(1, probe_steps // 4), lr=lr,
+                weight_decay=weight_decay, deep_supervision_weight=deep_supervision_weight,
+                loss_type=loss_type, device=device, amp=amp, cuda_graph=graph,
+            )
+            if torch.device(device).type == "cuda":
+                torch.cuda.synchronize()
+            elapsed = time.perf_counter() - t0
+        except (RuntimeError, torch.cuda.OutOfMemoryError) as e:  # noqa: PERF203
+            # A candidate that cannot run here (OOM under a graph's private pool, a capture
+            # failure, fp16 overflow) is disqualified, not fatal — that IS the measurement.
+            timings[label] = float("inf")
+            print(f"      [speed:auto] {label}: unavailable ({type(e).__name__}: {e})")
+            continue
+        finally:
+            # Free the throwaway model before timing the next candidate, so a graph's private
+            # pool from mode N does not distort mode N+1's memory picture (§11.2 #18 is exactly
+            # a memory-competition effect, so leaking probes between candidates would bias the
+            # measurement toward whichever mode ran first).
+            probe = None
+            _empty_cuda_cache(device)
+        timings[label] = elapsed
+        if elapsed < best_time:
+            best, best_time = (amp, graph), elapsed
+    if best is None:
+        raise RuntimeError(
+            "train.speed=auto: every candidate mode failed on this config. Re-run with "
+            "speed: manual and explicit flags to see the underlying error."
+        )
+    return best, timings
+
+
+def _speed_mode_label(amp: bool, graph: bool) -> str:
+    if amp and graph:
+        return "amp+cuda_graph"
+    if amp:
+        return "amp"
+    if graph:
+        return "cuda_graph"
+    return "eager"
+
+
 def _baselines(loader, *, want_exact_match: bool) -> dict[str, float]:
     out = {"accuracy": majority_baseline(loader)}
     if want_exact_match:
@@ -271,16 +362,17 @@ def run_point(cfg: ExperimentConfig, task_params: dict, seed: int) -> tuple[dict
                 "standard train path — curriculum / use_act / n_sup>1 / contraction-reg are "
                 "classification routines."
             )
-        if cfg.train.amp and (curriculum is not None or arm.use_act or arm.n_sup > 1 or stable):
-            # AMP is wired into the STANDARD train path only. The curriculum / ACT / N_sup /
-            # contraction routines have their own loss and backward structure (and train_stable
-            # differentiates through a Jacobian probe, which fp16 would degrade). Fail loudly
-            # rather than silently training some arms in fp16 and others in fp32 — a per-arm
-            # precision difference would land directly in the reported Δ.
+        if cfg.train.amp and curriculum is not None:
+            # AMP now covers the standard path AND the DS family (train_deep_supervision /
+            # train_act / train_stable — each autocasts its own forward/loss; train_stable keeps
+            # its Jacobian probe in fp32 deliberately). The trajectory CURRICULUM routines still
+            # raise: they resample the unroll depth per batch, so the readout count varies and
+            # they serve closed levers (M3b/M7) rather than the regime these knobs target. Fail
+            # loudly rather than silently training some arms in fp16 and others in fp32.
             raise ValueError(
-                f"arm '{arm.resolved_label()}': train.amp=true is supported on the standard "
-                "train path only — curriculum / use_act / n_sup>1 / contraction-reg arms have "
-                "their own training routines. Set amp: false for this experiment."
+                f"arm '{arm.resolved_label()}': train.amp=true is not supported on the "
+                "trajectory curriculum / progressive routines (per-batch depth resampling). "
+                "Set amp: false for this experiment."
             )
         if microbatch_size is not None and (
             curriculum is not None or arm.use_act or arm.n_sup > 1 or stable
@@ -304,23 +396,19 @@ def run_point(cfg: ExperimentConfig, task_params: dict, seed: int) -> tuple[dict
                 "different precision than autocast arms. Use 'trm_mixer' under amp, or set "
                 "amp: false for this experiment."
             )
-        cuda_graph_conflict = curriculum is not None or arm.use_act or arm.n_sup > 1 or stable
+        cuda_graph_conflict = curriculum is not None or stable
         if cfg.train.cuda_graph and cuda_graph_conflict:
-            # cuda_graph is wired into the STANDARD train path only, same reasoning as amp above:
-            # the other routines run a variable inner-loop structure (curriculum depth sampling,
-            # ACT/N_sup detached-carry passes, the stable Jacobian probe) that a single fixed
-            # captured graph cannot represent. Fail loudly rather than silently falling back.
+            # cuda_graph now also covers the DS family: ACT/N_sup run a FIXED number of
+            # identically-shaped passes per batch, so the PASS is capturable (fresh-init +
+            # carried-state graphs, see _CapturedPassStep). What remains uncapturable is genuinely
+            # shape-variable: the curriculum's per-batch depth sampling, and train_stable's
+            # torch.func.jvp probe (a fresh graph structure per batch). Fail loudly for those
+            # rather than silently falling back.
             raise ValueError(
-                f"arm '{arm.resolved_label()}': train.cuda_graph=true is supported on the "
-                "standard train path only — curriculum / use_act / n_sup>1 / contraction-reg "
-                "arms have their own training routines. Set cuda_graph: false for this experiment."
-            )
-        if cfg.train.cuda_graph and cfg.train.amp:
-            # GradScaler's dynamic loss-scale logic needs host-side inf/nan checks each step;
-            # combining that with a statically replayed graph is unsupported for now (§11.3).
-            raise ValueError(
-                f"arm '{arm.resolved_label()}': train.cuda_graph and train.amp cannot be combined "
-                "yet. Set one of them false for this experiment."
+                f"arm '{arm.resolved_label()}': train.cuda_graph=true is not supported on the "
+                "trajectory curriculum / contraction-reg routines (per-batch depth resampling / "
+                "a per-batch Jacobian probe have no fixed capturable shape). Set cuda_graph: "
+                "false for this experiment."
             )
         if cfg.train.cuda_graph and microbatch_size is not None:
             raise ValueError(
@@ -350,6 +438,56 @@ def run_point(cfg: ExperimentConfig, task_params: dict, seed: int) -> tuple[dict
                 f"arm '{arm.resolved_label()}' sets n_sup>1, which is incompatible with a "
                 "curriculum run (train_deep_supervision is for the standard-train path)."
             )
+        # --- Speed-mode resolution (train.speed). "manual" keeps the explicit flags; "auto" times
+        # the candidate modes this arm admits and picks the fastest (see _autotune_speed_mode).
+        arm_amp, arm_cuda_graph = cfg.train.amp, cfg.train.cuda_graph
+        speed_mode_used = _speed_mode_label(arm_amp, arm_cuda_graph)
+        speed_timings: dict[str, float] | None = None
+        standard_path = curriculum is None and not arm.use_act and arm.n_sup <= 1 and not stable
+        if cfg.train.speed == "auto":
+            if torch.device(device).type != "cuda":
+                # Both knobs are inert on CPU, so there is nothing to choose between; say so
+                # rather than burning probe time measuring four identical eager runs.
+                speed_mode_used = "eager (cpu: knobs inert)"
+            elif not standard_path or microbatch_size is not None:
+                # The autotuner probes through `train`, so it can only speak for the standard
+                # path. Rather than silently mis-measuring, fall back to the configured flags.
+                speed_mode_used = f"{_speed_mode_label(arm_amp, arm_cuda_graph)} (auto n/a here)"
+            else:
+                candidates = [(False, False), (True, False), (False, True), (True, True)]
+                (arm_amp, arm_cuda_graph), speed_timings = _autotune_speed_mode(
+                    lambda: _build_model(
+                        arm, in_features, num_classes, out_features, n_steps=coupled_steps
+                    ),
+                    train_loader,
+                    candidates=candidates,
+                    device=device,
+                    lr=cfg.train.lr,
+                    weight_decay=cfg.train.weight_decay,
+                    deep_supervision_weight=arm.deep_supervision_weight,
+                    loss_type="mse" if regression else "ce",
+                    probe_steps=cfg.train.speed_probe_steps,
+                )
+                speed_mode_used = _speed_mode_label(arm_amp, arm_cuda_graph)
+                best_s = speed_timings[speed_mode_used]
+                print(
+                    f"      [speed:auto] {arm.resolved_label()}: chose {speed_mode_used} "
+                    + " | ".join(
+                        f"{k}={v:.3f}s" if v != float("inf") else f"{k}=n/a"
+                        for k, v in speed_timings.items()
+                    )
+                    + f"  (best {best_s:.3f}s)"
+                )
+                # Probing built and trained throwaway models; re-seed so the real arm's init and
+                # loader shuffle stream are exactly what they would have been without autotuning.
+                torch.manual_seed(seed)
+                m = _build_model(
+                    arm, in_features, num_classes, out_features, n_steps=coupled_steps
+                )
+                m_orig = m
+                if cfg.train.compile:
+                    m = _compile_model(m)
+
         if curriculum is not None and arm.ds_mode in ("progressive_final", "progressive_step"):
             # M7: Deep Thinking progressive loss (TRM loop arms only; controls take the
             # standard curriculum path below via their "final" ds_mode).
@@ -400,6 +538,9 @@ def run_point(cfg: ExperimentConfig, task_params: dict, seed: int) -> tuple[dict
                 halt_weight=arm.halt_weight,
                 ema_decay=arm.ema_decay,
                 device=device,
+                amp=arm_amp,
+                cuda_graph=arm_cuda_graph,
+                amp_static_loss_scale=cfg.train.amp_static_loss_scale,
             )
         elif arm.n_sup > 1:
             # M18 ingredient 1: canonical TRM deep supervision (N_sup detached-carry passes).
@@ -428,6 +569,9 @@ def run_point(cfg: ExperimentConfig, task_params: dict, seed: int) -> tuple[dict
                 deep_supervision_weight=arm.deep_supervision_weight,
                 ema_decay=arm.ema_decay,
                 device=device,
+                amp=arm_amp,
+                cuda_graph=arm_cuda_graph,
+                amp_static_loss_scale=cfg.train.amp_static_loss_scale,
             )
         elif stable:
             # M27: contraction-regularized loop (`trm_stable` / `trm_mixer` — the mixer re-test).
@@ -453,6 +597,7 @@ def run_point(cfg: ExperimentConfig, task_params: dict, seed: int) -> tuple[dict
                 ema_decay=arm.ema_decay,
                 reg_seed=seed,
                 device=device,
+                amp=arm_amp,
             )
         else:
             train(
@@ -465,8 +610,10 @@ def run_point(cfg: ExperimentConfig, task_params: dict, seed: int) -> tuple[dict
                 ema_decay=arm.ema_decay,
                 loss_type="mse" if regression else "ce",
                 device=device,
-                amp=cfg.train.amp,
-                cuda_graph=cfg.train.cuda_graph,
+                amp=arm_amp,
+                cuda_graph=arm_cuda_graph,
+                cuda_graph_tail=cfg.train.cuda_graph_tail,
+                amp_static_loss_scale=cfg.train.amp_static_loss_scale,
                 microbatch_size=microbatch_size,
             )
         # Training and evaluation have substantially different allocation shapes in the
@@ -526,7 +673,14 @@ def run_point(cfg: ExperimentConfig, task_params: dict, seed: int) -> tuple[dict
             # step-aligned DS may help), not a capacity verdict against the loop.
             "train_accuracy": train_acc,
             "n_params": m_orig.count_params(),
+            # Which speed path actually produced this number. Under `speed: auto` different arms
+            # can land on different modes, so a run record that did not say so would hide a
+            # per-arm precision difference inside a reported Δ (§11.3's "set knobs uniformly"
+            # contract). Recorded always, so manual runs are equally self-describing.
+            "speed_mode": speed_mode_used,
         }
+        if speed_timings is not None:
+            metrics["speed_timings_s"] = speed_timings
         if arm.use_act and "avg_segments" in test_metrics:
             metrics["avg_segments"] = test_metrics["avg_segments"]  # adaptive-compute diagnostic
         if multi_output:
@@ -616,6 +770,14 @@ def _aggregate(per_seed: list[dict], labels: list[str]) -> dict:
             segs = [s[lbl]["avg_segments"] for s in per_seed]
             stats["avg_segments_mean"] = float(np.mean(segs))
             stats["avg_segments_std"] = _std(segs)
+        if "speed_mode" in per_seed[0][lbl]:
+            # Carry the speed path into the aggregate so a run record states how its numbers were
+            # produced. Deduplicated across seeds and reported as a SORTED LIST rather than a
+            # single value: under `speed: auto` the autotuner can pick different modes on
+            # different seeds (timings vary run to run), and collapsing that to one label would
+            # hide a precision difference inside the reported Δ. A list of length > 1 is the
+            # signal to distrust the Δ and pin the mode manually.
+            stats["speed_modes"] = sorted({s[lbl]["speed_mode"] for s in per_seed})
         out[lbl] = stats
 
     if "baseline" in per_seed[0]:

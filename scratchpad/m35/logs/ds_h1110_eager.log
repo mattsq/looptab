@@ -1,0 +1,19 @@
+Traceback (most recent call last):
+  File "<frozen runpy>", line 198, in _run_module_as_main
+  File "<frozen runpy>", line 88, in _run_code
+  File "C:\Users\scifi\looptab\src\looptab\run.py", line 1768, in <module>
+    main()
+  File "C:\Users\scifi\looptab\src\looptab\run.py", line 1130, in main
+    seed_outputs = _compute_seeds(cfg, task_params, seeds)
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\scifi\looptab\src\looptab\run.py", line 928, in _compute_seeds
+    return [_compute_seed(cfg, task_params, s) for s in seeds]
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\scifi\looptab\src\looptab\run.py", line 894, in _compute_seed
+    r, models, baselines, diagnostics = run_point(cfg, task_params, seed)
+                                        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\scifi\looptab\src\looptab\run.py", line 360, in run_point
+    raise ValueError(
+ValueError: arm 'trm_nsup_h1110': regression (objective=regression) supports only standard train path — curriculum / use_act / n_sup>1 / contraction-reg are classification routines.
+
+=== single ===

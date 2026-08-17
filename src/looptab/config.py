@@ -13,7 +13,7 @@ from __future__ import annotations
 import itertools
 from typing import Literal, Optional
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 
 class TaskConfig(BaseModel):
@@ -154,8 +154,11 @@ class TrainConfig(BaseModel):
     # `amp`: fp16 mixed precision for TRAINING only (autocast + GradScaler); evaluation always
     # runs in fp32, so metrics stay directly comparable. CUDA-only (silently inert on CPU, which
     # has no fp16 tensor cores). Turing/Ampere+ give ~2x on the GEMMs; measured ~1.1-1.2x
-    # end-to-end here. Supported on the STANDARD train path only — the curriculum / ACT / N_sup /
-    # contraction routines raise rather than silently ignore it.
+    # end-to-end here. Supported on the standard train path AND (since the DS-family pass came
+    # under capture) on `train_deep_supervision` / `train_act` / `train_stable`; only the
+    # trajectory CURRICULUM routines still raise, because they resample the unroll depth per
+    # batch. On `train_stable` the contraction penalties stay fp32 deliberately (the Jacobian
+    # probe's whole point is small-magnitude fidelity) — see that routine's docstring.
     #
     # `compile`: wrap each arm in `torch.compile`. Measured ~1.9-2.2x with amp (the largest
     # single lever), but it needs a torch new enough for this interpreter (torch 2.2 + Python
@@ -168,9 +171,13 @@ class TrainConfig(BaseModel):
     # `cuda_graph`: capture the whole training step (zero-grad + forward + loss + backward +
     # optimizer step, + EMA update if enabled) into a CUDA graph and replay it every batch,
     # eliminating per-kernel-launch dispatch overhead. CUDA-only (silently inert on CPU).
-    # Supported on the STANDARD train path only (curriculum / ACT / N_sup / contraction raise).
-    # Mutually exclusive with `amp` for now — GradScaler's dynamic loss-scale logic needs
-    # host-side inf/nan checks that don't compose with a static replayed graph.
+    # Supported on the standard train path AND on the DS family (`train_deep_supervision` /
+    # `train_act`), where the captured unit is one PASS/SEGMENT — those routines run a fixed
+    # number of identically-shaped passes per batch, differing only in the carried (z, a) state,
+    # so two graphs (fresh-init + carried-state) on one shared pool cover them. The trajectory
+    # curriculum routines and `train_stable` still raise: per-batch depth resampling and the
+    # `torch.func.jvp` probe have no fixed capturable shape.
+    # Composes with `amp` (see `amp_static_loss_scale`).
     #
     # Why this can be a much bigger lever than `amp`/`compile` on SMALL configs: profiling a
     # tiny model (M26 ETTh1 forecasting: batch=128, n_cells=7) showed only ~4.5ms of a 21ms
@@ -180,6 +187,14 @@ class TrainConfig(BaseModel):
     # pre-recorded launch beats kernel fusion. On a large-GEMM config (e.g. the M23 sudoku sweep)
     # the earlier speed-knob search found CUDA graphs a 1.00x no-op (§11.3), because the GPU was
     # already compute-bound there — this knob's payoff is shape-dependent, so measure per config.
+    #
+    # GPU-VERIFIED DANGER ZONE (results/log/m35.md): on a WIDE (hidden_dim ~1000+), HIGH-
+    # in_features arm (e.g. a TRMMixer sized like electricity's h1110 widest arm, in_features in
+    # the tens of thousands) DS-family capture (two graphs: fresh + carry) measured 2.76x SLOWER
+    # than eager (7.58s/pass -> 20.93s/pass) and used MORE peak memory (11.37GB -> 11.99GB) on an
+    # 8GB card, mirroring #18's standard-path finding, only worse. Eager ALONE already exceeded
+    # the card's memory at this shape, so the fix there is amp + microbatch_size, never
+    # cuda_graph, regardless of DS-family or standard path.
     #
     # Correctness caveats, both handled internally, not the caller's problem:
     #  - the last batch of an epoch is DROPPED if it's smaller than the graph's captured batch
@@ -192,6 +207,60 @@ class TrainConfig(BaseModel):
     # algorithms than a pure eager run) — opt-in, and an experiment must set it uniformly across
     # every arm.
     cuda_graph: bool = False
+    # `cuda_graph_tail`: capture a SECOND graph for the ragged final batch instead of dropping it,
+    # so graphed runs cover exactly the rows an eager run does. The two graphs share one memory
+    # pool, so this does not double the graph memory footprint that §11.2 #18 found harmful at
+    # high channel counts. Off by default because dropping the tail is what every committed
+    # `cuda_graph` result did — turning this on changes which rows are trained on, so it is a
+    # numerical change, not a pure speed knob. Ignored unless `cuda_graph` is on.
+    cuda_graph_tail: bool = False
+    # `amp_static_loss_scale`: the fixed fp16 loss scale used when `amp` and `cuda_graph` are BOTH
+    # on. GradScaler's dynamic scale needs a host-side inf/nan check every step, which a replayed
+    # graph cannot perform; a fixed scale (multiply the loss, divide the grads, both inside the
+    # captured region) is the standard graph-compatible AMP recipe. Overflow cannot be caught
+    # per-step, so it surfaces as a non-finite EPOCH loss and raises with instructions to lower
+    # this value. Unused when the two flags are not combined (plain `amp` keeps dynamic scaling).
+    # Default 8192 (2**13), not GradScaler's usual 65536 init: on real GPU testing, 65536
+    # overflowed fp16 gradients on the deep-supervision multi-pass captured path (n_sup=3,
+    # carry=True) at epoch 1, while the single-pass standard path was fine at that value —
+    # 65536..32768 is right at that path's overflow edge (binary-searched: 32768 trains cleanly,
+    # 65536 overflows), so 8192 keeps an 8x margin below the observed failure point rather than
+    # trusting a value that was never actually run on a GPU.
+    amp_static_loss_scale: float = 8192.0
+    # `speed`: per-arm automatic selection among the knob combinations above. "manual" (default)
+    # honours the explicit amp/cuda_graph flags exactly as before. "auto" times a handful of real
+    # training steps per arm, on a THROWAWAY copy of the model and optimizer, for each candidate
+    # mode this config admits, then trains with the fastest — operationalizing the repo's own
+    # repeatedly-learned lesson that every one of these knobs flips sign by config shape (§11.2
+    # #16/#18: CUDA graphs are ~5x on small-cell shapes and ~3x SLOWER at high channel counts;
+    # amp is 1.18x on sudoku and 0.74x on ETTh1). The chosen mode is recorded per arm in the run
+    # record, so a result always says how it was produced. CUDA-only; on CPU "auto" resolves to
+    # eager. NOTE: because different arms may land on different modes, "auto" deliberately breaks
+    # the "set knobs uniformly across arms" contract — the modes are numerically equivalent up to
+    # fp16 rounding, but a Δ measured under mixed modes carries a per-arm precision difference.
+    # Use it for exploration/timing; pin the winning mode manually for a result you will publish.
+    # `speed_probe_steps` sets how many timed steps each candidate gets (after warmup).
+    #
+    # ★ GPU-VERIFIED FINDING (results/log/m35.md, CLAUDE.md §11.2 #21): "auto" is NOT currently
+    # recommended for a real run. Two concrete problems, not hypothetical: (1) the autotuner only
+    # probes through the standard `train()` path, so it silently gives NO autotuning to DS-family
+    # arms (`n_sup>1` / `use_act` / curriculum / `train_stable`) — falls back to the configured
+    # flags (default: plain eager) — which is exactly backwards, since DS-family arms are where
+    # `cuda_graph` gives its biggest measured win (2.25x on `m18e_compute_matched`). (2) at real
+    # config scale (`electricity`, M=321) the probe's own cost dwarfed what the chosen modes
+    # saved: total wall clock was ~5x SLOWER than just pinning `amp: true` manually, even though
+    # every autotuned choice was individually sensible. Prefer manually setting `amp`/`cuda_graph`
+    # per §11.2 #16/#18/#21's measured dispatch rules (small launch-bound cells → `cuda_graph`;
+    # high channel count → `amp`+`microbatch_size`, no graph) over reaching for `auto`.
+    speed: str = "manual"
+    speed_probe_steps: int = 8
+
+    @field_validator("speed")
+    @classmethod
+    def _check_speed(cls, v: str) -> str:
+        if v not in ("manual", "auto"):
+            raise ValueError(f"train.speed must be 'manual' or 'auto', got {v!r}")
+        return v
 
 
 class SweepConfig(BaseModel):

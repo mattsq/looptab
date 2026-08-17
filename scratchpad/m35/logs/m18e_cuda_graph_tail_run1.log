@@ -1,0 +1,24 @@
+
+=== rule=78, w=24 ===
+  [seed=0] trm_nods=0.965  trm_nsup=0.990  trm_nsup_nocarry=0.987 (baseline=0.562)
+  [seed=1] trm_nods=0.967  trm_nsup=0.989  trm_nsup_nocarry=0.993 (baseline=0.561)
+  [seed=2] trm_nods=0.973  trm_nsup=0.990  trm_nsup_nocarry=0.987 (baseline=0.562)
+  [seed=3] trm_nods=0.969  trm_nsup=0.989  trm_nsup_nocarry=0.986 (baseline=0.561)
+  [seed=4] trm_nods=0.962  trm_nsup=0.985  trm_nsup_nocarry=0.991 (baseline=0.561)
+  [seed=5] trm_nods=0.967  trm_nsup=0.991  trm_nsup_nocarry=0.977 (baseline=0.563)
+  [seed=6] trm_nods=0.971  trm_nsup=0.985  trm_nsup_nocarry=0.989 (baseline=0.562)
+  [seed=7] trm_nods=0.961  trm_nsup=0.991  trm_nsup_nocarry=0.991 (baseline=0.562)
+  majority_baseline: acc 0.5618 ± 0.0007
+   subset_baseline: EM  0.0238 ± 0.0018
+          trm_nods: acc 0.9668 ± 0.0043
+          trm_nsup: acc 0.9886 ± 0.0025
+  trm_nsup_nocarry: acc 0.9876 ± 0.0049
+  Δ(trm_nsup − trm_nsup_nocarry) = +0.0010 ± 0.0064  [EM +0.0025 ± 0.0680]  [coh -0.0130 ± 0.0448]
+  Δ(trm_nsup − trm_nods) = +0.0217 ± 0.0050  [EM +0.2710 ± 0.0537]  [coh -0.0421 ± 0.0177]
+  Δ(trm_nsup_nocarry − trm_nods) = +0.0207 ± 0.0074  [EM +0.2685 ± 0.0684]  [coh -0.0292 ± 0.0419]
+
+Results : scratchpad\m35\results\m18e_cuda_graph_tail_20260817T160858.json
+Curve   : scratchpad\m35\results\m18e_cuda_graph_tail_20260817T160858_curve.csv
+Deltas  : scratchpad\m35\results\m18e_cuda_graph_tail_20260817T160858_deltas.csv
+Params  : scratchpad\m35\results\m18e_cuda_graph_tail_20260817T160858_params.csv
+  ✓ BUDGET PARITY: all matched arms within ±2% per cell.
