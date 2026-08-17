@@ -1,0 +1,9 @@
+
+=== single ===
+  [seed=0] trm_mixer_unsharedro=-0.111 (baseline=-1.503)
+  majority_baseline: acc -1.5028 ± 0.0000
+  trm_mixer_unsharedro: acc -0.1112 ± 0.0000
+
+Results : scratchpad\m35\results\electricity_unsharedro_eager_20260817T205013.json
+Curve   : scratchpad\m35\results\electricity_unsharedro_eager_20260817T205013_curve.csv
+Deltas  : scratchpad\m35\results\electricity_unsharedro_eager_20260817T205013_deltas.csv

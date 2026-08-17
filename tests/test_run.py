@@ -698,21 +698,40 @@ def test_amp_defaults_off():
     assert cfg.train.amp is False and cfg.train.compile is False
 
 
-def test_amp_rejects_non_standard_train_routines():
-    """AMP is wired into the standard train path only; n_sup>1 / use_act / contraction arms must
-    raise, not silently drop the flag."""
+def test_amp_accepted_on_deep_supervision_family():
+    """AMP now covers the DS family (n_sup>1 / use_act / contraction) as well as the standard
+    path — each routine autocasts its own forward/loss. On CPU the flag is inert, so these must
+    RUN (previously they raised) and produce the same numbers as the un-flagged config."""
     for arm_over in [
         dict(n_sup=2),
         dict(use_act=True),
         dict(jac_reg_weight=0.1),
     ]:
         arm = dict(name="trm", label="a", hidden_dim=16, latent_dim=16, n_steps=3, **arm_over)
+        base = _cfg(
+            arms=[arm],
+            train=dict(epochs=1, lr=1e-3, weight_decay=1e-4, batch_size=64),
+        )
+        ref, _, _, _ = run_point(base, base.task.params, seed=0)
         cfg = _cfg(
             arms=[arm],
             train=dict(epochs=1, lr=1e-3, weight_decay=1e-4, batch_size=64, amp=True),
         )
-        with pytest.raises(ValueError, match="standard train path only"):
-            run_point(cfg, cfg.task.params, seed=0)
+        got, _, _, _ = run_point(cfg, cfg.task.params, seed=0)
+        assert ref["a"]["accuracy"] == got["a"]["accuracy"]
+
+
+def test_amp_still_rejects_curriculum_routines():
+    """The trajectory curriculum resamples the unroll depth per batch, so it keeps raising —
+    the guard must narrow to that case, not disappear."""
+    cfg = _iter_cfg(
+        curriculum=dict(param="T", T_min=1, T_max=4),
+        couple_n_steps_to_param="T",
+        train=dict(epochs=1, lr=1e-3, weight_decay=1e-4, batch_size=64, amp=True),
+    )
+    cfg.task.params = {"w": 8, "T": 4, "rule": 30, "distractors": 2}
+    with pytest.raises(ValueError, match="curriculum"):
+        run_point(cfg, cfg.task.params, seed=0)
 
 
 def test_compile_failure_is_actionable():
@@ -748,27 +767,178 @@ def test_cuda_graph_defaults_off():
     assert cfg.train.amp is False and cfg.train.compile is False and cfg.train.cuda_graph is False
 
 
-def test_cuda_graph_rejects_non_standard_train_routines():
-    """cuda_graph is wired into the standard train path only; n_sup>1 / use_act / contraction
-    arms must raise, not silently drop the flag."""
-    for arm_over in [
-        dict(n_sup=2),
-        dict(use_act=True),
-        dict(jac_reg_weight=0.1),
-    ]:
+def test_cuda_graph_accepted_on_deep_supervision_family():
+    """cuda_graph now covers the DS family: n_sup / ACT run a fixed number of identically-shaped
+    passes per batch, so the PASS is capturable. Inert on CPU, so these must run and match the
+    un-flagged numbers."""
+    for arm_over in [dict(n_sup=2), dict(use_act=True)]:
         arm = dict(name="trm", label="a", hidden_dim=16, latent_dim=16, n_steps=3, **arm_over)
+        base = _cfg(arms=[arm], train=dict(epochs=1, lr=1e-3, weight_decay=1e-4, batch_size=64))
+        ref, _, _, _ = run_point(base, base.task.params, seed=0)
         cfg = _cfg(
             arms=[arm],
             train=dict(epochs=1, lr=1e-3, weight_decay=1e-4, batch_size=64, cuda_graph=True),
         )
-        with pytest.raises(ValueError, match="standard train path only"):
-            run_point(cfg, cfg.task.params, seed=0)
+        got, _, _, _ = run_point(cfg, cfg.task.params, seed=0)
+        assert ref["a"]["accuracy"] == got["a"]["accuracy"]
 
 
-def test_cuda_graph_amp_mutually_exclusive():
-    cfg = _cfg(train=dict(epochs=1, lr=1e-3, batch_size=64, amp=True, cuda_graph=True))
-    with pytest.raises(ValueError, match="cannot be combined"):
+def test_cuda_graph_still_rejects_unshaped_routines():
+    """What stays rejected is genuinely shape-variable: the contraction probe (a fresh
+    torch.func.jvp graph per batch) and the trajectory curriculum (per-batch depth)."""
+    arm = dict(name="trm", label="a", hidden_dim=16, latent_dim=16, n_steps=3, jac_reg_weight=0.1)
+    cfg = _cfg(
+        arms=[arm],
+        train=dict(epochs=1, lr=1e-3, weight_decay=1e-4, batch_size=64, cuda_graph=True),
+    )
+    with pytest.raises(ValueError, match="contraction-reg"):
         run_point(cfg, cfg.task.params, seed=0)
+
+
+def test_cuda_graph_amp_combination_accepted():
+    """The static-loss-scale capture path replaced the old mutual exclusion; on CPU both flags
+    are inert, so the run must match the plain config rather than raising."""
+    ref_cfg = _cfg(train=dict(epochs=2, lr=1e-3, batch_size=64))
+    ref, _, _, _ = run_point(ref_cfg, ref_cfg.task.params, seed=0)
+    cfg = _cfg(train=dict(epochs=2, lr=1e-3, batch_size=64, amp=True, cuda_graph=True))
+    got, _, _, _ = run_point(cfg, cfg.task.params, seed=0)
+    for label in ref:
+        assert ref[label]["accuracy"] == got[label]["accuracy"]
+
+
+def test_speed_mode_is_recorded_in_results():
+    """Every arm's metrics must say which speed path produced them — under `speed: auto` arms can
+    land on different modes, and a Δ that hides a per-arm precision difference is exactly what
+    §11.3's uniformity contract exists to prevent."""
+    cfg = _cfg(train=dict(epochs=1, lr=1e-3, batch_size=64))
+    out, _, _, _ = run_point(cfg, cfg.task.params, seed=0)
+    for label in out:
+        assert out[label]["speed_mode"] == "eager"
+
+
+def test_speed_mode_is_recorded_for_regression_results():
+    """The regression branch must not continue before attaching speed provenance."""
+    cfg = ExperimentConfig(
+        task=dict(
+            name="etth1",
+            objective="regression",
+            params={"lookback": 12, "horizon": 3, "n_folds": 10, "test_frac": 0.3},
+            n_train=64,
+            n_test=32,
+            task_seed=0,
+        ),
+        arms=[dict(name="ff_matched", label="ff", hidden_dim=8, latent_dim=8, n_steps=2)],
+        train=dict(epochs=1, lr=1e-3, batch_size=32, device="cpu"),
+        seeds=[0],
+    )
+    out, _, _, _ = run_point(cfg, cfg.task.params, seed=0)
+    assert out["ff"]["speed_mode"] == "eager"
+
+
+def test_speed_auto_is_inert_on_cpu():
+    """`speed: auto` on CPU has nothing to choose between (both knobs are inert there), so it must
+    resolve to eager and reproduce the manual run exactly rather than burning probe time."""
+    ref_cfg = _cfg(train=dict(epochs=2, lr=1e-3, batch_size=64))
+    ref, _, _, _ = run_point(ref_cfg, ref_cfg.task.params, seed=0)
+    cfg = _cfg(train=dict(epochs=2, lr=1e-3, batch_size=64, speed="auto"))
+    got, _, _, _ = run_point(cfg, cfg.task.params, seed=0)
+    for label in ref:
+        assert ref[label]["accuracy"] == got[label]["accuracy"]
+        assert "cpu" in got[label]["speed_mode"]
+
+
+def test_speed_rejects_unknown_mode():
+    with pytest.raises(Exception, match="speed"):
+        _cfg(train=dict(epochs=1, lr=1e-3, batch_size=64, speed="turbo"))
+
+
+def _probe_loader():
+    """A small real loader for the autotuner tests (same shape as the `_cfg` parity task)."""
+    from looptab.data.dataset import make_loaders, make_splits
+
+    train_ds, test_ds = make_splits(
+        task="parity", task_cfg={"d": 12, "k": 2}, task_seed=42,
+        train_sample_seed=1, test_sample_seed=2, n_train=400, n_test=200,
+    )
+    train_loader, _ = make_loaders(train_ds, test_ds, batch_size=64)
+    return train_loader
+
+
+def _probe_model():
+    from looptab.models.trm import TRM
+
+    return TRM(in_features=12, num_classes=2, hidden_dim=16, latent_dim=16, n_steps=3)
+
+
+def test_autotune_probe_returns_a_mode_and_timings():
+    """Exercise the autotuner directly. On CPU the candidates are all really the same eager path,
+    so this asserts the CONTRACT (a valid winner, one finite timing per candidate, throwaway
+    models only) rather than which mode wins — the winner is a GPU question."""
+    from looptab.run import _autotune_speed_mode, _speed_mode_label
+
+    built = []
+
+    def _build():
+        m = _probe_model()
+        built.append(m)
+        return m
+
+    candidates = [(False, False), (True, False)]
+    best, timings = _autotune_speed_mode(
+        _build, _probe_loader(), candidates=candidates, device="cpu", lr=1e-3,
+        weight_decay=1e-4, deep_supervision_weight=1.0, loss_type="ce", probe_steps=4,
+    )
+    assert best in candidates
+    assert set(timings) == {_speed_mode_label(a, g) for a, g in candidates}
+    assert all(t < float("inf") for t in timings.values())
+    # One throwaway model per candidate — probing must never train the arm's real weights.
+    assert len(built) == len(candidates)
+    # CPU candidates are the same eager path, so restored RNG + identical batches must leave
+    # their trained weights exactly equal; only the requested speed mode may vary.
+    for a, b in zip(built[0].parameters(), built[1].parameters()):
+        assert torch.equal(a, b)
+
+
+def test_autotune_probe_leaves_rng_recoverable():
+    """The probe trains throwaway models, which CONSUMES the global RNG (InMemoryLoader draws its
+    per-epoch shuffle from it). run_point therefore re-seeds and rebuilds the arm after probing.
+    This asserts the property that makes that safe: re-seeding restores the exact stream, so a
+    post-probe seeded train is identical to one that never probed. Without the re-seed, an
+    autotuned run would silently train on a different shuffle order than a manual one."""
+    from looptab.run import _autotune_speed_mode
+    from looptab.train.loop import train
+
+    loader = _probe_loader()
+
+    def _weights_after_seeded_train():
+        torch.manual_seed(7)
+        m = _probe_model()
+        train(m, loader, epochs=2, lr=1e-3, device="cpu")
+        return [p.detach().clone() for p in m.parameters()]
+
+    clean = _weights_after_seeded_train()
+    _autotune_speed_mode(
+        _probe_model, loader, candidates=[(False, False)], device="cpu", lr=1e-3,
+        weight_decay=1e-4, deep_supervision_weight=1.0, loss_type="ce", probe_steps=4,
+    )
+    after_probe = _weights_after_seeded_train()
+    for a, b in zip(clean, after_probe):
+        assert torch.equal(a, b)
+
+
+def test_cuda_graph_tail_defaults_off_and_is_inert_on_cpu():
+    """cuda_graph_tail changes WHICH rows are trained on (it stops dropping the ragged batch), so
+    it must default off — committed cuda_graph results dropped that batch."""
+    cfg = _cfg()
+    assert cfg.train.cuda_graph_tail is False
+    ref_cfg = _cfg(train=dict(epochs=2, lr=1e-3, batch_size=64))
+    ref, _, _, _ = run_point(ref_cfg, ref_cfg.task.params, seed=0)
+    got_cfg = _cfg(
+        train=dict(epochs=2, lr=1e-3, batch_size=64, cuda_graph=True, cuda_graph_tail=True)
+    )
+    got, _, _, _ = run_point(got_cfg, got_cfg.task.params, seed=0)
+    for label in ref:
+        assert ref[label]["accuracy"] == got[label]["accuracy"]
 
 
 def test_trm_mixer_fused_rejects_amp():

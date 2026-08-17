@@ -539,6 +539,75 @@ file and one index row, not here.
     memory. Per-arm override available (`ModelConfig.microbatch_size`) since budget-matched
     controls can differ in width by 40x at the same task. Mutually exclusive with `cuda_graph`.
     See §11.2 #18.
+  - **M35 widened the speed substrate (all opt-in, all default-off, CPU runs bit-identical).**
+    Bit-identity was verified by running the pre-M35 and post-M35 trees side by side through the
+    real runner and diffing every numeric field of the aggregate records — 0 mismatches on seven
+    configs chosen to cover every training routine: `m0_smoke_linear` (standard),
+    `m18e_compute_matched` (N_sup detached carry), `m17_nested_converge_smoke` (nested),
+    `m26_etth1_smoke` (regression/MSE), `m23_sudoku_screen` (mixer, multi-class), plus two
+    purpose-built fast probes covering `train_act` + `train_stable` together and the
+    multilabel/F1 + K-fold eval path. What changed:
+    - **`amp` and `cuda_graph` now cover the DEEP-SUPERVISION FAMILY**, not just the standard
+      train path. `train_deep_supervision` / `train_act` run a FIXED number of
+      identically-shaped passes per batch differing only in the carried `(z, a)`, so the
+      capturable unit is the PASS: `_CapturedPassStep` captures two graphs (fresh-init and
+      carried-state) on one shared pool and replays them, copying the detached carry between
+      replays. `train_stable` gets `amp` for its task loss but keeps the Jacobian probe in fp32
+      (its whole point is small-magnitude fidelity) and no graph (`torch.func.jvp` builds a
+      fresh graph structure per batch). The **trajectory curriculum / progressive routines still
+      reject both** — per-batch depth resampling means no fixed shape — and the runner says so.
+    - **`amp` + `cuda_graph` COMPOSE now** (they used to be mutually exclusive). `GradScaler`'s
+      dynamic scale needs a host-side inf check per step, which replay cannot do, so the
+      captured path uses a STATIC scale (`train.amp_static_loss_scale`, default 8192) applied
+      and divided out inside the captured region. Overflow cannot be acted on per-step, so after
+      every epoch the runner checks the loss PLUS all post-update gradient/parameter/optimizer/EMA tensors
+      and raises naming the knob to lower. **Post-review correction:** the first implementation
+      checked only the pre-update loss and missed an overflow on the final optimizer step; a
+      one-batch/one-epoch GPU regression test now covers that exact failure. **GPU-verified
+      correction:** the M35 draft shipped this default at 65536 (GradScaler's usual init value)
+      but was never actually run on a GPU; the first real-hardware test run overflowed on the
+      deep-supervision multi-pass path (`n_sup=3`, `carry=True`) at epoch 1. Binary-searched the
+      threshold on that shape: 32768 trains cleanly, 65536 overflows — the default is now 8192,
+      an 8x margin below the observed failure point. The standard single-pass path was fine at
+      65536 too, so this was a DS-family-specific numerical margin issue, not a graph-mechanics
+      bug (eager AMP with dynamic `GradScaler` on the identical config never overflowed either).
+    - **`train.cuda_graph_tail`** captures a second graph for the ragged final batch instead of
+      dropping it, sharing the first graph's memory pool (so it does not double the graph
+      footprint #18 found harmful at high M). On DS/ACT it captures a second fresh/carry graph
+      pair. **Post-review correction:** the first version silently ignored this flag on DS/ACT;
+      that is fixed and GPU-tested. **Off by default because it changes WHICH ROWS are trained
+      on** — every committed `cuda_graph` result dropped that batch.
+    - **`train.speed: auto`** (default `manual`) times exactly `speed_probe_steps` full-size loader
+      batches per arm across the modes the config admits (eager / amp / cuda_graph /
+      amp+cuda_graph), after two untimed batches on the SAME throwaway model/optimizer/graph, and
+      trains with the fastest. This is the repo's own "measure, don't assume" law
+      (§11.2 #16/#18) turned into code rather than a note. **Caveat that matters: different arms
+      can land on different modes, which deliberately breaks the "set knobs uniformly across
+      arms" contract** — use it to find the winner, then pin it manually for a result you will
+      publish. Every new run record, including regression, carries `speed_mode` per arm (and
+      `speed_modes`, a sorted
+      list, per aggregate) so a Δ always states how it was produced; a `speed_modes` list longer
+      than one is the signal to distrust that Δ. **Post-review correction (§11.2 #21):** the first
+      implementation's `speed_probe_steps=8` actually ran three FULL epochs per candidate across
+      two separate optimizers/graph captures; that bug, not intrinsic autotuning cost, caused the
+      old electricity run's ~5x slowdown. **Rerun with the fix: 64m30s, statistically identical to
+      a freshly-timed manual-pinned baseline (64m53.9s) — auto is not meaningfully slower once the
+      probe is bounded correctly** (the original "~16min" comparison baseline was itself a
+      misread per-seed figure, not the 4-seed total). DS-family arms still receive no autotuning
+      (honestly labelled `"auto n/a here"`), so use auto only on standard-path arms and pin one
+      uniform mode before
+      publishing a Δ.
+    - **Per-batch GPU syncs removed from the DS family.** `train_deep_supervision`, `train_act`,
+      `train_stable`, `train_curriculum` and `train_progressive` accumulated the epoch loss with
+      a `.item()` per pass — a full CPU/GPU round-trip `n_sup` times per batch in exactly the
+      launch-bound regime #16 describes. They now accumulate in float64 on-device and synchronize
+      once per epoch; float64 accumulation of the exactly-converted float32 losses reproduces the
+      former Python float sum **bit-for-bit** (asserted in `tests/test_training.py`).
+    - **Eval collects predictions on-device** and transfers once, instead of a `.cpu()` per batch
+      (a sync that drains the GPU between batches). Classification only: `_predict_regression`
+      **deliberately keeps** the per-batch copies, because regression predictions are full
+      `(N, M, H)` floats — hundreds of MB on traffic — and that is the one regime where #18 says
+      memory, not launch latency, is the binding constraint.
 
 ### 11.2 Behaviour-changing conclusions (read before re-running anything)
 
@@ -913,6 +982,46 @@ file and one index row, not here.
     the old code silently fell back to reporting the bare (clean-looking) SHA — exactly the
     false-clean state the fix exists to prevent. Now reports `-status-unknown` in that case instead
     of guessing clean (`tests/test_run.py::test_git_sha_fails_conservatively_when_status_check_errors`).
+21. **M35 GPU speed substrate — REVIEW-CORRECTED, then FOLLOWED UP with real numbers for the
+    retracted items (see `results/log/m35.md` §5).** A GPU-verification pass (this repo's own)
+    found and fixed a real bug (default `amp_static_loss_scale` 65536→8192, DS-family fp16
+    overflow). An adversarial review then found the loss-only overflow guard missed corruption on
+    the FINAL optimizer step (fixed: captured AMP now checks post-update gradients, parameters,
+    Adam tensor state, and EMA once per epoch, GPU-regression-tested), that `cuda_graph_tail`
+    silently no-opped on DS/ACT (fixed: a second fresh/carry graph pair, GPU-tested), that the
+    `speed:auto` probe counted full epochs instead of `speed_probe_steps` batches (fixed: exactly
+    N timed batches after 2 same-instance warmups), that regression run records dropped speed
+    provenance (fixed), and that the "faithful" electricity DS proxy used the wrong batch size/loss
+    shape (fixed). All confirmed independently: full suite **362 passed, 6 skipped** on this GPU.
+    The follow-up then closed every item the review left open:
+    - **DS-family capture at electricity-scale width, corrected proxy:** `cuda_graph` is
+      **1.36x slower** (not the retracted 2.76x) and both modes fit comfortably inside 8GB (not the
+      retracted "eager already exceeds 8GB") — the withdrawn proxy's wrong batch size (128 vs. the
+      real 64) drove both errors. Still a **hypothetical** stress test (`n_sup>1` is structurally
+      blocked for regression; `cuda_graph` and `microbatch_size` are mutually exclusive so this
+      can't represent the real recipe's accumulation), but no longer overstated.
+    - **`speed:auto` at electricity scale, rerun with the fixed probe:** 64m30s — and a SECOND,
+      independent error surfaced here (not from the review): the "~16 minutes" this was being
+      compared against in the original write-up is a **per-seed** figure from the M34 entry above,
+      silently misread as a 4-seed total. Directly timing the real committed baseline gives
+      **64m53.9s** — statistically identical to the auto run. **Once the probe bug is fixed,
+      `speed:auto` is not meaningfully slower than manual pinning at this scale**, reversing both
+      the original "~5x slower" claim and this pass's own initial "~4x slower" reading. A targeted
+      check (real, not probed, full 15-epoch timing across all 4 modes on one representative arm)
+      confirmed the probe's mode choices hold at sustained scale too — no hidden divergence.
+    - **`cuda_graph_tail` on DS-family, rerun with the fix:** `trm_nsup`/`trm_nsup_nocarry` now
+      genuinely change under the tail flag (previously silently identical to the no-tail run,
+      exactly as the review found) — same negligible overhead as before.
+    - **The `m18e_compute_matched` `eager`/`cuda_graph` numbers are now repeat-validated**, not
+      provisional: both modes are deterministic without AMP, so repeat runs reproduced
+      bit-identically, confirming the 2.25x ratio. `amp`/`amp`+`cuda_graph` were not repeated
+      (lower priority — fp16 rounding means a repeat wouldn't be bit-identical anyway, and they're
+      independently corroborated by agreement with the CPU reference).
+    Net: DS-family capture, AMP+graph composition, and `cuda_graph_tail` are real GPU-verified wins
+    with no outstanding surprises; `speed:auto` is not the overhead risk it appeared to be (though
+    it still silently skips DS-family arms — never in question); the electricity-scale DS question
+    remains open/non-actionable (no real config can exercise it) but is no longer overstated. Only
+    the `m23_sudoku_act_sweep` ACT row remains unrun.
 
 ### 11.3 Open work
 
@@ -976,10 +1085,19 @@ file and one index row, not here.
   already shows non-recurrent mixing suffices); a convergent fixed-point task the mixer
   under-fits, to test the DS carry in its motivated regime (none found — the mixer fits them
   all). Neither is needed to interpret current evidence.
+- **M35 is review-corrected AND follow-up-verified — see §11.2 #21.** Every item the review left
+  retracted/provisional now has a real number (results/log/m35.md §5): corrected DS-family
+  electricity proxy (1.36x, not 2.76x), `speed:auto` rerun at real scale (≈ manual pinning once the
+  probe bug is fixed — the old "~5x" claim also rested on a misread per-seed baseline figure, now
+  corrected too), `cuda_graph_tail` on DS-family confirmed working at config scale, and
+  `eager`/`cuda_graph` repeat-validated (bit-identical reruns). Only two low-priority items remain:
+  a second run of `amp`/`amp`+`cuda_graph` (not expected to move — fp16, but never repeated), and
+  the `m23_sudoku_act_sweep` ACT-capture completeness row.
 - **Speed knobs `train.amp` / `train.compile` (BUILT, opt-in, off by default).** Compute is ~99%
   of a run and the dominant channel-MLP GEMM already sits at ~94% of fp32 peak, so nothing is
   left on the plumbing side. Measured and *rejected* as no-ops/harms: fused Adam (1.006x), CUDA
-  graphs (1.00x), uniform batch shapes (1.014x), dataloader work (0.9% of runtime),
+  graphs (1.00x — but see #16, which REVERSED this at small-cell shapes), uniform batch shapes
+  (1.014x), dataloader work (0.9% of runtime),
   `torch.func.vmap` seed-ensembling (**0.88x, slower**), and hand-written CUDA kernels (reached
   1.68x but `torch.compile` beats them with no custom code — see the GPU memory note). What
   works:

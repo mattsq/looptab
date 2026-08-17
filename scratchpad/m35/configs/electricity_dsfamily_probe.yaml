@@ -1,0 +1,32 @@
+# Quick safety probe (M35 follow-up): does DS-family cuda_graph capture (TWO graphs -- fresh +
+# carry -- on one shared pool) blow memory/time up worse than the already-measured standard-path
+# behavior at electricity's widest arm (h1110, the #18 danger zone)? batch_size reduced to 32
+# (vs the committed recipe's 128+microbatch_size=64) so an eager run fits without microbatching --
+# cuda_graph and microbatch_size are mutually exclusive, so this isolates cuda_graph's OWN memory
+# pressure at this width from the batch-size-driven pressure the real recipe works around.
+task:
+  name: electricity
+  objective: regression
+  params: {dataset: electricity, lookback: 96, horizon: 24, n_folds: 10, test_frac: 0.3}
+  n_train: 256
+  n_test: 64
+  task_seed: 0
+arms:
+  - name: trm
+    label: trm_nsup_h1110
+    hidden_dim: 1110
+    latent_dim: 1110
+    n_steps: 8
+    n_latent: 1
+    use_rmsnorm: true
+    deep_supervision: false
+    n_sup: 4
+    n_sup_carry: true
+deltas: []
+train:
+  epochs: 2
+  lr: 1e-3
+  batch_size: 32
+  device: cuda
+seeds: [0]
+results_dir: scratchpad/m35/results

@@ -1,0 +1,49 @@
+
+=== single ===
+      [speed:auto] trm_mixer_unsharedro: chose amp+cuda_graph eager=20.181s | amp=14.267s | cuda_graph=22.029s | amp+cuda_graph=14.214s  (best 14.214s)
+      [speed:auto] trm_mixer_nomix_unsharedro: chose amp+cuda_graph eager=15.801s | amp=9.944s | cuda_graph=15.898s | amp+cuda_graph=9.851s  (best 9.851s)
+      [speed:auto] trm_mixer_nomix_distinctw: chose cuda_graph eager=2.667s | amp=2.716s | cuda_graph=2.259s | amp+cuda_graph=2.291s  (best 2.259s)
+      [speed:auto] trm_flat: chose amp+cuda_graph eager=2.032s | amp=2.473s | cuda_graph=1.176s | amp+cuda_graph=1.133s  (best 1.133s)
+      [speed:auto] ff_matched: chose cuda_graph eager=0.880s | amp=0.962s | cuda_graph=0.759s | amp+cuda_graph=0.791s  (best 0.759s)
+      [speed:auto] trm_mixer_unsharedro: chose amp eager=20.124s | amp=14.217s | cuda_graph=32.695s | amp+cuda_graph=16.434s  (best 14.217s)
+      [speed:auto] trm_mixer_nomix_unsharedro: chose amp+cuda_graph eager=15.804s | amp=9.934s | cuda_graph=17.675s | amp+cuda_graph=9.818s  (best 9.818s)
+      [speed:auto] trm_mixer_nomix_distinctw: chose cuda_graph eager=2.673s | amp=2.723s | cuda_graph=2.250s | amp+cuda_graph=2.289s  (best 2.250s)
+      [speed:auto] trm_flat: chose amp+cuda_graph eager=1.977s | amp=2.414s | cuda_graph=1.183s | amp+cuda_graph=1.129s  (best 1.129s)
+      [speed:auto] ff_matched: chose cuda_graph eager=0.888s | amp=0.976s | cuda_graph=0.764s | amp+cuda_graph=0.794s  (best 0.764s)
+      [speed:auto] trm_mixer_unsharedro: chose amp eager=20.114s | amp=14.206s | cuda_graph=33.752s | amp+cuda_graph=16.316s  (best 14.206s)
+      [speed:auto] trm_mixer_nomix_unsharedro: chose amp eager=16.207s | amp=10.239s | cuda_graph=21.777s | amp+cuda_graph=10.976s  (best 10.239s)
+      [speed:auto] trm_mixer_nomix_distinctw: chose cuda_graph eager=2.690s | amp=2.785s | cuda_graph=2.260s | amp+cuda_graph=2.295s  (best 2.260s)
+      [speed:auto] trm_flat: chose amp+cuda_graph eager=1.969s | amp=2.430s | cuda_graph=1.174s | amp+cuda_graph=1.129s  (best 1.129s)
+      [speed:auto] ff_matched: chose cuda_graph eager=0.884s | amp=0.971s | cuda_graph=0.768s | amp+cuda_graph=0.776s  (best 0.768s)
+      [speed:auto] trm_mixer_unsharedro: chose amp eager=20.167s | amp=14.243s | cuda_graph=31.354s | amp+cuda_graph=15.224s  (best 14.243s)
+      [speed:auto] trm_mixer_nomix_unsharedro: chose amp+cuda_graph eager=15.805s | amp=9.931s | cuda_graph=18.208s | amp+cuda_graph=9.800s  (best 9.800s)
+      [speed:auto] trm_mixer_nomix_distinctw: chose cuda_graph eager=2.664s | amp=2.709s | cuda_graph=2.258s | amp+cuda_graph=2.303s  (best 2.258s)
+      [speed:auto] trm_flat: chose amp+cuda_graph eager=1.977s | amp=2.463s | cuda_graph=1.175s | amp+cuda_graph=1.125s  (best 1.125s)
+      [speed:auto] ff_matched: chose cuda_graph eager=0.891s | amp=0.963s | cuda_graph=0.764s | amp+cuda_graph=1.047s  (best 0.764s)
+  [seed=0] trm_mixer=-0.115  trm_mixer_nomix=-0.143  trm_mixer_unsharedro=-0.111  trm_mixer_nomix_unsharedro=-0.128  trm_mixer_nomix_distinctw=-0.139  trm_flat=-0.209  ff_matched=-0.233 (baseline=-1.503)
+  [seed=1] trm_mixer=-0.092  trm_mixer_nomix=-0.115  trm_mixer_unsharedro=-0.109  trm_mixer_nomix_unsharedro=-0.111  trm_mixer_nomix_distinctw=-0.117  trm_flat=-0.189  ff_matched=-0.247 (baseline=-1.260)
+  [seed=2] trm_mixer=-0.110  trm_mixer_nomix=-0.141  trm_mixer_unsharedro=-0.108  trm_mixer_nomix_unsharedro=-0.133  trm_mixer_nomix_distinctw=-0.142  trm_flat=-0.186  ff_matched=-0.217 (baseline=-1.269)
+  [seed=3] trm_mixer=-0.108  trm_mixer_nomix=-0.135  trm_mixer_unsharedro=-0.100  trm_mixer_nomix_unsharedro=-0.123  trm_mixer_nomix_distinctw=-0.135  trm_flat=-0.201  ff_matched=-0.214 (baseline=-1.348)
+  majority_baseline: acc -1.3450 ± 0.1124
+         trm_mixer: acc -0.1062 ± 0.0097
+   trm_mixer_nomix: acc -0.1333 ± 0.0126
+  trm_mixer_unsharedro: acc -0.1071 ± 0.0048
+  trm_mixer_nomix_unsharedro: acc -0.1238 ± 0.0096
+  trm_mixer_nomix_distinctw: acc -0.1331 ± 0.0114
+          trm_flat: acc -0.1960 ± 0.0107
+        ff_matched: acc -0.2277 ± 0.0154
+  Δ(trm_mixer_nomix − trm_mixer_nomix_unsharedro) = -0.0095 ± 0.0048  [MSE +0.0095 ± 0.0048]  [MAE +0.0084 ± 0.0035]  [R2 -0.0108 ± 0.0044]
+  Δ(trm_mixer − trm_mixer_unsharedro) = +0.0009 ± 0.0111  [MSE -0.0009 ± 0.0111]  [MAE +0.0004 ± 0.0053]  [R2 +0.0018 ± 0.0139]
+  Δ(trm_mixer − trm_mixer_nomix) = +0.0271 ± 0.0034  [MSE -0.0271 ± 0.0034]  [MAE -0.0216 ± 0.0023]  [R2 +0.0320 ± 0.0051]
+  Δ(trm_mixer_unsharedro − trm_mixer_nomix_unsharedro) = +0.0167 ± 0.0109  [MSE -0.0167 ± 0.0109]  [MAE -0.0136 ± 0.0061]  [R2 +0.0194 ± 0.0135]
+  Δ(trm_mixer_nomix − trm_mixer_nomix_distinctw) = -0.0002 ± 0.0025  [MSE +0.0002 ± 0.0025]  [MAE -0.0073 ± 0.0043]  [R2 +0.0000 ± 0.0027]
+  Δ(trm_mixer_nomix − ff_matched) = +0.0944 ± 0.0257  [MSE -0.0944 ± 0.0257]  [MAE -0.1064 ± 0.0279]  [R2 +0.1127 ± 0.0391]
+  Δ(trm_mixer_nomix_unsharedro − ff_matched) = +0.1039 ± 0.0234  [MSE -0.1039 ± 0.0234]  [MAE -0.1148 ± 0.0270]  [R2 +0.1234 ± 0.0355]
+  Δ(trm_mixer − ff_matched) = +0.1215 ± 0.0228  [MSE -0.1215 ± 0.0228]  [MAE -0.1279 ± 0.0259]  [R2 +0.1446 ± 0.0382]
+  Δ(trm_flat − ff_matched) = +0.0317 ± 0.0193  [MSE -0.0317 ± 0.0193]  [MAE -0.0232 ± 0.0161]  [R2 +0.0387 ± 0.0267]
+
+Results : scratchpad\m35\results\m34_electricity_auto_20260817T160544.json
+Curve   : scratchpad\m35\results\m34_electricity_auto_20260817T160544_curve.csv
+Deltas  : scratchpad\m35\results\m34_electricity_auto_20260817T160544_deltas.csv
+Params  : scratchpad\m35\results\m34_electricity_auto_20260817T160544_params.csv
+  ✓ BUDGET PARITY: all matched arms within ±5% per cell.

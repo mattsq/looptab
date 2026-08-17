@@ -12,15 +12,25 @@ def _predict(
 ) -> tuple[np.ndarray, np.ndarray]:
     # inference_mode is a strictly-faster no_grad (skips view/version tracking) and is safe
     # here: predictions only feed argmax/numpy, never autograd. Numerically identical.
+    #
+    # Batches are kept ON DEVICE and transferred once at the end rather than `.cpu()`-ing each
+    # one: a per-batch device->host copy is a synchronization point, so the GPU drains between
+    # batches instead of running ahead. That costs little on the tiny synthetic test sets but is
+    # real on the many-batch forecasting tables (§11.2 #18's regime). The concatenated values are
+    # bit-identical either way — only the transfer granularity changes. Predictions are argmax
+    # indices (int64), so holding them on device is cheap even for large test sets.
     model.eval()
     preds, targets = [], []
     for X, y in loader:
         X = X.to(device)
         logits, _ = model(X, **kwargs)
         # argmax over the class dim handles both single-output (B, C) and multi-output (B, W, C).
-        preds.append(logits.argmax(dim=-1).cpu().numpy())
-        targets.append(y.cpu().numpy())
-    return np.concatenate(preds), np.concatenate(targets)
+        preds.append(logits.argmax(dim=-1))
+        targets.append(y.to(preds[-1].device))
+    return (
+        torch.cat(preds).cpu().numpy(),
+        torch.cat(targets).cpu().numpy(),
+    )
 
 
 def accuracy(model: nn.Module, loader: DataLoader, device: str = "cpu", **kwargs) -> float:
@@ -219,6 +229,14 @@ def _predict_regression(
 ) -> tuple[np.ndarray, np.ndarray]:
     """Raw model outputs as regression predictions (M26). No argmax — the readout values ARE the
     forecast. Returns (preds, targets), both ``(N, M, H)`` float (variable-cells × horizon)."""
+    # DELIBERATELY per-batch `.cpu()` here, unlike `_predict`. The on-device accumulation that
+    # helps the classification path would backfire on this one: regression predictions are FULL
+    # float outputs of shape (N, M, H), so on traffic (M=862, H=24) a few thousand test rows is
+    # hundreds of MB held on the device — and this is precisely the high-channel regime where
+    # §11.2 #18 found activation memory, not launch latency, to be the binding constraint on an
+    # 8GB card. Classification predictions are argmax INDICES (N, W), which are small enough that
+    # the same trick is free. Trading memory for launch latency is the wrong side of that
+    # tradeoff here; keep the copies.
     model.eval()
     preds, targets = [], []
     for X, y in loader:

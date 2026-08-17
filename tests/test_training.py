@@ -9,7 +9,13 @@ from looptab.data.generators import make_linear
 from looptab.eval.metrics import accuracy, delta_report, evaluate_act
 from looptab.models.controls import FFMatched
 from looptab.models.trm import TRM
-from looptab.train.loop import train, train_act, train_curriculum, train_progressive
+from looptab.train.loop import (
+    benchmark_train_steps,
+    train,
+    train_act,
+    train_curriculum,
+    train_progressive,
+)
 
 
 def _small_loader():
@@ -31,6 +37,27 @@ def test_train_ff_runs():
     loader = _small_loader()
     losses = train(m, loader, epochs=5, lr=1e-3, device="cpu")
     assert len(losses) == 5
+
+
+def test_benchmark_train_steps_counts_batches_not_epochs():
+    """The autotune primitive's public unit is a step, independent of loader length."""
+
+    class CountingModel(torch.nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.linear = torch.nn.Linear(10, 2)
+            self.forward_count = 0
+
+        def forward(self, X):
+            self.forward_count += 1
+            return self.linear(X), None
+
+    model = CountingModel()
+    elapsed = benchmark_train_steps(
+        model, _small_loader(), warmup_steps=2, probe_steps=5, device="cpu"
+    )
+    assert elapsed >= 0
+    assert model.forward_count == 7
 
 
 def test_microbatch_preserves_effective_batch_update():
@@ -352,12 +379,102 @@ def test_ema_invalid_nsup():
         train_deep_supervision(m, _small_loader(), n_sup=0, epochs=1, device="cpu")
 
 
-def test_cuda_graph_amp_mutually_exclusive_at_train_level():
-    """The amp+cuda_graph guard lives in train() itself (defense in depth beyond run.py's arm
-    dispatch check), and fires before any device dispatch — no CUDA needed to hit it."""
+def test_cuda_graph_amp_combination_is_accepted_and_inert_on_cpu():
+    """amp+cuda_graph used to raise; the static-loss-scale capture path (see _GraphedStepBase)
+    now supports the combination. On CPU both flags stay inert, so the run must be bit-identical
+    to the plain eager one rather than raising."""
+    torch.manual_seed(0)
+    m_ref = TRM(in_features=10, num_classes=2, hidden_dim=16, latent_dim=16, n_steps=2)
+    ref = train(m_ref, _small_loader(), epochs=3, lr=1e-2, device="cpu")
+    torch.manual_seed(0)
+    m_both = TRM(in_features=10, num_classes=2, hidden_dim=16, latent_dim=16, n_steps=2)
+    got = train(m_both, _small_loader(), epochs=3, lr=1e-2, device="cpu", amp=True,
+                cuda_graph=True)
+    assert ref == got
+    for a, b in zip(m_ref.parameters(), m_both.parameters()):
+        assert torch.equal(a, b)
+
+
+def test_microbatch_still_rejects_cuda_graph():
+    """Lifting the amp+cuda_graph exclusion must NOT loosen the microbatch one: gradient
+    accumulation spans several forward/backward passes per optimizer step, which a single
+    fixed-shape captured step cannot represent."""
     m = TRM(in_features=10, num_classes=2, hidden_dim=8, latent_dim=8, n_steps=2)
-    with pytest.raises(ValueError, match="cannot be combined"):
-        train(m, _small_loader(), epochs=1, device="cpu", amp=True, cuda_graph=True)
+    with pytest.raises(ValueError, match="microbatch_size and cuda_graph"):
+        train(m, _small_loader(), epochs=1, device="cpu", microbatch_size=8, cuda_graph=True)
+
+
+def test_ds_family_speed_flags_are_inert_on_cpu():
+    """amp/cuda_graph on the deep-supervision family must be inert on CPU, i.e. bit-identical to
+    the pre-flag routine — the same portability contract `train` has, so a cuda config can run
+    unchanged on a CPU box."""
+    def _run(**kw):
+        torch.manual_seed(0)
+        m = TRM(in_features=10, num_classes=2, hidden_dim=16, latent_dim=16, n_steps=3)
+        losses = train_deep_supervision(m, _small_loader(), n_sup=3, epochs=3, lr=1e-2,
+                                        device="cpu", **kw)
+        return losses, [p.detach().clone() for p in m.parameters()]
+
+    ref_losses, ref_params = _run()
+    got_losses, got_params = _run(amp=True, cuda_graph=True)
+    assert ref_losses == got_losses
+    for a, b in zip(ref_params, got_params):
+        assert torch.equal(a, b)
+
+
+def test_carried_state_cast_is_a_semantic_noop():
+    """Pins down what the DS routines' `.to(X.dtype)` on the carried (z, a) actually does.
+
+    Under AMP the loop returns fp16 state while X stays fp32. It would be easy to assume that
+    breaks the models' `torch.cat([X, z, a])` — it does NOT: `cat` type-promotes, so the mixed
+    carry silently becomes fp32 anyway. The explicit cast therefore changes nothing numerically;
+    it is there to make the dtype of the cross-pass state stated rather than incidental (and so
+    the captured-graph path can hold fixed-dtype static buffers). This test exists so nobody
+    "fixes" a crash that was never there, or deletes the cast believing it was load-bearing.
+    """
+    torch.manual_seed(0)
+    m = TRM(in_features=10, num_classes=2, hidden_dim=16, latent_dim=16, n_steps=2)
+    X = torch.randn(4, 10)
+    _, _, (z, a) = m(X, n_steps=1, return_state=True)
+    half_state = (z.detach().half(), a.detach().half())
+    promoted, _, _ = m(X, n_steps=1, init_state=half_state, return_state=True)
+    cast_state = (half_state[0].to(X.dtype), half_state[1].to(X.dtype))
+    explicit, _, _ = m(X, n_steps=1, init_state=cast_state, return_state=True)
+    assert torch.equal(promoted, explicit)
+
+
+def test_async_loss_accumulation_matches_python_sum():
+    """The per-epoch device-side float64 accumulation replaced a per-batch `.item()` Python sum.
+    On CPU the two must agree bit-for-bit, so the reported loss curves in committed run records
+    stay comparable across the change."""
+    torch.manual_seed(0)
+    m = TRM(in_features=10, num_classes=2, hidden_dim=16, latent_dim=16, n_steps=2)
+    losses = train_deep_supervision(m, _small_loader(), n_sup=2, epochs=3, lr=1e-2, device="cpu")
+    # Recompute the same quantity the routine reports, the old way, from an identical rerun.
+    torch.manual_seed(0)
+    m2 = TRM(in_features=10, num_classes=2, hidden_dim=16, latent_dim=16, n_steps=2)
+    manual = []
+    opt = torch.optim.AdamW(m2.parameters(), lr=1e-2, weight_decay=1e-4)
+    from looptab.train.loop import _loss_fn
+    for _ in range(3):
+        m2.train()
+        total, n = 0.0, 0
+        for X, y in _small_loader():
+            state = None
+            for _ in range(2):
+                opt.zero_grad()
+                logits, all_logits, state = m2(X, n_steps=None, init_state=state,
+                                               return_state=True)
+                loss = _loss_fn(logits, y)
+                if all_logits is not None:
+                    loss = loss + sum(_loss_fn(sl, y) for sl in all_logits) / len(all_logits)
+                loss.backward()
+                opt.step()
+                state = (state[0].detach(), state[1].detach())
+                total += loss.item()
+                n += 1
+        manual.append(total / n)
+    assert losses == manual
 
 
 def test_cuda_graph_is_inert_on_cpu():
@@ -413,6 +530,135 @@ class TestCudaGraphOnGPU:
                         cuda_graph=True)
         assert len(losses) == 8
         assert all(v == v for v in losses)
+
+    def test_tail_graph_covers_the_ragged_batch(self):
+        """`cuda_graph_tail` captures a SECOND graph for the smaller last batch instead of
+        dropping it. n=200/batch=64 gives batches of 64,64,64,8 — so the tail flag must raise the
+        per-epoch batch count from 3 to 4 and still train (the mid-training capture path, which
+        must restore real optimizer moments rather than zeroing them)."""
+        def _run(tail):
+            torch.manual_seed(0)
+            m = TRM(in_features=10, num_classes=2, hidden_dim=16, latent_dim=16, n_steps=2)
+            losses = train(m, _small_loader(), epochs=12, lr=1e-2, device="cuda",
+                           cuda_graph=True, cuda_graph_tail=tail)
+            return losses, m
+
+        dropped_losses, _ = _run(False)
+        tail_losses, m_tail = _run(True)
+        assert all(v == v for v in tail_losses)  # no NaN from the second capture
+        assert tail_losses[-1] < tail_losses[0] * 0.6  # still genuinely learning
+        # The two differ: the tail run trains on 8 extra rows per epoch.
+        assert tail_losses != dropped_losses
+
+    def test_amp_plus_cuda_graph_trains(self):
+        """The static-loss-scale AMP capture must converge, not just avoid crashing — the failure
+        mode #17 documents (a wrong-but-plausible gradient) looks exactly like 'ran fine' unless
+        the loss is checked for genuine descent."""
+        torch.manual_seed(0)
+        m = TRM(in_features=10, num_classes=2, hidden_dim=16, latent_dim=16, n_steps=2)
+        losses = train(m, _small_loader(), epochs=15, lr=1e-2, device="cuda", amp=True,
+                       cuda_graph=True)
+        assert all(v == v for v in losses)
+        assert losses[-1] < losses[0] * 0.6
+
+    def test_amp_static_scale_overflow_raises_actionably(self):
+        """Catch an overflow on the final optimizer step, when the pre-update loss stays finite."""
+        torch.manual_seed(0)
+        m = TRM(in_features=10, num_classes=2, hidden_dim=16, latent_dim=16, n_steps=2)
+        one_batch = [next(iter(_small_loader()))]
+        with pytest.raises(RuntimeError, match="amp_static_loss_scale"):
+            train(m, one_batch, epochs=1, lr=1e-2, device="cuda", amp=True,
+                  cuda_graph=True, amp_static_loss_scale=1e30)
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="needs CUDA")
+class TestDeepSupervisionGraphsOnGPU:
+    """The DS family runs `n_sup` identically-shaped passes per batch, so its captured unit is the
+    PASS (fresh-init graph + carried-state graph). These assert real convergence, not merely that
+    the capture ran — the #17 stream-ordering class of bug is invisible to a crash test."""
+
+    def test_ds_graph_trains_and_matches_eager_ballpark(self):
+        def _run(**kw):
+            torch.manual_seed(0)
+            m = TRM(in_features=10, num_classes=2, hidden_dim=16, latent_dim=16, n_steps=3)
+            return train_deep_supervision(m, _small_loader(), n_sup=3, epochs=15, lr=1e-2,
+                                          device="cuda", **kw)
+
+        eager = _run()
+        graphed = _run(cuda_graph=True)
+        assert all(v == v for v in graphed)
+        assert graphed[-1] < graphed[0] * 0.6
+        assert abs(graphed[-1] - eager[-1]) < 0.2
+
+    def test_ds_graph_respects_carry_false(self):
+        """carry=False must replay the FRESH graph every pass (the compute-matched control), so it
+        has to keep differing from carry=True under capture exactly as it does eagerly."""
+        def _run(carry):
+            torch.manual_seed(0)
+            m = TRM(in_features=10, num_classes=2, hidden_dim=16, latent_dim=16, n_steps=3)
+            train_deep_supervision(m, _small_loader(), n_sup=3, epochs=6, lr=1e-2,
+                                   device="cuda", carry=carry, cuda_graph=True)
+            return [p.detach().cpu().clone() for p in m.parameters()]
+
+        assert any(not torch.equal(a, b) for a, b in zip(_run(True), _run(False)))
+
+    def test_ds_graph_with_amp_and_ema(self):
+        torch.manual_seed(0)
+        m = TRM(in_features=10, num_classes=2, hidden_dim=16, latent_dim=16, n_steps=3)
+        losses = train_deep_supervision(m, _small_loader(), n_sup=3, epochs=12, lr=1e-2,
+                                        device="cuda", ema_decay=0.9, amp=True, cuda_graph=True)
+        assert all(v == v for v in losses)
+        assert losses[-1] < losses[0] * 0.6
+
+    def test_ds_tail_graph_covers_ragged_batch(self):
+        """DS capture must honor the config-level tail flag, not silently drop the last rows."""
+
+        def _run(tail):
+            torch.manual_seed(0)
+            m = TRM(in_features=10, num_classes=2, hidden_dim=16, latent_dim=16, n_steps=3)
+            losses = train_deep_supervision(
+                m,
+                _small_loader(),
+                n_sup=2,
+                epochs=4,
+                lr=1e-2,
+                device="cuda",
+                cuda_graph=True,
+                cuda_graph_tail=tail,
+            )
+            return losses, [p.detach().cpu().clone() for p in m.parameters()]
+
+        dropped_losses, dropped_params = _run(False)
+        tail_losses, tail_params = _run(True)
+        assert all(v == v for v in tail_losses)
+        assert tail_losses != dropped_losses
+        assert any(not torch.equal(a, b) for a, b in zip(dropped_params, tail_params))
+
+    def test_act_tail_graph_covers_ragged_batch(self):
+        """The ACT-specific halt-loss graph pair must also support the ragged shape."""
+        base = _multi_loader().dataset
+        loader = DataLoader(torch.utils.data.Subset(base, range(200)), batch_size=64)
+
+        def _run(tail):
+            torch.manual_seed(0)
+            m = _act_trm()
+            losses = train_act(
+                m,
+                loader,
+                max_segments=2,
+                epochs=3,
+                lr=1e-2,
+                device="cuda",
+                cuda_graph=True,
+                cuda_graph_tail=tail,
+            )
+            return losses, [p.detach().cpu().clone() for p in m.parameters()]
+
+        dropped_losses, dropped_params = _run(False)
+        tail_losses, tail_params = _run(True)
+        assert all(v == v for v in tail_losses)
+        assert tail_losses != dropped_losses
+        assert any(not torch.equal(a, b) for a, b in zip(dropped_params, tail_params))
 
 
 def test_train_deep_supervision_carry_flag_matches_compute_changes_result():

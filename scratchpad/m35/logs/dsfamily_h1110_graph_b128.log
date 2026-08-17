@@ -1,0 +1,10 @@
+
+=== rule=78, w=24 ===
+  [seed=0] trm_nsup_h1110=0.718 (baseline=0.564)
+  majority_baseline: acc 0.5645 ± 0.0000
+   subset_baseline: EM  0.0312 ± 0.0000
+    trm_nsup_h1110: acc 0.7181 ± 0.0000
+
+Results : scratchpad\m35\results\dsfamily_h1110_probe_graph_20260817T161843.json
+Curve   : scratchpad\m35\results\dsfamily_h1110_probe_graph_20260817T161843_curve.csv
+Deltas  : scratchpad\m35\results\dsfamily_h1110_probe_graph_20260817T161843_deltas.csv
