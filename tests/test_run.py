@@ -466,6 +466,35 @@ def test_untied_stack_routed_as_fixed_depth_in_extrapolation():
     )
 
 
+def test_unroll_untied_evaluates_untied_stack_at_each_r():
+    """M36c: with ``extrapolation.unroll_untied`` the untied stack is evaluated per R' (its forward
+    clamps to min(R', depth)), so a step-aligned untied arm stops after T blocks on a T-step
+    test."""
+    from looptab.config import ExtrapolationConfig
+    from looptab.run import run_extrapolation_point
+
+    cfg = _cfg()
+    cfg.task.name = "iterated"
+    cfg.task.params = {"w": 8, "T": 2, "rule": 90, "distractors": 2}
+    cfg.arms.append(_untied_arm(cfg))
+    cfg.extrapolation = ExtrapolationConfig(T_values=[2], R_values=[1, 5], unroll_untied=True)
+    _, models, _, _ = run_point(cfg, cfg.task.params, seed=0)
+
+    seen = []
+
+    def spy(model, loader, device, want_exact_match=False, n_steps=None):
+        if model is models["untied_stack"]:
+            seen.append(n_steps)
+        return evaluate(model, loader, device, want_exact_match=want_exact_match, n_steps=n_steps)
+
+    with patch("looptab.run.evaluate", side_effect=spy):
+        run_extrapolation_point(
+            cfg, cfg.task.params, seed=0, models=models, T_test=2, R_test_values=[1, 5],
+            device="cpu",
+        )
+    assert seen == [1, 5]
+
+
 def _iter_cfg(**over):
     """A small iterated-CA experiment with the four M3a arms (loop + 3 controls)."""
     base = dict(

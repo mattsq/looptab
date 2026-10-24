@@ -884,7 +884,11 @@ def run_extrapolation_point(
         m = models[lbl]
 
         # recurrent arms (TRM, the decoupled variant, and the M27 mixer) can be unrolled to R'
-        if arm.name in ("trm", "trm_decoupled", "trm_mixer"):
+        # M36c: with ``unroll_untied`` the untied stacks are evaluated at min(R', depth) too.
+        unrollable = ("trm", "trm_decoupled", "trm_mixer")
+        if cfg.extrapolation is not None and cfg.extrapolation.unroll_untied:
+            unrollable += ("untied_stack", "untied_matched", "untied_mixer", "untied_mixer_matched")
+        if arm.name in unrollable:
             for R in R_test_values:
                 point_results[(lbl, R)] = evaluate(
                     m, test_loader, device, want_exact_match=multi_output, n_steps=R
@@ -1111,7 +1115,7 @@ def main():
     parser.add_argument("--seed", type=int, default=None, help="override: run a single seed")
     args = parser.parse_args()
 
-    with open(args.config) as f:
+    with open(args.config, encoding="utf-8") as f:
         raw = yaml.safe_load(f)
     cfg = ExperimentConfig(**raw)
 

@@ -1,0 +1,94 @@
+# M36d — rule generality for the M36b step-operator positive: rule 30, chaotic (class 3).
+#
+# Identical to m36b_mixer_stepds_curriculum.yaml (T-curriculum U{1..8} + step-aligned DS,
+# w=24, 8 seeds, same arms/deltas/budget) except the CA rule, and run on GPU (eager; the
+# curriculum routine rejects amp/cuda_graph). Question: is the mixer's transferable step
+# operator specific to rule 110, or does it hold for rule 30 too? T_test 12/16 is OOD.
+task:
+  name: iterated
+  params:
+    w: 24
+    T: 8
+    rule: 30
+    distractors: 0
+  n_train: 4000
+  n_test: 1000
+  task_seed: 42
+  train_sample_seed: 1
+  test_sample_seed: 2
+
+curriculum:
+  param: T
+  T_min: 1
+  T_max: 8
+
+couple_n_steps_to_param: T
+
+arms:
+  - name: trm_mixer
+    label: trm_mixer_stepds
+    hidden_dim: 96
+    latent_dim: 64
+    token_hidden: 32
+    n_steps: 8
+    n_latent: 1
+    use_rmsnorm: true
+    deep_supervision: true
+    ds_mode: step_aligned
+  - name: trm_mixer
+    label: trm_mixer_finalds
+    hidden_dim: 96
+    latent_dim: 64
+    token_hidden: 32
+    n_steps: 8
+    n_latent: 1
+    use_rmsnorm: true
+    deep_supervision: true
+    ds_mode: final
+  - name: trm
+    label: trm_flat_stepds
+    hidden_dim: 64
+    latent_dim: 64
+    n_steps: 8
+    n_latent: 1
+    use_rmsnorm: true
+    deep_supervision: true
+    ds_mode: step_aligned
+  - name: untied_mixer_matched
+    label: untied_mixer_matched
+    hidden_dim: 96
+    latent_dim: 64
+    token_hidden: 32
+    n_steps: 8
+    use_rmsnorm: true
+    deep_supervision: false
+    deep_supervision_weight: 0.0
+  - name: ff_matched
+    label: ff_matched
+    hidden_dim: 64
+    latent_dim: 64
+    n_steps: 8
+
+deltas:
+  - [trm_mixer_stepds, trm_mixer_finalds]
+  - [trm_mixer_stepds, trm_flat_stepds]
+  - [trm_mixer_stepds, untied_mixer_matched]
+  - [trm_mixer_stepds, ff_matched]
+
+train:
+  epochs: 100
+  lr: 1e-3
+  weight_decay: 1e-4
+  batch_size: 256
+  device: cuda
+
+extrapolation:
+  T_values: [4, 8, 12, 16]
+  R_values: [4, 8, 12, 16]
+
+budget_reference: trm_flat_stepds
+budget_tol: 0.05
+
+seeds: [0, 1, 2, 3, 4, 5, 6, 7]
+parallel_workers: 3
+results_dir: results

@@ -1,0 +1,107 @@
+# M36c — the clean TYING control for the M36b step-operator positive, plus extrapolation to 4×T_max.
+#
+# WHY. M36b found that `trm_mixer` trained with a T-curriculum (T ~ U{1..8}) and STEP-ALIGNED deep
+# supervision (loop step i <- s_i) recovers s_12 / s_16 by running 12 / 16 loops, while every control
+# stays at baseline. Its tying control was not clean: `untied_mixer_matched` ran with DS OFF, so it
+# was never asked to read out s_i at block i. Here the untied mixers get the SAME step-aligned
+# supervision, and `extrapolation.unroll_untied` evaluates them at min(R', depth) so a T-step test
+# stops after T blocks. This answers: in distribution (T <= 8), is the tied loop's step operator any
+# better than an untied stack of step blocks? Out of distribution only the tied loop can run, so the
+# second question is how far past T_max the tied operator holds (T_test up to 32 = 4×T_max).
+# Arms:
+#   - trm_mixer_stepds              tied mixer, step DS (M36b's winner; replication)
+#   - untied_mixer_matched_stepds   untied, budget-matched, step DS (the clean tying control)
+#   - untied_mixer_stepds           untied, full width (~8× params, CEILING), step DS
+#   - trm_flat_stepds               flat loop, step DS (operator control; budget reference)
+#   - ff_matched                    §4a grounding
+# Rule 110, w=24, distractors=0, n_train 4000, 100 epochs, 8 seeds — identical to M36b. GPU eager
+# (the curriculum routine rejects amp/cuda_graph by design).
+task:
+  name: iterated
+  params:
+    w: 24
+    T: 8
+    rule: 110
+    distractors: 0
+  n_train: 4000
+  n_test: 1000
+  task_seed: 42
+  train_sample_seed: 1
+  test_sample_seed: 2
+
+curriculum:
+  param: T
+  T_min: 1
+  T_max: 8
+
+couple_n_steps_to_param: T
+
+arms:
+  - name: trm_mixer
+    label: trm_mixer_stepds
+    hidden_dim: 96
+    latent_dim: 64
+    token_hidden: 32
+    n_steps: 8
+    n_latent: 1
+    use_rmsnorm: true
+    deep_supervision: true
+    ds_mode: step_aligned
+  - name: untied_mixer_matched
+    label: untied_mixer_matched_stepds
+    hidden_dim: 96
+    latent_dim: 64
+    token_hidden: 32
+    n_steps: 8
+    use_rmsnorm: true
+    deep_supervision: true
+    ds_mode: step_aligned
+  - name: untied_mixer
+    label: untied_mixer_stepds
+    hidden_dim: 96
+    latent_dim: 64
+    token_hidden: 32
+    n_steps: 8
+    use_rmsnorm: true
+    deep_supervision: true
+    ds_mode: step_aligned
+  - name: trm
+    label: trm_flat_stepds
+    hidden_dim: 64
+    latent_dim: 64
+    n_steps: 8
+    n_latent: 1
+    use_rmsnorm: true
+    deep_supervision: true
+    ds_mode: step_aligned
+  - name: ff_matched
+    label: ff_matched
+    hidden_dim: 64
+    latent_dim: 64
+    n_steps: 8
+
+deltas:
+  - [trm_mixer_stepds, untied_mixer_matched_stepds]   # HEADLINE: tying, at fixed budget, same supervision
+  - [trm_mixer_stepds, untied_mixer_stepds]           # tied vs the capacity-unconstrained ceiling
+  - [trm_mixer_stepds, trm_flat_stepds]               # operator (replicates M36b)
+  - [trm_mixer_stepds, ff_matched]
+
+train:
+  epochs: 100
+  lr: 1e-3
+  weight_decay: 1e-4
+  batch_size: 256
+  device: cuda
+
+extrapolation:
+  T_values: [4, 8, 12, 16, 24, 32]
+  R_values: [4, 8, 12, 16, 24, 32]
+  unroll_untied: true
+
+budget_reference: trm_flat_stepds
+budget_ceiling: [untied_mixer_stepds]
+budget_tol: 0.05
+
+seeds: [0, 1, 2, 3, 4, 5, 6, 7]
+parallel_workers: 3
+results_dir: results

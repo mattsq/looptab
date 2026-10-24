@@ -301,6 +301,11 @@ class ExtrapolationConfig(BaseModel):
 
     T_values: list[int]
     R_values: list[int]
+    # M36c: also evaluate the UNTIED stacks at each R' (their forward clamps to min(R', depth)),
+    # instead of once at full depth. Needed when an untied arm is trained with step-aligned DS,
+    # where block i reads out s_i, so a T-step test must stop after T blocks. Off by default so
+    # every earlier record keeps its meaning (untied arms evaluated once at full depth).
+    unroll_untied: bool = False
 
 
 class CurriculumConfig(BaseModel):
