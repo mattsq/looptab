@@ -864,9 +864,14 @@ def run_extrapolation_point(
     task_cfg = cfg.task
     this_task_seed = task_cfg.task_seed + seed
 
-    # Generate test split with T_test
+    # Generate test split with T_test. M38: extrapolation.param=None keeps the task unchanged (the
+    # normal test split, per-step decoding only); its train split is unused here, so build it at
+    # n=1 instead of regenerating it (synthetic splits are independent draws, so the test split is
+    # identical either way).
+    param = cfg.extrapolation.param if cfg.extrapolation is not None else "T"
     test_params = copy.deepcopy(task_params)
-    test_params["T"] = T_test
+    if param is not None:
+        test_params[param] = T_test
 
     _, test_ds = make_splits(
         task=task_cfg.name,
@@ -874,7 +879,7 @@ def run_extrapolation_point(
         task_seed=this_task_seed,
         train_sample_seed=task_cfg.train_sample_seed + seed * 100,
         test_sample_seed=task_cfg.test_sample_seed + seed * 100,
-        n_train=task_cfg.n_train,
+        n_train=task_cfg.n_train if param is not None else 1,
         n_test=task_cfg.n_test,
         seed=seed,
     )

@@ -318,6 +318,17 @@ class ExtrapolationConfig(BaseModel):
     # where block i reads out s_i, so a T-step test must stop after T blocks. Off by default so
     # every earlier record keeps its meaning (untied arms evaluated once at full depth).
     unroll_untied: bool = False
+    # M38: the task parameter T_values overwrites in the test split ("T" = the iterated-CA depth,
+    # the historical behaviour). None = leave the task unchanged and only unroll the loop at each
+    # R' on the normal test set — per-step decoding for tasks with no depth parameter (e.g. sudoku).
+    # With None, T_values must hold exactly one placeholder value (it only labels the output).
+    param: Optional[str] = "T"
+
+    @model_validator(mode="after")
+    def _single_placeholder_without_param(self):
+        if self.param is None and len(self.T_values) != 1:
+            raise ValueError("extrapolation.param=None needs exactly one T_values placeholder")
+        return self
 
 
 class CurriculumConfig(BaseModel):

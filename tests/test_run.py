@@ -466,6 +466,29 @@ def test_untied_stack_routed_as_fixed_depth_in_extrapolation():
     )
 
 
+def test_extrapolation_param_none_decodes_the_normal_test_split():
+    """M38: with extrapolation.param=None the harness keeps the task unchanged, so the loop's
+    accuracy at its trained depth equals the main evaluation exactly (per-step decoding)."""
+    from looptab.config import ExtrapolationConfig
+    from looptab.run import run_extrapolation_point
+
+    cfg = _cfg()
+    cfg.task.name = "iterated"
+    cfg.task.params = {"w": 8, "T": 2, "rule": 90, "distractors": 2}
+    cfg.extrapolation = ExtrapolationConfig(T_values=[0], R_values=[1, 4], param=None)
+    out, models, _, _ = run_point(cfg, cfg.task.params, seed=0)
+    loop = cfg.arms[0]
+    extrap, _ = run_extrapolation_point(
+        cfg, cfg.task.params, seed=0, models=models, T_test=0,
+        R_test_values=[1, loop.n_steps], device="cpu",
+    )
+    assert extrap[(loop.resolved_label(), loop.n_steps)]["accuracy"] == pytest.approx(
+        out[loop.resolved_label()]["accuracy"], abs=0
+    )
+    with pytest.raises(ValueError):
+        ExtrapolationConfig(T_values=[0, 1], R_values=[1], param=None)
+
+
 def test_unroll_untied_evaluates_untied_stack_at_each_r():
     """M36c: with ``extrapolation.unroll_untied`` the untied stack is evaluated per R' (its forward
     clamps to min(R', depth)), so a step-aligned untied arm stops after T blocks on a T-step

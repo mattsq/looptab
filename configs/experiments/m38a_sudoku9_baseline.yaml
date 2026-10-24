@@ -1,0 +1,86 @@
+# M38a — a properly trained 9×9 Sudoku baseline, with per-step decoding (step 1 of the
+# test-time-compute track: Probabilistic TRM arXiv 2605.19943; "Universal Transformers Need Memory"
+# arXiv 2604.21999; "shallow effective recursion", TRM-on-ARC arXiv 2512.11847).
+#
+# WHY. 9×9 Sudoku is where the mixer's win survives every control (M33/M34: token-mixing is the
+# whole win) and there is no trajectory to shortcut it, but M34 left the whole-grid exact-match at
+# 2.6% after only 25 epochs / 5 seeds, with the mixer's TRAIN accuracy still 0.938 (undertrained).
+# Before testing noise-plus-selection or memory tokens, this re-establishes the baseline and asks:
+#   (1) how far does longer training move cell accuracy and whole-grid exact-match?
+#   (2) per-step decoding: does accuracy rise across loops (real refinement) or arrive at step 1
+#       ("shallow effective recursion")? And what do extra test-time loops (R' > 8) do?
+# Changes vs m34_sudoku9.yaml: epochs 25 → 100, seeds 5 → 8, n_givens {30,26,24} → {30,26}, the M33
+# decomposition arms dropped (settled), the budget-matched untied mixer added (tying control), and
+# per-step decoding via extrapolation.param: null (task unchanged; the loop unrolled at each R').
+# Same widths as M34 (budget reference trm_flat, ±5%); AMP on uniformly as in M34.
+task:
+  name: sudoku
+  params:
+    size: 9
+  n_train: 4000
+  n_test: 500
+  task_seed: 42
+  train_sample_seed: 1
+  test_sample_seed: 2
+
+sweep:
+  param: n_givens
+  values: [30, 26]
+
+arms:
+  - name: trm_mixer
+    label: trm_mixer
+    hidden_dim: 370
+    latent_dim: 370
+    token_hidden: 64
+    n_steps: 8
+    n_latent: 1
+    use_rmsnorm: true
+    deep_supervision: true
+  - name: untied_mixer_matched
+    label: untied_mixer_matched
+    hidden_dim: 370
+    latent_dim: 370
+    token_hidden: 64
+    n_steps: 8
+    use_rmsnorm: true
+    deep_supervision: true
+  - name: trm
+    label: trm_flat
+    hidden_dim: 128
+    latent_dim: 128
+    n_steps: 8
+    n_latent: 1
+    use_rmsnorm: true
+    deep_supervision: true
+  - name: ff_matched
+    label: ff_matched
+    hidden_dim: 128
+    latent_dim: 128
+    n_steps: 8
+
+deltas:
+  - [trm_mixer, ff_matched]
+  - [trm_mixer, trm_flat]
+  - [trm_mixer, untied_mixer_matched]
+
+train:
+  epochs: 100
+  lr: 1e-3
+  weight_decay: 1e-4
+  batch_size: 256
+  device: cuda
+  amp: true
+
+extrapolation:
+  param: null
+  T_values: [0]
+  R_values: [1, 2, 4, 6, 8, 12, 16]
+  unroll_untied: true
+
+budget_reference: trm_flat
+budget_tol: 0.05
+
+seeds: [0, 1, 2, 3, 4, 5, 6, 7]
+parallel_workers: 2
+results_dir: results
