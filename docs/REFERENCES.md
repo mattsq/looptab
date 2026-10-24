@@ -73,3 +73,21 @@ These ground the M21 measurement-only suite and the (unbuilt, evidence-gated) `t
   found via web search (Jacobian-Spectral-Radius Regularization + random-loop sampling; pre-norm
   "grow without bound" vs post-norm "settle into poor states"); it is an OPTIONAL pointer whose ID is
   a 2026 arXiv number this repo cannot verify offline — cite it as supplementary, not load-bearing.
+
+### 2026 follow-ups consulted for M36 (read at abstract level; preprints with self-reported numbers)
+
+- **Convergence Selection in Weight-Tied Looped Transformers** — arXiv 2607.20594. Tying selects a
+  serial step-wise solution whose speed is set by the training budget; operator-first curriculum.
+  Motivated M36/M36b (the mixer extrapolates only with step-aligned supervision).
+- **Universal Transformers Need Memory** — arXiv 2604.21999. ACT router-init trap (bias −3 fix);
+  memory tokens. The trap does not apply to looptab's `train_act` (halting never sets training depth).
+- **Probabilistic TRM** — arXiv 2605.19943. Noise per recursion step + parallel rollouts selected by
+  the Q head; a width axis of test-time compute looptab has not tested.
+- **TRM on ARC-AGI-1** — arXiv 2512.11847. "Shallow effective recursion"; conditioning and test-time
+  augmentation carry the result.
+- **LoopICL** — arXiv 2609.36108 (looped block for tabular in-context learning; tying = parameter
+  efficiency). **Tab-TRM** — arXiv 2601.07675 (insurance pricing; no matched non-recursive control).
+- **TAPS** — arXiv 2609.36653 (test-time step-size scheduling for looped models).
+- **Fixed-Point Reasoners** — arXiv 2606.18206; **Attractor Models** — arXiv 2605.12466.
+- **Han et al., Capacity and Robustness Trade-off** — arXiv 2304.05206; **channel-strategy survey**
+  (IJCAI 2026) — arXiv 2502.10721. Context for the forecasting CI/CD findings (§11.2 #13–#19).

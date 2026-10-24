@@ -66,6 +66,18 @@ class ModelConfig(BaseModel):
     #                    iteration-count-independent / repeatable step operator → the depth-
     #                    extrapolation lever. Requires a trajectory target; loop arms only.
     ds_mode: Literal["final", "step_aligned", "progressive_final", "progressive_step"] = "final"
+    # M36e: SPARSE step alignment (curriculum path, ``step_aligned`` only). Supervise loop step i
+    # against s_i only when i is a multiple of ``ds_stride`` (1-indexed), plus the final step s_T
+    # always. 1 = every step = the M3b/M36 loss exactly (same terms, same order, same divisor).
+    # Measures how much of the privileged trajectory the step operator needs.
+    ds_stride: int = Field(default=1, ge=1)
+    # M37: answer-only STATE BOTTLENECK for `trm_mixer` (off = "none" ⇒ byte-identical). Each step
+    # sees only the current decoded state s_t (in the input slot; the original input only sets s_0),
+    # the learned per-cell z0 in the latent slot every step (no latent carry), and a zero answer
+    # slot — so the loop is forced to be a Markov map on the observable state. s_{t+1} is decoded
+    # from the step's readout: "soft" = P(class 1), "hard" = 0/1 with a straight-through gradient.
+    # Requires cell_dim == 1 and num_classes == 2 (binary per-cell state, e.g. `iterated`).
+    state_bottleneck: Literal["none", "soft", "hard"] = "none"
     # M7: mix weight between the progressive term and the standard full-T term in the
     # progressive loss: L = alpha·L_progressive + (1−alpha)·L_full. Deep Thinking keeps both
     # (the full term anchors the model so it doesn't collapse). Only used by progressive ds_modes.
@@ -301,6 +313,22 @@ class ExtrapolationConfig(BaseModel):
 
     T_values: list[int]
     R_values: list[int]
+    # M36c: also evaluate the UNTIED stacks at each R' (their forward clamps to min(R', depth)),
+    # instead of once at full depth. Needed when an untied arm is trained with step-aligned DS,
+    # where block i reads out s_i, so a T-step test must stop after T blocks. Off by default so
+    # every earlier record keeps its meaning (untied arms evaluated once at full depth).
+    unroll_untied: bool = False
+    # M38: the task parameter T_values overwrites in the test split ("T" = the iterated-CA depth,
+    # the historical behaviour). None = leave the task unchanged and only unroll the loop at each
+    # R' on the normal test set — per-step decoding for tasks with no depth parameter (e.g. sudoku).
+    # With None, T_values must hold exactly one placeholder value (it only labels the output).
+    param: Optional[str] = "T"
+
+    @model_validator(mode="after")
+    def _single_placeholder_without_param(self):
+        if self.param is None and len(self.T_values) != 1:
+            raise ValueError("extrapolation.param=None needs exactly one T_values placeholder")
+        return self
 
 
 class CurriculumConfig(BaseModel):

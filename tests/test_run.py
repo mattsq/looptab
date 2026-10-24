@@ -466,6 +466,58 @@ def test_untied_stack_routed_as_fixed_depth_in_extrapolation():
     )
 
 
+def test_extrapolation_param_none_decodes_the_normal_test_split():
+    """M38: with extrapolation.param=None the harness keeps the task unchanged, so the loop's
+    accuracy at its trained depth equals the main evaluation exactly (per-step decoding)."""
+    from looptab.config import ExtrapolationConfig
+    from looptab.run import run_extrapolation_point
+
+    cfg = _cfg()
+    cfg.task.name = "iterated"
+    cfg.task.params = {"w": 8, "T": 2, "rule": 90, "distractors": 2}
+    cfg.extrapolation = ExtrapolationConfig(T_values=[0], R_values=[1, 4], param=None)
+    out, models, _, _ = run_point(cfg, cfg.task.params, seed=0)
+    loop = cfg.arms[0]
+    extrap, _ = run_extrapolation_point(
+        cfg, cfg.task.params, seed=0, models=models, T_test=0,
+        R_test_values=[1, loop.n_steps], device="cpu",
+    )
+    assert extrap[(loop.resolved_label(), loop.n_steps)]["accuracy"] == pytest.approx(
+        out[loop.resolved_label()]["accuracy"], abs=0
+    )
+    with pytest.raises(ValueError):
+        ExtrapolationConfig(T_values=[0, 1], R_values=[1], param=None)
+
+
+def test_unroll_untied_evaluates_untied_stack_at_each_r():
+    """M36c: with ``extrapolation.unroll_untied`` the untied stack is evaluated per R' (its forward
+    clamps to min(R', depth)), so a step-aligned untied arm stops after T blocks on a T-step
+    test."""
+    from looptab.config import ExtrapolationConfig
+    from looptab.run import run_extrapolation_point
+
+    cfg = _cfg()
+    cfg.task.name = "iterated"
+    cfg.task.params = {"w": 8, "T": 2, "rule": 90, "distractors": 2}
+    cfg.arms.append(_untied_arm(cfg))
+    cfg.extrapolation = ExtrapolationConfig(T_values=[2], R_values=[1, 5], unroll_untied=True)
+    _, models, _, _ = run_point(cfg, cfg.task.params, seed=0)
+
+    seen = []
+
+    def spy(model, loader, device, want_exact_match=False, n_steps=None):
+        if model is models["untied_stack"]:
+            seen.append(n_steps)
+        return evaluate(model, loader, device, want_exact_match=want_exact_match, n_steps=n_steps)
+
+    with patch("looptab.run.evaluate", side_effect=spy):
+        run_extrapolation_point(
+            cfg, cfg.task.params, seed=0, models=models, T_test=2, R_test_values=[1, 5],
+            device="cpu",
+        )
+    assert seen == [1, 5]
+
+
 def _iter_cfg(**over):
     """A small iterated-CA experiment with the four M3a arms (loop + 3 controls)."""
     base = dict(
@@ -967,3 +1019,78 @@ def test_trm_mixer_fused_rejects_amp():
     )
     with pytest.raises(ValueError, match="not supported with trm_mixer_fused"):
         run_point(cfg, cfg.task.params, seed=0)
+
+
+def test_extrapolation_records_every_sweep_point(tmp_path, monkeypatch):
+    """M38: per-step decoding is kept for EVERY sweep point (the aggregate used to keep only the
+    last one) with per-seed exact match, and both extrapolation CSVs carry a `config` column."""
+    import csv
+    import json
+    import sys
+
+    import yaml
+
+    from looptab.run import main
+
+    cfg = {
+        "task": {
+            "name": "iterated", "params": {"w": 8, "rule": 90, "T": 1}, "n_train": 64,
+            "n_test": 32, "task_seed": 42, "train_sample_seed": 1, "test_sample_seed": 2,
+        },
+        "sweep": {"param": "T", "values": [1, 2]},
+        "arms": [
+            {"name": "trm", "label": "trm", "hidden_dim": 8, "latent_dim": 8, "n_steps": 2},
+            {"name": "ff_matched", "label": "ff", "hidden_dim": 8, "latent_dim": 8, "n_steps": 2},
+        ],
+        "deltas": [["trm", "ff"]],
+        "train": {"epochs": 1, "batch_size": 32},
+        "extrapolation": {"param": None, "T_values": [0], "R_values": [1, 2]},
+        "seeds": [0, 1],
+        "results_dir": str(tmp_path),
+    }
+    path = tmp_path / "cfg.yaml"
+    path.write_text(yaml.safe_dump(cfg), encoding="utf-8")
+    monkeypatch.setattr(sys, "argv", ["run", "--config", str(path)])
+    main()
+
+    record = json.loads(next(tmp_path.glob("cfg_*[0-9].json")).read_text(encoding="utf-8"))
+    assert len(record["points"]) == 2
+    for p in record["points"]:
+        cell = p["extrapolation"]["0"]["2"]["trm"]
+        assert len(cell["exact_match_per_seed"]) == 2
+        # at the trained depth, per-step decoding reproduces that point's main evaluation
+        assert cell["accuracy_mean"] == pytest.approx(p["agg"]["trm"]["accuracy_mean"], abs=0)
+    for suffix in ("extrapolation", "extrapolation_deltas"):
+        with open(next(tmp_path.glob(f"cfg_*_{suffix}.csv")), encoding="utf-8") as f:
+            rows = list(csv.DictReader(f))
+        assert {r["config"] for r in rows} == {p["label"] for p in record["points"]}
+
+
+@pytest.mark.parametrize("task,expected", [("iterated", 1), ("multilabel", 64)])
+def test_per_step_decoding_keeps_train_split_for_real_data(monkeypatch, task, expected):
+    """M38 PR review: per-step decoding builds the unused train split at n=1 only for synthetic
+    tasks. Real-data loaders normalise the test inputs with train-split statistics, so shrinking
+    their train split would change the test inputs."""
+    import looptab.run as run_mod
+    from looptab.config import ExperimentConfig
+
+    seen = {}
+
+    class _Stop(Exception):
+        pass
+
+    def fake_make_splits(**kw):
+        seen["n_train"] = kw["n_train"]
+        raise _Stop
+
+    monkeypatch.setattr(run_mod, "make_splits", fake_make_splits)
+    cfg = ExperimentConfig.model_validate({
+        "task": {"name": task, "params": {}, "n_train": 64, "n_test": 32},
+        "arms": [{"name": "ff_matched", "label": "ff", "hidden_dim": 8, "latent_dim": 8}],
+        "train": {"epochs": 1, "batch_size": 32},
+        "extrapolation": {"param": None, "T_values": [0], "R_values": [1]},
+        "seeds": [0],
+    })
+    with pytest.raises(_Stop):
+        run_mod.run_extrapolation_point(cfg, {}, 0, {}, 0, [1], "cpu")
+    assert seen["n_train"] == expected

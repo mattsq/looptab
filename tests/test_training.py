@@ -183,6 +183,66 @@ def test_train_curriculum_step_aligned_runs_and_learns():
     assert losses[-1] < losses[0]  # the operator-supervised loss goes down
 
 
+def test_train_curriculum_ds_stride_one_is_bit_identical_to_default():
+    """M36e: ``ds_stride=1`` must reproduce the pre-M36e step-aligned loss exactly."""
+
+    def run(**kw):
+        torch.manual_seed(0)
+        loader, w = _traj_loader(T_max=5, w=8)
+        m = TRM(in_features=10, num_classes=2, hidden_dim=32, latent_dim=32, n_steps=5,
+                deep_supervision=True, out_features=w)
+        return train_curriculum(
+            m, loader, T_min=1, T_max=5, ds_mode="step_aligned", epochs=3, seed=0, **kw
+        )
+
+    assert run() == run(ds_stride=1)
+
+
+def test_train_curriculum_ds_stride_supervises_every_kth_state_plus_final():
+    """M36e: with ds_stride=3, loop step i (1-indexed) is supervised iff i % 3 == 0 or i == T."""
+    import looptab.train.loop as loop_mod
+
+    loader, w = _traj_loader(T_max=7, w=8)
+
+    class Spy(torch.nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.p = torch.nn.Parameter(torch.zeros(()))
+            self.outs = []
+
+        def forward(self, X, n_steps=None):
+            B = X.shape[0]
+            self.outs = [self.p + torch.zeros(B, w, 2) for _ in range(n_steps)]
+            return self.outs[-1], self.outs
+
+    spy = Spy()
+    seen = []
+
+    def loss_spy(logits, target):
+        i = next(j for j, o in enumerate(spy.outs) if o is logits)
+        seen.append((len(spy.outs), i))
+        return (logits * 0).sum()
+
+    original = loop_mod._loss_fn
+    loop_mod._loss_fn = loss_spy
+    try:
+        train_curriculum(spy, loader, T_min=1, T_max=7, ds_mode="step_aligned", ds_stride=3,
+                         epochs=3, seed=0)
+    finally:
+        loop_mod._loss_fn = original
+
+    # Indices rise within a batch, so a non-increasing index (or a new T) starts the next batch.
+    order = []
+    for T, i in seen:
+        if not order or order[-1][0] != T or i <= order[-1][1][-1]:
+            order.append((T, [i]))
+        else:
+            order[-1][1].append(i)
+    assert order
+    for T, idx in order:
+        assert idx == [i for i in range(T) if (i + 1) % 3 == 0 or i == T - 1]
+
+
 def test_train_curriculum_final_mode_runs():
     loader, w = _traj_loader(T_max=4, w=8)
     m = TRM(

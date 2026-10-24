@@ -46,6 +46,11 @@ from .train.loop import (
     train_stable,
 )
 
+_FORECAST_TASKS = ("etth1", "weather", "etth2", "ettm1", "ettm2", "electricity", "traffic")
+# Real-data loaders normalise BOTH splits with statistics of the train split, so the test inputs
+# depend on n_train; synthetic generators draw the splits independently.
+_REAL_DATA_TASKS = ("multilabel", *_FORECAST_TASKS)
+
 
 def _git_sha() -> str:
     """The commit a run's code came from, with a ``-dirty`` suffix if the working tree has
@@ -120,6 +125,10 @@ def _build_model(
         kwargs["use_rmsnorm"] = arm.use_rmsnorm
         kwargs["n_latent"] = arm.n_latent
         kwargs["token_hidden"] = arm.token_hidden
+    if arm.state_bottleneck != "none":  # M37, opt-in; omitted at default ⇒ construction unchanged
+        if arm.name != "trm_mixer":
+            raise ValueError("state_bottleneck is only implemented for trm_mixer")
+        kwargs["state_bottleneck"] = arm.state_bottleneck
     if arm.name in ("untied_mixer", "untied_mixer_matched"):  # M24e: mixing-matched §4b controls
         kwargs["use_rmsnorm"] = arm.use_rmsnorm
         kwargs["token_hidden"] = arm.token_hidden
@@ -524,6 +533,7 @@ def run_point(cfg: ExperimentConfig, task_params: dict, seed: int) -> tuple[dict
                 T_max=curriculum.T_max,
                 ds_mode=arm.ds_mode,
                 deep_supervision_weight=arm.deep_supervision_weight,
+                ds_stride=arm.ds_stride,
                 epochs=cfg.train.epochs,
                 lr=cfg.train.lr,
                 weight_decay=cfg.train.weight_decay,
@@ -859,9 +869,16 @@ def run_extrapolation_point(
     task_cfg = cfg.task
     this_task_seed = task_cfg.task_seed + seed
 
-    # Generate test split with T_test
+    # Generate test split with T_test. M38: extrapolation.param=None keeps the task unchanged (the
+    # normal test split, per-step decoding only); its train split is unused here, so for synthetic
+    # tasks build it at n=1 instead of regenerating it (their splits are independent draws, so the
+    # test split is identical either way). Real-data tasks keep the full n_train: their test inputs
+    # are normalised with train-split statistics.
+    param = cfg.extrapolation.param if cfg.extrapolation is not None else "T"
     test_params = copy.deepcopy(task_params)
-    test_params["T"] = T_test
+    if param is not None:
+        test_params[param] = T_test
+    shrink_train = param is None and task_cfg.name not in _REAL_DATA_TASKS
 
     _, test_ds = make_splits(
         task=task_cfg.name,
@@ -869,7 +886,7 @@ def run_extrapolation_point(
         task_seed=this_task_seed,
         train_sample_seed=task_cfg.train_sample_seed + seed * 100,
         test_sample_seed=task_cfg.test_sample_seed + seed * 100,
-        n_train=task_cfg.n_train,
+        n_train=1 if shrink_train else task_cfg.n_train,
         n_test=task_cfg.n_test,
         seed=seed,
     )
@@ -884,7 +901,11 @@ def run_extrapolation_point(
         m = models[lbl]
 
         # recurrent arms (TRM, the decoupled variant, and the M27 mixer) can be unrolled to R'
-        if arm.name in ("trm", "trm_decoupled", "trm_mixer"):
+        # M36c: with ``unroll_untied`` the untied stacks are evaluated at min(R', depth) too.
+        unrollable = ("trm", "trm_decoupled", "trm_mixer")
+        if cfg.extrapolation is not None and cfg.extrapolation.unroll_untied:
+            unrollable += ("untied_stack", "untied_matched", "untied_mixer", "untied_mixer_matched")
+        if arm.name in unrollable:
             for R in R_test_values:
                 point_results[(lbl, R)] = evaluate(
                     m, test_loader, device, want_exact_match=multi_output, n_steps=R
@@ -990,6 +1011,7 @@ def _aggregate_extrapolation(
                     ]
                     stats["exact_match_mean"] = float(np.mean(ems))
                     stats["exact_match_std"] = _std(ems)
+                    stats["exact_match_per_seed"] = ems
                 agg[T][R][lbl] = stats
             # Paired Δ + sign test per (T, R') cell, so the extrapolation diagonal (R'=T) —
             # which carries the milestone headline (e.g. the M3b short-horizon stepDS win) —
@@ -1065,8 +1087,7 @@ def cv_sign_test_status(task_name: str, task_params: dict, seeds: list[int]) -> 
     Computed from the **per-point** ``task_params`` (not the base config) so a sweep/grid that
     overrides ``n_folds`` is honoured.
     """
-    _FORECAST_TASKS = ("etth1", "weather", "etth2", "ettm1", "ettm2", "electricity", "traffic")
-    if task_name not in ("multilabel", *_FORECAST_TASKS):
+    if task_name not in _REAL_DATA_TASKS:
         return True, "independent (fresh function + rows per seed)"
     # M26/M34 forecasting: the expanding-window backtest maps seed → a DISJOINT chronological test
     # block (fold = seed % n_folds), same validity condition as multilabel K-fold — and stronger,
@@ -1111,7 +1132,7 @@ def main():
     parser.add_argument("--seed", type=int, default=None, help="override: run a single seed")
     args = parser.parse_args()
 
-    with open(args.config) as f:
+    with open(args.config, encoding="utf-8") as f:
         raw = yaml.safe_load(f)
     cfg = ExperimentConfig(**raw)
 
@@ -1130,6 +1151,9 @@ def main():
 
     points = []  # one entry per axis point
     extrap_results = None
+    # (point label, extrapolation aggregate) for EVERY axis point. M38: the record used to keep
+    # only the last point's aggregate (`extrap_results` is overwritten at each point).
+    extrap_by_point: list[tuple[str, dict]] = []
 
     for point_label, overrides in axis_points:
         task_params = copy.deepcopy(cfg.task.params)
@@ -1243,6 +1267,7 @@ def main():
                 cfg.extrapolation.R_values,
                 delta_pairs=cfg.resolved_deltas(),
             )
+            extrap_by_point.append((point_label, extrap_results))
             print("\n=== Depth Extrapolation Summary ===")
             for T in cfg.extrapolation.T_values:
                 base_mean = extrap_results[T]["baseline_mean"]
@@ -1284,6 +1309,7 @@ def main():
                 "deltas": deltas,
                 "diagnostics": diag_agg,
                 "seeds": per_seed,
+                **({"extrapolation": extrap_results} if cfg.extrapolation is not None else {}),
             }
         )
 
@@ -1538,46 +1564,52 @@ def main():
         extrap_csv_path = out_dir / f"{tag}_{stamp}_extrapolation.csv"
         with open(extrap_csv_path, "w", newline="") as f:
             w = csv.writer(f)
-            w.writerow(["T_test", "R_test", "arm", "metric", "mean", "std"])
-            for T in cfg.extrapolation.T_values:
-                # Write baseline row for this T_test
-                w.writerow(
-                    [
-                        T,
-                        0,
-                        "baseline",
-                        "accuracy",
-                        extrap_results[T]["baseline_mean"],
-                        extrap_results[T]["baseline_std"],
-                    ]
-                )
-                if "exact_match" in extrap_results[T].get("baselines", {}):
-                    b = extrap_results[T]["baselines"]["exact_match"]
-                    w.writerow([T, 0, "baseline", "exact_match", b["mean"], b["std"]])
-                for R in cfg.extrapolation.R_values:
-                    for lbl in labels:
-                        stats = extrap_results[T][R][lbl]
+            w.writerow(["config", "T_test", "R_test", "arm", "metric", "mean", "std"])
+            for cfg_label, ex in extrap_by_point:
+                for T in cfg.extrapolation.T_values:
+                    # Write baseline row for this T_test
+                    w.writerow(
+                        [
+                            cfg_label,
+                            T,
+                            0,
+                            "baseline",
+                            "accuracy",
+                            ex[T]["baseline_mean"],
+                            ex[T]["baseline_std"],
+                        ]
+                    )
+                    if "exact_match" in ex[T].get("baselines", {}):
+                        b = ex[T]["baselines"]["exact_match"]
                         w.writerow(
-                            [
-                                T,
-                                R,
-                                lbl,
-                                "accuracy",
-                                stats["accuracy_mean"],
-                                stats["accuracy_std"],
-                            ]
+                            [cfg_label, T, 0, "baseline", "exact_match", b["mean"], b["std"]]
                         )
-                        if "exact_match_mean" in stats:
+                    for R in cfg.extrapolation.R_values:
+                        for lbl in labels:
+                            stats = ex[T][R][lbl]
                             w.writerow(
                                 [
+                                    cfg_label,
                                     T,
                                     R,
                                     lbl,
-                                    "exact_match",
-                                    stats["exact_match_mean"],
-                                    stats["exact_match_std"],
+                                    "accuracy",
+                                    stats["accuracy_mean"],
+                                    stats["accuracy_std"],
                                 ]
                             )
+                            if "exact_match_mean" in stats:
+                                w.writerow(
+                                    [
+                                        cfg_label,
+                                        T,
+                                        R,
+                                        lbl,
+                                        "exact_match",
+                                        stats["exact_match_mean"],
+                                        stats["exact_match_std"],
+                                    ]
+                                )
         print(f"Extrap  : {extrap_csv_path}")
 
         # Paired Δ + sign test per (T_test, R') cell — so the extrapolation diagonal carries
@@ -1586,25 +1618,27 @@ def main():
         with open(extrap_deltas_path, "w", newline="") as f:
             w = csv.writer(f)
             w.writerow(
-                ["T_test", "R_test", "delta", "delta_mean", "delta_std",
+                ["config", "T_test", "R_test", "delta", "delta_mean", "delta_std",
                  "sign_pos", "sign_neg", "sign_p"]
             )
-            for T in cfg.extrapolation.T_values:
-                for R in cfg.extrapolation.R_values:
-                    for pair, rep in extrap_results[T][R].get("_deltas", {}).items():
-                        st = rep.get("sign_test") or {}
-                        w.writerow(
-                            [
-                                T,
-                                R,
-                                pair,
-                                rep["delta_mean"],
-                                rep["delta_std"],
-                                st.get("n_pos", ""),
-                                st.get("n_neg", ""),
-                                st.get("p_value", ""),
-                            ]
-                        )
+            for cfg_label, ex in extrap_by_point:
+                for T in cfg.extrapolation.T_values:
+                    for R in cfg.extrapolation.R_values:
+                        for pair, rep in ex[T][R].get("_deltas", {}).items():
+                            st = rep.get("sign_test") or {}
+                            w.writerow(
+                                [
+                                    cfg_label,
+                                    T,
+                                    R,
+                                    pair,
+                                    rep["delta_mean"],
+                                    rep["delta_std"],
+                                    st.get("n_pos", ""),
+                                    st.get("n_neg", ""),
+                                    st.get("p_value", ""),
+                                ]
+                            )
         print(f"ExtrapΔ : {extrap_deltas_path}")
 
         _maybe_plot_extrapolation(

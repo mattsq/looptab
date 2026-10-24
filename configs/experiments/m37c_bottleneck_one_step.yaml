@@ -1,0 +1,98 @@
+# M37c — train on ONE-STEP pairs (s0 -> s1) only, then iterate the learned step to T=32.
+#
+# WHY. M37a/M37b (final state only, no depth-1 labels): every state-bottleneck arm collapsed to the
+# majority class. Scratch diagnostics (results/log/m37.md) located the cause: the hard bottleneck
+# trains only when shallow labels dominate — gradients through several composed hard steps from a
+# random init carry almost no signal — but trained on one-step pairs alone it iterated perfectly to
+# 8 steps on one seed, where the normal mixer trained the same way fell to chance after step 1.
+# This config makes that a proper result: 8 seeds, matched controls, extrapolation to 32 steps.
+# Supervision is (s0, s1) pairs only — far less than M36's every-intermediate-state curriculum, but
+# still a one-step trajectory label, NOT trajectory-free.
+# Arms (all trained at T=1, so every arm sees exactly the same labels):
+#   - mixer_hard   state_bottleneck: hard (0/1 state, straight-through)
+#   - mixer_soft   state_bottleneck: soft (P(cell=1) passed on)
+#   - mixer        default mixer (input recall + latent carry) — the M36 architecture
+#   - ff_matched   §4a grounding (one-shot, cannot be unrolled)
+# Rule 110, w=24, distractors=0, n_train 4000, 100 epochs, 8 seeds; RTX 2070, eager.
+task:
+  name: iterated
+  params:
+    w: 24
+    T: 1
+    rule: 110
+    distractors: 0
+  n_train: 4000
+  n_test: 1000
+  task_seed: 42
+  train_sample_seed: 1
+  test_sample_seed: 2
+
+curriculum:
+  param: T
+  T_min: 1
+  T_max: 1
+
+couple_n_steps_to_param: T
+
+arms:
+  - name: trm_mixer
+    label: mixer_hard
+    hidden_dim: 96
+    latent_dim: 64
+    token_hidden: 32
+    n_steps: 1
+    n_latent: 1
+    use_rmsnorm: true
+    deep_supervision: true
+    ds_mode: step_aligned
+    state_bottleneck: hard
+  - name: trm_mixer
+    label: mixer_soft
+    hidden_dim: 96
+    latent_dim: 64
+    token_hidden: 32
+    n_steps: 1
+    n_latent: 1
+    use_rmsnorm: true
+    deep_supervision: true
+    ds_mode: step_aligned
+    state_bottleneck: soft
+  - name: trm_mixer
+    label: mixer
+    hidden_dim: 96
+    latent_dim: 64
+    token_hidden: 32
+    n_steps: 1
+    n_latent: 1
+    use_rmsnorm: true
+    deep_supervision: true
+    ds_mode: step_aligned
+  - name: ff_matched
+    label: ff_matched
+    hidden_dim: 64
+    latent_dim: 64
+    n_steps: 1
+
+deltas:
+  - [mixer_hard, mixer]       # HEADLINE: does the bottleneck make a one-step-trained step iterable?
+  - [mixer_hard, mixer_soft]  # does the state have to be discrete?
+  - [mixer_soft, mixer]
+  - [mixer_hard, ff_matched]
+
+train:
+  epochs: 100
+  lr: 1e-3
+  weight_decay: 1e-4
+  batch_size: 256
+  device: cuda
+
+extrapolation:
+  T_values: [1, 4, 8, 16, 24, 32]
+  R_values: [1, 4, 8, 16, 24, 32]
+
+budget_reference: mixer
+budget_tol: 0.05
+
+seeds: [0, 1, 2, 3, 4, 5, 6, 7]
+parallel_workers: 3
+results_dir: results

@@ -1,0 +1,112 @@
+# M36 — depth extrapolation re-tested on the CROSS-CELL MIXER (Task B, `iterated`).
+#
+# WHY. Every depth-extrapolation null (M1/M3b/M7/M8, §11.2 #4) was measured on the FLAT `trm`,
+# which §4 now says is feedforward-equivalent. M24 put the mixer on `iterated` but only
+# in-distribution (loop depth coupled to T, no test-time over-unroll). "When Does Recurrence
+# Become an Algorithm?" (arXiv 2607.20594) reports that weight tying selects a SERIAL step-wise
+# solution whose speed is set by the training budget (train length / train loops), that extra
+# test-time loops rescue longer computations, and that a depth-matched UNTIED model extrapolates
+# worst. This config asks the §3 question directly of the mixer: trained at T=4, does unrolling
+# R' > R recover s_T for T > 4?
+#
+# DESIGN. Train once at T=4 (the depth where M24's mixer has a large in-distribution win), then
+# evaluate on T in {4,6,8,12} at R' in {4,6,8,12,16}. READ the diagonal R'=T (one loop per CA
+# step) and the R'=2T diagonal for the R=8 arm. T in {6,8,12} is OOD.
+# Arms (each extra mixer arm differs from `trm_mixer` in ONE knob):
+#   - trm_mixer           R=4, per-step DS (the M24 recipe).
+#   - trm_mixer_nods      R=4, deep supervision OFF (the paper's "free training": loss on the final
+#                         loop only — per-step DS against the FINAL target rewards reaching s_T
+#                         early and holding it, which works against a one-step-per-loop operator).
+#   - trm_mixer_r8        R=8, per-step DS (budget law: 8 loops for 4 CA steps ⇒ the predicted
+#                         speed is 0.5 step/loop, so its extrapolation should sit on R'=2T).
+#   - untied_mixer_matched depth 4, budget-matched (tying control; cannot be over-unrolled, so it is
+#                         evaluated once per T like the feedforward).
+#   - trm_flat, ff_matched — the §4 controls.
+# Rule 110, w=24, distractors=0 (mixer constraint), as in m24_mixer_iterated.yaml.
+task:
+  name: iterated
+  params:
+    w: 24
+    T: 4
+    rule: 110
+    distractors: 0
+  n_train: 4000
+  n_test: 1000
+  task_seed: 42
+  train_sample_seed: 1
+  test_sample_seed: 2
+
+arms:
+  - name: trm_mixer
+    label: trm_mixer
+    hidden_dim: 96
+    latent_dim: 64
+    token_hidden: 32
+    n_steps: 4
+    n_latent: 1
+    use_rmsnorm: true
+    deep_supervision: true
+  - name: trm_mixer
+    label: trm_mixer_nods
+    hidden_dim: 96
+    latent_dim: 64
+    token_hidden: 32
+    n_steps: 4
+    n_latent: 1
+    use_rmsnorm: true
+    deep_supervision: false
+  - name: trm_mixer
+    label: trm_mixer_r8
+    hidden_dim: 96
+    latent_dim: 64
+    token_hidden: 32
+    n_steps: 8
+    n_latent: 1
+    use_rmsnorm: true
+    deep_supervision: true
+  - name: untied_mixer_matched
+    label: untied_mixer_matched
+    hidden_dim: 96
+    latent_dim: 64
+    token_hidden: 32
+    n_steps: 4
+    use_rmsnorm: true
+    deep_supervision: true
+  - name: trm
+    label: trm_flat
+    hidden_dim: 64
+    latent_dim: 64
+    n_steps: 4
+    n_latent: 1
+    use_rmsnorm: true
+    deep_supervision: true
+  - name: ff_matched
+    label: ff_matched
+    hidden_dim: 64
+    latent_dim: 64
+    n_steps: 4
+
+deltas:
+  - [trm_mixer, ff_matched]
+  - [trm_mixer, trm_flat]
+  - [trm_mixer, untied_mixer_matched]
+  - [trm_mixer_nods, trm_mixer]
+  - [trm_mixer_r8, trm_mixer]
+
+train:
+  epochs: 100
+  lr: 1e-3
+  weight_decay: 1e-4
+  batch_size: 256
+  device: cpu
+
+extrapolation:
+  T_values: [4, 6, 8, 12]
+  R_values: [4, 6, 8, 12, 16]
+
+budget_reference: trm_flat
+budget_tol: 0.05
+
+seeds: [0, 1, 2, 3, 4, 5, 6, 7]
+parallel_workers: 4
+results_dir: results

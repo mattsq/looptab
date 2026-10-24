@@ -1,0 +1,128 @@
+# M37a — answer-only STATE BOTTLENECK vs trajectory-free training (final state only, depths 4..8).
+#
+# WHY. M36e: the mixer's transferable CA step needs DENSE trajectory supervision; with the final
+# state only (curriculum or progressive loss) it learns nothing transferable. Diagnosis: the default
+# loop can bypass its own state — it re-reads the input every step (recall) and carries a free
+# latent z — so nothing forces step i of a deep run to do the job of one CA step. M37 closes that
+# bypass with the new opt-in `state_bottleneck` (same parameters as `trm_mixer`): each step sees only
+# the decoded current state s_t (the input only sets s_0), the learned per-cell z0 every step, and a
+# zero answer slot, so the loop is a Markov map on the observable state. "soft" passes P(cell=1);
+# "hard" passes 0/1 with a straight-through gradient. If a final-state loss at depth T now trains
+# the SAME step T times, the operator should be learnable without a trajectory.
+# Trajectory-free claim discipline: NO depth-1 labels (T ~ U{4..8}). `ds_stride: 8` with T <= 8
+# supervises only the final step. The two `*_stride1` arms see every intermediate state and are
+# NOT trajectory-free: `mixer_stride1` is the M36 ceiling, `mixer_hard_stride1` checks the
+# bottlenecked loop can represent the step at all.
+# Rule 110, w=24, distractors=0, n_train 4000, 100 epochs, 8 seeds; RTX 2070, eager.
+task:
+  name: iterated
+  params:
+    w: 24
+    T: 8
+    rule: 110
+    distractors: 0
+  n_train: 4000
+  n_test: 1000
+  task_seed: 42
+  train_sample_seed: 1
+  test_sample_seed: 2
+
+curriculum:
+  param: T
+  T_min: 4
+  T_max: 8
+
+couple_n_steps_to_param: T
+
+arms:
+  - name: trm_mixer
+    label: mixer_finalonly
+    hidden_dim: 96
+    latent_dim: 64
+    token_hidden: 32
+    n_latent: 1
+    use_rmsnorm: true
+    deep_supervision: true
+    ds_mode: step_aligned
+    ds_stride: 8
+    state_bottleneck: none
+    n_steps: 8
+  - name: trm_mixer
+    label: mixer_soft_finalonly
+    hidden_dim: 96
+    latent_dim: 64
+    token_hidden: 32
+    n_latent: 1
+    use_rmsnorm: true
+    deep_supervision: true
+    ds_mode: step_aligned
+    ds_stride: 8
+    state_bottleneck: soft
+    n_steps: 8
+  - name: trm_mixer
+    label: mixer_hard_finalonly
+    hidden_dim: 96
+    latent_dim: 64
+    token_hidden: 32
+    n_latent: 1
+    use_rmsnorm: true
+    deep_supervision: true
+    ds_mode: step_aligned
+    ds_stride: 8
+    state_bottleneck: hard
+    n_steps: 8
+  - name: trm_mixer
+    label: mixer_hard_stride1
+    hidden_dim: 96
+    latent_dim: 64
+    token_hidden: 32
+    n_latent: 1
+    use_rmsnorm: true
+    deep_supervision: true
+    ds_mode: step_aligned
+    ds_stride: 1
+    state_bottleneck: hard
+    n_steps: 8
+  - name: trm_mixer
+    label: mixer_stride1
+    hidden_dim: 96
+    latent_dim: 64
+    token_hidden: 32
+    n_latent: 1
+    use_rmsnorm: true
+    deep_supervision: true
+    ds_mode: step_aligned
+    ds_stride: 1
+    state_bottleneck: none
+    n_steps: 8
+  - name: ff_matched
+    label: ff_matched
+    hidden_dim: 64
+    latent_dim: 64
+    n_steps: 8
+
+deltas:
+  - [mixer_hard_finalonly, mixer_finalonly]   # HEADLINE: does the bottleneck rescue final-only?
+  - [mixer_soft_finalonly, mixer_finalonly]
+  - [mixer_hard_finalonly, mixer_soft_finalonly]
+  - [mixer_hard_finalonly, ff_matched]
+  - [mixer_stride1, mixer_hard_finalonly]     # gap left to the trajectory-supervised ceiling
+  - [mixer_hard_stride1, mixer_stride1]       # bottleneck cost when the trajectory IS given
+
+train:
+  epochs: 100
+  lr: 1e-3
+  weight_decay: 1e-4
+  batch_size: 256
+  device: cuda
+
+extrapolation:
+  T_values: [4, 8, 12, 16, 24, 32]
+  R_values: [4, 8, 12, 16, 24, 32]
+
+budget_reference: mixer_stride1
+budget_tol: 0.05
+
+seeds: [0, 1, 2, 3, 4, 5, 6, 7]
+parallel_workers: 3
+results_dir: results

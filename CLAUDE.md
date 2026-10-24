@@ -276,8 +276,11 @@ It decomposes into two mechanisms plus one broad architectural fact (narratives:
   regime-independent architectural pro-loop fact.
 
 Equally load-bearing, **what the loop does NOT buy** (so Task C isn't designed to chase a ghost):
-*not* depth-extrapolation or a transferable step operator (M1/M3b/M7 — over-unrolling decays even
-on a convergent target, M8); *not* adaptive test-time compute (M8); *not* a token-accuracy edge at
+*not* depth-extrapolation or a transferable step operator **for the FLAT loop or any
+final-target-trained loop** (M1/M3b/M7/M36 — over-unrolling decays even on a convergent target, M8;
+the mixer DOES extrapolate under step-aligned supervision, M36b, **but an MLP one-step predictor
+rolled out autoregressively matches/beats it from a subset of those labels, M37 — so it is not a
+loop capability over a control; §11.2 #22–#23**); *not* adaptive test-time compute (M8); *not* a token-accuracy edge at
 large w (M9); *not* universal across operator families (ff dominates per-cell-*easy* targets, M11);
 *not* a property of hard-convergence fixed points in general — it is CA/local-update specific
 (M13/M14); *not* a capacity-independent "beats-both" (ff wins at small model size, M11).
@@ -496,7 +499,10 @@ file and one index row, not here.
   `exact_match`, `coherence_excess`, `majority_baseline`, `multilabel_f1` (micro+macro) +
   K-fold CV, and regression `evaluate_regression` (MSE/MAE/R²) + `persistence_baseline_mse`
   gated by `objective: regression` (M26). `delta_report` = paired Δ + variance + sign test,
-  with a ceiling-tie guard (`eps`/`near_tie_eps` + `sign_test_robust`, M29c). Optional M21
+  with a ceiling-tie guard (`eps`/`near_tie_eps` + `sign_test_robust`, M29c). Extrapolation
+  `unroll_untied` (M36c, off by default) evaluates untied stacks at min(R', depth). Arm knobs
+  `ds_stride` (M36e, sparse step-aligned DS; 1 = old loss) and `state_bottleneck` (M37, `trm_mixer`
+  answer-only Markov loop; "none" = unchanged) are opt-in and byte-identical at defaults. Optional M21
   introspection side-car (`eval/introspection.py`, off by default). Runner
   `python -m looptab.run --config <yaml>` (sweep / grid / extrapolation; pins `num_threads=1`
   — mandatory for the 3-D matmul arms `trm_decoupled`/`trm_mixer`/`train_stable`).
@@ -627,7 +633,10 @@ file and one index row, not here.
    on a convergent target (M8) — the decay is intrinsic to learned depth, not task
    non-convergence. Deep CA is unlearnable one-shot at T≥8 for all arms (a learnability wall).
    The loop's only Task-B edge is a shallow-depth parameter-efficiency win over a fair untied
-   stack, gone by T≥8.
+   stack, gone by T≥8. **SCOPE (M36/M36b, §11.2 #22): this holds for the flat loop and for any
+   loop trained against the FINAL state only — including the mixer (M36). The mixer trained with
+   a T-curriculum + step-aligned DS does extrapolate (to 4×T_max) — but so does an MLP trained on
+   one-step pairs and rolled out (M37, #23), so that is not evidence FOR the loop.**
 5. **Deep supervision is protocol-dependent, not inert** (M3b): final-state per-step DS is
    neutral-to-negative; step-aligned DS wins at SHORT horizon (+0.162 EM @ T=4) but flips
    negative by T≥8. Progressive loss is inert (M7/M7b). The canonical detached-carry DS
@@ -656,7 +665,9 @@ file and one index row, not here.
    growing with difficulty — TRM's real signature) where `trm_flat ≈ ff`. **But the win is the
    ARCHITECTURE, not recurrence:** a budget-matched *untied* mixer matches the tied loop
    (M24e/M24f/M26) — weight-tying adds only parameter EFFICIENCY (P1), no capability an untied
-   mixer of equal capacity lacks (mirrors M21's "dressed-up depth").
+   mixer of equal capacity lacks (mirrors M21's "dressed-up depth"). **Exception (M36c, #22): under
+   step-ALIGNED supervision on `iterated`, the tied mixer beats untied mixers of equal and 7.3×
+   capacity in distribution — tying is a capability when one shared step is the target.**
 8. **The mixer helps iff outputs are CROSS-CELL COUPLED *and* there is a SHARED input/output
    cell topology** (M24–M28) — the sharp version of the dividing line:
    - Fires on synthetic coupling: `converge` (win grows with w, SOLVES it — M24), dense
@@ -1022,8 +1033,110 @@ file and one index row, not here.
     it still silently skips DS-family arms — never in question); the electricity-scale DS question
     remains open/non-actionable (no real config can exercise it) but is no longer overstated. Only
     the `m23_sudoku_act_sweep` ACT row remains unrun.
+22. **(CORRECTED by M37, #23 — the extrapolation below is matched/beaten by an MLP one-step
+    rollout control, so it is NOT a loop capability over a control; read #23 first.)** **The MIXER
+    + T-curriculum + STEP-ALIGNED deep supervision extrapolates in depth** (M36/M36b,
+    `results/log/m36.md`; rule 110, w=24, 8 seeds,
+    all arms budget-matched within ±1.2%). Trained on T ≤ 8 (T ~ U{1..8}, loop step i supervised
+    against s_i), `trm_mixer` recovers s_12 / s_16 by running R'=12 / 16 loops: **acc 0.983 / 0.966,
+    whole-row EM 0.886 / 0.823**, where every control is at baseline (8/0, p=.0078, in all 16
+    diagonal cells). It is a CONJUNCTION, each half one-knob-isolated: the flat loop with identical
+    supervision fails (baseline past T=4), and the same mixer with final-state DS under the same
+    curriculum fails. M36 (single training depth T=4, final-state DS, with DS on/off and R=4/8
+    variants) is a clean null: baseline one CA step past training, and over-unrolling destroys the
+    in-distribution answer — so single-depth final-target training learns a fixed-depth circuit even
+    on the mixer, and the untied mixer there beats the tied one in distribution (−0.08 acc, 0/8).
+    Caveats: (a) step-aligned DS uses the privileged trajectory — the claim is "given intermediate
+    states, the mixer learns a repeatable local step", NOT "it discovers the algorithm from
+    input/output pairs"; (b) one width (24), uniform 3-cell rules only; (c) it is a transferable
+    operator, not adaptive compute — off the R'=T diagonal accuracy is at baseline, as it must be on
+    a non-convergent CA. M36b also dissolves the "deep CA unlearnable one-shot at T≥8" wall for the
+    mixer (0.992 at T=8): that wall was a supervision limit. Also checked: the ACT router-init trap
+    (arXiv 2604.21999) does not apply to M23 — halting never sets training depth in `train_act`.
+    **M36c (GPU) — clean tying control + 4×T_max:** with step-aligned DS on BOTH (and the new opt-in
+    `extrapolation.unroll_untied` so untied arms stop after T blocks), the tied mixer beats the
+    budget-matched untied mixer at T=8 by +0.31 acc / +0.97 EM AND a 7.3×-parameter untied ceiling by
+    +0.05 acc / +0.58 EM (both 8/0) — **the first exception to #7's "tying adds only efficiency"**,
+    scoped to step supervision on a uniform rule (one shared step IS the target; each untied block
+    only learns from its own step). OOD the tied operator decays slowly: EM 0.973 (T=8) → 0.872 (16)
+    → 0.761 (24) → **0.690 at T=32 = 4×T_max** (acc 0.899; 6/8 seeds ≈0.95, 2 weaker). **M36d — rule
+    generality:** rules 30 (chaotic) and 54 (complex) replicate the conjunction (8/0 vs final-DS mixer
+    and step-DS flat loop at every T): rule 30 acc/EM 0.893/0.644 at T=16 (one failed seed of 8),
+    rule 54 0.998/0.981. Rule 54 is partly periodic (s_12 = s_16 on 76% of cells), so its final-DS
+    mixer keeps 0.90 acc OOD but only 0.29 EM. **★ M36e — the load-bearing limit: the operator needs
+    DENSE trajectory supervision.** Same mixer, only the supervision varied (new knob `ds_stride`,
+    default 1 = old loss, bit-identical): every 2nd or 4th intermediate state keeps a partial
+    in-distribution fit (T=8 EM 0.28/0.42) but loses most of the extrapolation (EM ≤ 0.10 at T=16,
+    ≈0 at T=32 vs 0.69 for every-state); final-state-only training — across depths 1..8, or with
+    Deep Thinking progressive loss — learns nothing transferable and ties `ff_matched` from T=8 on.
+    So #22 is what the mixer CAN represent and iterate when given every intermediate state, NOT what
+    it discovers from input/output pairs; it does not transfer to trajectory-free (e.g. tabular)
+    targets as it stands. Progressive loss is now null on the mixer too (cf. M7).
+23. **★ The AUTOREGRESSIVE ROLLOUT control deflates #22, and the state bottleneck does not give
+    trajectory-free learning** (M37, `results/log/m37.md`). New opt-in `trm_mixer`
+    `state_bottleneck` ("soft"/"hard"; default "none" ⇒ unchanged, same params): each step sees only
+    the decoded state s_t, z0, and a zero answer slot — a Markov map on the observable state.
+    (a) Final state only (T ~ U{4..8} or T=4, no depth-1 labels, M37a/b): every bottleneck arm —
+    even the one given every intermediate state — collapsed to the majority class; diagnostics
+    (1–2 seeds, `experiments/m37_diagnostics/`) show it trains only when shallow labels dominate,
+    and final-state-only stays at chance even with depth-1 batches mixed in. **Trajectory-free
+    learning of the step: still not achieved; this route is closed.** (b) Trained on one-step pairs
+    (s0, s1) only (M37c, 8 seeds), feeding back the decoded state extrapolates (acc 0.975 / EM 0.928
+    at T=32) — **but `ff_matched` trained on the same pairs and rolled out x_{t+1}=argmax(ff(x_t))
+    does exactly as well (0.976 / 0.934)**, and beats M36c's step-supervised tied mixer (0.899 /
+    0.690) from a strict SUBSET of its labels. So given step labels, extrapolation on `iterated` is
+    one-step prediction + autoregression; the loop adds nothing over that control. What survives of
+    #22: the tied mixer internalises the step under step supervision (flat loop / final-state DS do
+    not); M36c's within-architecture tying contrast; M36e's "dense trajectory required".
+    **Rule for any future extrapolation claim: include an autoregressive rollout control — the best
+    one-step predictor from the same labels, iterated on its own outputs.**
+24. **9×9 Sudoku (M38a, `results/log/m38.md`): the mixer's recursion is DEEP, and extra test-time
+    loops raise exact match.** 100 epochs, 8 seeds, all arms within ±0.5% budget. Mixer acc/EM
+    0.848/0.061 (30 clues) and 0.767/0.009 (26 clues), but train acc 1.000: the limit is
+    generalisation (4,000 puzzles), not fitting, and longer training than M34 memorised rather
+    than solved. Controls: +0.38–0.46 acc over ff/flat, and +0.04–0.05 over the budget-matched untied
+    mixer (8/0, both difficulties; both mixers fit train perfectly, so tying helps generalisation;
+    a second scoped exception to #7). Per-step decoding (26 clues): accuracy climbs over all 8 trained
+    steps (0.637 → 0.767); the flat loop is flat from step 1 (the ARC "shallow recursion" pattern
+    applies to it, not the mixer). Over-unrolling to R'=12/16 keeps cell accuracy (0.770/0.768) and
+    raises EM 0.009 → 0.034 → 0.054 (paired-confirmed in M38b, 8/0). The harness gap (only the
+    last sweep point kept, no per-seed EM) is fixed in `run.py` (commit `90127ef`).
+25. **★ 9×9 Sudoku test-time compute (M38b, `results/log/m38.md`): spend it on K noisy samples
+    with whole-grid selection, not on more loops.** 8 fresh seeds, both difficulties, headline
+    pre-registered on a seed-0 pilot. Per-step noise `sigma * rms * N(0,1)` after each step's norm.
+    (a) **Training noise (sigma 0.3)** raises mixer test acc +0.03 (8/0) and roughly doubles the
+    deterministic over-unrolling plateau (EM at R'=512: 0.234 → 0.522 at 30 clues, 0.092 → 0.280 at
+    26); it hurts `ff`. Deterministic EM plateaus by R'≈64. (b) **K=32 samples at R=16 (sampling
+    sigma 0.4) vs the deterministic loop at R'=512 (equal loop steps)**, noise-trained mixer:
+    verifier selection 0.809 / 0.605 EM (30 / 26 clues) vs 0.522 / 0.280; **confidence selection
+    (no rules) 0.730 / 0.531**; all 8/0. Violation selection equals pass@K (unique solutions), so
+    confidence is the verifier-free number. Per-cell voting is worse than no sampling (0/8); one
+    sample is worse than the deterministic run; the K curve is unsaturated at 32. (c) **Controls:**
+    `ff` gets EM 0 from sampling everywhere (mixing is a precondition); the budget-matched untied
+    mixer at the same 8 steps and sampling trails the tied mixer by +0.17/+0.20 EM at 30 clues
+    (8/0), and only the tied loop can run past 8 steps, where most of the gain is. Caveats: one
+    training-noise level; the headline was tuned at 30 clues only; R=32, sigma 0.8 reaches 0.925
+    with the verifier but is an unregistered selected maximum, and confidence selection degrades
+    there (longer noisy runs give confident wrong grids).
 
 ### 11.3 Open work
+
+- **Test-time compute on 9×9 Sudoku (M38, in progress; §11.2 #24–#25).** M38a baseline and M38b
+  (noise + K samples + selection, `experiments/m38_ttc/`) DONE. Next: M38c, learned memory tokens
+  in the mixing axis; a learned selection head (Q-head) compared against confidence selection (the
+  verifier-free number to beat); a second training-noise level; and, since the limit is
+  generalisation, one data-scaling point.
+
+- **Follow up the M36 step-operator positive (§11.2 #22).** DONE: the clean tying control and
+  extrapolation to 4×T_max (M36c), rules 30/54 (M36d), and the supervision-sparsity ladder (M36e —
+  the operator needs DENSE trajectory supervision; final-state-only and progressive loss fail).
+  M37 then closed the state-bottleneck route and showed an MLP rollout control matches the M36
+  extrapolation (§11.2 #23), so extending M36 to other widths/rules is LOW value now. Still open:
+  a training signal that recovers the step WITHOUT a trajectory (none validated; R'↔R'+1
+  consistency is the wrong target on a non-convergent CA; the remaining brainstorm ideas —
+  restart/semigroup consistency, operator-first ordering with T_min ≥ 2, self-training on the
+  model's own endpoint-correct rollouts, a locality prior — all need the autoregressive rollout
+  control from #23 to count). Each config runs in ~2–9 min on the RTX 2070.
 
 - **Only build H/L (M19) after a new Task-C gate passes** (§9.3): a `nested_converge` instance
   where the single-timescale loop plateaus below target **and** ff/untied/untied-mixer do NOT
@@ -1168,7 +1281,8 @@ file and one index row, not here.
 
 ### 11.4 Closed levers — do not redo casually
 
-Depth-extrapolation via progressive loss / path-independence (M7/M8); adaptive compute /
+Depth-extrapolation via progressive loss / path-independence (M7/M8; progressive loss also null on
+the mixer, M36e); the answer-only state bottleneck as a route to trajectory-free learning (M37); adaptive compute /
 ACT as a hard-solving unlock (M8/M23 — ACT works and is adaptive but buys nothing);
 contraction / `trm_stable` (M27 — closed, architecture-independent); the M4 sample-wall lift
 (M5); the both-axes gate rescue (M6a); decoupled-head mechanism isolation (M10); the model-size
