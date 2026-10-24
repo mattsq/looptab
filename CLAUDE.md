@@ -1056,17 +1056,26 @@ file and one index row, not here.
     generality:** rules 30 (chaotic) and 54 (complex) replicate the conjunction (8/0 vs final-DS mixer
     and step-DS flat loop at every T): rule 30 acc/EM 0.893/0.644 at T=16 (one failed seed of 8),
     rule 54 0.998/0.981. Rule 54 is partly periodic (s_12 = s_16 on 76% of cells), so its final-DS
-    mixer keeps 0.90 acc OOD but only 0.29 EM.
+    mixer keeps 0.90 acc OOD but only 0.29 EM. **★ M36e — the load-bearing limit: the operator needs
+    DENSE trajectory supervision.** Same mixer, only the supervision varied (new knob `ds_stride`,
+    default 1 = old loss, bit-identical): every 2nd or 4th intermediate state keeps a partial
+    in-distribution fit (T=8 EM 0.28/0.42) but loses most of the extrapolation (EM ≤ 0.10 at T=16,
+    ≈0 at T=32 vs 0.69 for every-state); final-state-only training — across depths 1..8, or with
+    Deep Thinking progressive loss — learns nothing transferable and ties `ff_matched` from T=8 on.
+    So #22 is what the mixer CAN represent and iterate when given every intermediate state, NOT what
+    it discovers from input/output pairs; it does not transfer to trajectory-free (e.g. tabular)
+    targets as it stands. Progressive loss is now null on the mixer too (cf. M7).
 
 ### 11.3 Open work
 
 - **Follow up the M36 step-operator positive (§11.2 #22).** DONE: the clean tying control and
-  extrapolation to 4×T_max (M36c), rules 30/54 (M36d). Still open, cheapest first: (1) width
-  (w=48) at fixed rule; (2) a non-uniform rule (`mixed_converge`-style per-position rules) or a wider
-  neighbourhood, where the step is not one shared 3-cell map; (3) a weaker signal than the full
-  trajectory — sparse intermediate states, or progressive loss (M7) on the mixer — to see how much
-  privileged supervision the operator needs (the most important for the program's question, since
-  real tabular targets come without trajectories). Each M36c/d config runs in ~5 min on the RTX 2070.
+  extrapolation to 4×T_max (M36c), rules 30/54 (M36d), and the supervision-sparsity ladder (M36e —
+  the operator needs DENSE trajectory supervision; final-state-only and progressive loss fail).
+  Still open: (1) the question M36e raises — a training signal that recovers the step WITHOUT a
+  trajectory (none validated; note R'↔R'+1 consistency is the wrong target on a non-convergent CA);
+  (2) cheaper extensions of a result that now needs privileged supervision: width (w=48), a
+  non-uniform rule (`mixed_converge`-style) or a wider neighbourhood. Each M36c–e config runs in
+  ~5–8 min on the RTX 2070.
 
 - **Only build H/L (M19) after a new Task-C gate passes** (§9.3): a `nested_converge` instance
   where the single-timescale loop plateaus below target **and** ff/untied/untied-mixer do NOT
@@ -1211,7 +1220,8 @@ file and one index row, not here.
 
 ### 11.4 Closed levers — do not redo casually
 
-Depth-extrapolation via progressive loss / path-independence (M7/M8); adaptive compute /
+Depth-extrapolation via progressive loss / path-independence (M7/M8; progressive loss also null on
+the mixer, M36e); adaptive compute /
 ACT as a hard-solving unlock (M8/M23 — ACT works and is adaptive but buys nothing);
 contraction / `trm_stable` (M27 — closed, architecture-independent); the M4 sample-wall lift
 (M5); the both-axes gate rescue (M6a); decoupled-head mechanism isolation (M10); the model-size
