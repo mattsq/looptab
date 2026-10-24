@@ -66,6 +66,11 @@ class ModelConfig(BaseModel):
     #                    iteration-count-independent / repeatable step operator → the depth-
     #                    extrapolation lever. Requires a trajectory target; loop arms only.
     ds_mode: Literal["final", "step_aligned", "progressive_final", "progressive_step"] = "final"
+    # M36e: SPARSE step alignment (curriculum path, ``step_aligned`` only). Supervise loop step i
+    # against s_i only when i is a multiple of ``ds_stride`` (1-indexed), plus the final step s_T
+    # always. 1 = every step = the M3b/M36 loss exactly (same terms, same order, same divisor).
+    # Measures how much of the privileged trajectory the step operator needs.
+    ds_stride: int = Field(default=1, ge=1)
     # M7: mix weight between the progressive term and the standard full-T term in the
     # progressive loss: L = alpha·L_progressive + (1−alpha)·L_full. Deep Thinking keeps both
     # (the full term anchors the model so it doesn't collapse). Only used by progressive ds_modes.

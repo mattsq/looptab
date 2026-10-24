@@ -1097,6 +1097,7 @@ def train_curriculum(
     T_max: int,
     ds_mode: str = "final",
     deep_supervision_weight: float = 1.0,
+    ds_stride: int = 1,
     epochs: int = 100,
     lr: float = 1e-3,
     weight_decay: float = 1e-4,
@@ -1152,10 +1153,12 @@ def train_curriculum(
                         f"step_aligned DS requires n_steps == T; got {len(all_logits)} readouts "
                         f"for T={T}. Couple the arm's depth to the curriculum param."
                     )
-                # Loop step i supervised against intermediate CA state s_i (i = 1..T).
+                # Loop step i supervised against intermediate CA state s_i (i = 1..T); with
+                # ds_stride > 1 only every ds_stride-th state plus the final s_T (M36e).
+                idx = [i for i in range(T) if (i + 1) % ds_stride == 0 or i == T - 1]
                 loss = sum(
-                    _loss_fn(all_logits[i], traj[:, i, :]) for i in range(T)
-                ) / T
+                    _loss_fn(all_logits[i], traj[:, i, :]) for i in idx
+                ) / len(idx)
             else:  # "final"
                 loss = _loss_fn(final_logits, s_T)
                 if all_logits is not None and deep_supervision_weight > 0:

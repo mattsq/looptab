@@ -524,6 +524,7 @@ def run_point(cfg: ExperimentConfig, task_params: dict, seed: int) -> tuple[dict
                 T_max=curriculum.T_max,
                 ds_mode=arm.ds_mode,
                 deep_supervision_weight=arm.deep_supervision_weight,
+                ds_stride=arm.ds_stride,
                 epochs=cfg.train.epochs,
                 lr=cfg.train.lr,
                 weight_decay=cfg.train.weight_decay,
