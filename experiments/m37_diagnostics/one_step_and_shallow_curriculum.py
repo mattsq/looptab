@@ -1,4 +1,5 @@
-﻿"""(A) can the bottlenecked step represent ONE CA step and iterate it? (B) does longer training help?"""
+﻿"""M37 diagnostic: (A) can the bottlenecked step learn ONE CA step and iterate it? (B) does a
+shallow step-supervised curriculum (T in 1..4) train it? Seed 0, rule 110, w=24, GPU."""
 import torch
 
 from looptab.data.dataset import make_loaders, make_trajectory_dataset

@@ -1,4 +1,5 @@
-"""(C) is the M37 collapse caused by T_min? (D) does the hard bottleneck rescue FINAL-ONLY training?"""
+"""M37 diagnostic: (C) is the collapse caused by T_min? (D) does the hard bottleneck rescue
+FINAL-ONLY training? Two seeds, hard state bottleneck, rule 110, w=24, 100 epochs, GPU."""
 import sys
 
 import torch
