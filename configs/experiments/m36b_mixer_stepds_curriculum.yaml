@@ -1,0 +1,106 @@
+# M36b — the step-operator version of M36: the M3b recipe (T-curriculum + STEP-ALIGNED deep
+# supervision) carried to the cross-cell MIXER.
+#
+# WHY. M36 (m36_mixer_iterated_extrap.yaml) trained at a single depth with every loop readout pinned
+# to the FINAL state, which never asks loop step i to equal CA step i — so its extrapolation null
+# could be a supervision artifact, not an architecture fact. Here each batch samples T ~ U{1..8} and
+# loop step i is supervised against the intermediate state s_i: the loop is trained to BE the CA
+# step operator (the closest in-repo analogue of the "operator-first" curriculum in arXiv
+# 2607.20594). M3b ran this exact recipe on the FLAT loop and still found no extrapolation; the
+# question is whether the mixer — whose token-mixing update can express a local CA rule — changes
+# that. T_test in {12,16} is OOD (beyond the curriculum's T_max=8).
+# Arms (one knob from `trm_mixer_stepds` each):
+#   - trm_mixer_stepds    mixer + step-aligned DS (the hypothesis)
+#   - trm_mixer_finalds   mixer + final-state DS (alignment control)
+#   - trm_flat_stepds     flat loop + step-aligned DS (operator control, = M3b's arm at this task)
+#   - untied_mixer_matched depth 8, budget-matched (tying control; fixed depth, cannot over-unroll)
+#   - ff_matched          §4a grounding
+# Rule 110, w=24, distractors=0, as in M36 / m24_mixer_iterated.yaml.
+task:
+  name: iterated
+  params:
+    w: 24
+    T: 8
+    rule: 110
+    distractors: 0
+  n_train: 4000
+  n_test: 1000
+  task_seed: 42
+  train_sample_seed: 1
+  test_sample_seed: 2
+
+curriculum:
+  param: T
+  T_min: 1
+  T_max: 8
+
+couple_n_steps_to_param: T
+
+arms:
+  - name: trm_mixer
+    label: trm_mixer_stepds
+    hidden_dim: 96
+    latent_dim: 64
+    token_hidden: 32
+    n_steps: 8
+    n_latent: 1
+    use_rmsnorm: true
+    deep_supervision: true
+    ds_mode: step_aligned
+  - name: trm_mixer
+    label: trm_mixer_finalds
+    hidden_dim: 96
+    latent_dim: 64
+    token_hidden: 32
+    n_steps: 8
+    n_latent: 1
+    use_rmsnorm: true
+    deep_supervision: true
+    ds_mode: final
+  - name: trm
+    label: trm_flat_stepds
+    hidden_dim: 64
+    latent_dim: 64
+    n_steps: 8
+    n_latent: 1
+    use_rmsnorm: true
+    deep_supervision: true
+    ds_mode: step_aligned
+  - name: untied_mixer_matched
+    label: untied_mixer_matched
+    hidden_dim: 96
+    latent_dim: 64
+    token_hidden: 32
+    n_steps: 8
+    use_rmsnorm: true
+    deep_supervision: false
+    deep_supervision_weight: 0.0
+  - name: ff_matched
+    label: ff_matched
+    hidden_dim: 64
+    latent_dim: 64
+    n_steps: 8
+
+deltas:
+  - [trm_mixer_stepds, trm_mixer_finalds]
+  - [trm_mixer_stepds, trm_flat_stepds]
+  - [trm_mixer_stepds, untied_mixer_matched]
+  - [trm_mixer_stepds, ff_matched]
+
+train:
+  epochs: 100
+  lr: 1e-3
+  weight_decay: 1e-4
+  batch_size: 256
+  device: cpu
+
+extrapolation:
+  T_values: [4, 8, 12, 16]
+  R_values: [4, 8, 12, 16]
+
+budget_reference: trm_flat_stepds
+budget_tol: 0.05
+
+seeds: [0, 1, 2, 3, 4, 5, 6, 7]
+parallel_workers: 4
+results_dir: results
