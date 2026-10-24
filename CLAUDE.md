@@ -1099,17 +1099,33 @@ file and one index row, not here.
     a second scoped exception to #7). Per-step decoding (26 clues): accuracy climbs over all 8 trained
     steps (0.637 → 0.767); the flat loop is flat from step 1 (the ARC "shallow recursion" pattern
     applies to it, not the mixer). Over-unrolling to R'=12/16 keeps cell accuracy (0.770/0.768) and
-    raises EM 0.009 → 0.034 → 0.054, a strong lead that still needs a paired test. Harness gap: the
-    extrapolation record keeps only the LAST sweep point and no per-seed EM; fix before M38b.
+    raises EM 0.009 → 0.034 → 0.054 (paired-confirmed in M38b, 8/0). The harness gap (only the
+    last sweep point kept, no per-seed EM) is fixed in `run.py` (commit `90127ef`).
+25. **★ 9×9 Sudoku test-time compute (M38b, `results/log/m38.md`): spend it on K noisy samples
+    with whole-grid selection, not on more loops.** 8 fresh seeds, both difficulties, headline
+    pre-registered on a seed-0 pilot. Per-step noise `sigma * rms * N(0,1)` after each step's norm.
+    (a) **Training noise (sigma 0.3)** raises mixer test acc +0.03 (8/0) and roughly doubles the
+    deterministic over-unrolling plateau (EM at R'=512: 0.234 → 0.522 at 30 clues, 0.092 → 0.280 at
+    26); it hurts `ff`. Deterministic EM plateaus by R'≈64. (b) **K=32 samples at R=16 (sampling
+    sigma 0.4) vs the deterministic loop at R'=512 (equal loop steps)**, noise-trained mixer:
+    verifier selection 0.809 / 0.605 EM (30 / 26 clues) vs 0.522 / 0.280; **confidence selection
+    (no rules) 0.730 / 0.531**; all 8/0. Violation selection equals pass@K (unique solutions), so
+    confidence is the verifier-free number. Per-cell voting is worse than no sampling (0/8); one
+    sample is worse than the deterministic run; the K curve is unsaturated at 32. (c) **Controls:**
+    `ff` gets EM 0 from sampling everywhere (mixing is a precondition); the budget-matched untied
+    mixer at the same 8 steps and sampling trails the tied mixer by +0.17/+0.20 EM at 30 clues
+    (8/0), and only the tied loop can run past 8 steps, where most of the gain is. Caveats: one
+    training-noise level; the headline was tuned at 30 clues only; R=32, sigma 0.8 reaches 0.925
+    with the verifier but is an unregistered selected maximum, and confidence selection degrades
+    there (longer noisy runs give confident wrong grids).
 
 ### 11.3 Open work
 
-- **Test-time compute on 9×9 Sudoku (M38, in progress; §11.2 #24).** M38a baseline DONE. Next,
-  M38b: (1) fix the harness so per-step decoding is kept per sweep point with per-seed EM; (2) per-step
-  noise plus K samples, selected by an exact constraint-violation count (Q-head selection reported
-  separately), against matched-compute controls: K-sample `ff` ensembles, more loops alone (R'
-  sweep), and the untied mixer. Then M38c: learned memory tokens in the mixing axis. Since the
-  limit is generalisation, one data-scaling point is also worth running.
+- **Test-time compute on 9×9 Sudoku (M38, in progress; §11.2 #24–#25).** M38a baseline and M38b
+  (noise + K samples + selection, `experiments/m38_ttc/`) DONE. Next: M38c, learned memory tokens
+  in the mixing axis; a learned selection head (Q-head) compared against confidence selection (the
+  verifier-free number to beat); a second training-noise level; and, since the limit is
+  generalisation, one data-scaling point.
 
 - **Follow up the M36 step-operator positive (§11.2 #22).** DONE: the clean tying control and
   extrapolation to 4×T_max (M36c), rules 30/54 (M36d), and the supervision-sparsity ladder (M36e —
