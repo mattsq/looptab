@@ -1064,3 +1064,33 @@ def test_extrapolation_records_every_sweep_point(tmp_path, monkeypatch):
         with open(next(tmp_path.glob(f"cfg_*_{suffix}.csv")), encoding="utf-8") as f:
             rows = list(csv.DictReader(f))
         assert {r["config"] for r in rows} == {p["label"] for p in record["points"]}
+
+
+@pytest.mark.parametrize("task,expected", [("iterated", 1), ("multilabel", 64)])
+def test_per_step_decoding_keeps_train_split_for_real_data(monkeypatch, task, expected):
+    """M38 PR review: per-step decoding builds the unused train split at n=1 only for synthetic
+    tasks. Real-data loaders normalise the test inputs with train-split statistics, so shrinking
+    their train split would change the test inputs."""
+    import looptab.run as run_mod
+    from looptab.config import ExperimentConfig
+
+    seen = {}
+
+    class _Stop(Exception):
+        pass
+
+    def fake_make_splits(**kw):
+        seen["n_train"] = kw["n_train"]
+        raise _Stop
+
+    monkeypatch.setattr(run_mod, "make_splits", fake_make_splits)
+    cfg = ExperimentConfig.model_validate({
+        "task": {"name": task, "params": {}, "n_train": 64, "n_test": 32},
+        "arms": [{"name": "ff_matched", "label": "ff", "hidden_dim": 8, "latent_dim": 8}],
+        "train": {"epochs": 1, "batch_size": 32},
+        "extrapolation": {"param": None, "T_values": [0], "R_values": [1]},
+        "seeds": [0],
+    })
+    with pytest.raises(_Stop):
+        run_mod.run_extrapolation_point(cfg, {}, 0, {}, 0, [1], "cpu")
+    assert seen["n_train"] == expected

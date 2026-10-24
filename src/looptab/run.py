@@ -46,6 +46,11 @@ from .train.loop import (
     train_stable,
 )
 
+_FORECAST_TASKS = ("etth1", "weather", "etth2", "ettm1", "ettm2", "electricity", "traffic")
+# Real-data loaders normalise BOTH splits with statistics of the train split, so the test inputs
+# depend on n_train; synthetic generators draw the splits independently.
+_REAL_DATA_TASKS = ("multilabel", *_FORECAST_TASKS)
+
 
 def _git_sha() -> str:
     """The commit a run's code came from, with a ``-dirty`` suffix if the working tree has
@@ -865,13 +870,15 @@ def run_extrapolation_point(
     this_task_seed = task_cfg.task_seed + seed
 
     # Generate test split with T_test. M38: extrapolation.param=None keeps the task unchanged (the
-    # normal test split, per-step decoding only); its train split is unused here, so build it at
-    # n=1 instead of regenerating it (synthetic splits are independent draws, so the test split is
-    # identical either way).
+    # normal test split, per-step decoding only); its train split is unused here, so for synthetic
+    # tasks build it at n=1 instead of regenerating it (their splits are independent draws, so the
+    # test split is identical either way). Real-data tasks keep the full n_train: their test inputs
+    # are normalised with train-split statistics.
     param = cfg.extrapolation.param if cfg.extrapolation is not None else "T"
     test_params = copy.deepcopy(task_params)
     if param is not None:
         test_params[param] = T_test
+    shrink_train = param is None and task_cfg.name not in _REAL_DATA_TASKS
 
     _, test_ds = make_splits(
         task=task_cfg.name,
@@ -879,7 +886,7 @@ def run_extrapolation_point(
         task_seed=this_task_seed,
         train_sample_seed=task_cfg.train_sample_seed + seed * 100,
         test_sample_seed=task_cfg.test_sample_seed + seed * 100,
-        n_train=task_cfg.n_train if param is not None else 1,
+        n_train=1 if shrink_train else task_cfg.n_train,
         n_test=task_cfg.n_test,
         seed=seed,
     )
@@ -1080,8 +1087,7 @@ def cv_sign_test_status(task_name: str, task_params: dict, seeds: list[int]) -> 
     Computed from the **per-point** ``task_params`` (not the base config) so a sweep/grid that
     overrides ``n_folds`` is honoured.
     """
-    _FORECAST_TASKS = ("etth1", "weather", "etth2", "ettm1", "ettm2", "electricity", "traffic")
-    if task_name not in ("multilabel", *_FORECAST_TASKS):
+    if task_name not in _REAL_DATA_TASKS:
         return True, "independent (fresh function + rows per seed)"
     # M26/M34 forecasting: the expanding-window backtest maps seed → a DISJOINT chronological test
     # block (fold = seed % n_folds), same validity condition as multilabel K-fold — and stronger,
