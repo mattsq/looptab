@@ -59,10 +59,26 @@ class TRMMixer(nn.Module):
         shared_readout: bool = True,
         distinct_cell_weights: bool = False,
         use_fused_kernel: bool = False,
+        state_bottleneck: str = "none",
     ):
         super().__init__()
         if out_features is None:
             raise ValueError("TRMMixer is multi-output only (out_features = number of cells).")
+        # M37 answer-only state bottleneck (off by default ⇒ forward unchanged). See
+        # ModelConfig.state_bottleneck: the step becomes a Markov map on the decoded state.
+        if state_bottleneck not in ("none", "soft", "hard"):
+            raise ValueError(f"state_bottleneck must be none/soft/hard, got {state_bottleneck!r}")
+        if state_bottleneck != "none" and (in_features != out_features or num_classes != 2):
+            raise ValueError(
+                "state_bottleneck needs one binary input feature per cell (cell_dim == 1, "
+                f"num_classes == 2); got in_features={in_features}, out_features={out_features}, "
+                f"num_classes={num_classes}."
+            )
+        if state_bottleneck != "none" and (
+            use_fused_kernel or distinct_cell_weights or not shared_readout
+        ):
+            raise ValueError("state_bottleneck supports only the default mixer body/readout.")
+        self.state_bottleneck = state_bottleneck
         if in_features % out_features != 0:
             raise ValueError(
                 f"in_features ({in_features}) must be divisible by out_features ({out_features}) = "
@@ -168,6 +184,8 @@ class TRMMixer(nn.Module):
         init_state: Optional[tuple[torch.Tensor, torch.Tensor]] = None,
         return_state: bool = False,
     ):
+        if self.state_bottleneck != "none":
+            return self._forward_bottleneck(X, n_steps, init_state, return_state)
         B = X.shape[0]
         steps = n_steps if n_steps is not None else self.n_steps
         x_cells = X.view(B, self.n_cells, self.cell_dim)  # un-flatten the grid into tokens
@@ -213,6 +231,45 @@ class TRMMixer(nn.Module):
             if self.deep_supervision:
                 all_logits.append(a)
 
+        if return_state:
+            return a, all_logits, (z, a)
+        return a, all_logits
+
+    def _decode_state(self, a: torch.Tensor) -> torch.Tensor:
+        """M37: per-cell logits (B, n_cells, 2) -> next state (B, n_cells, 1) in the input slot."""
+        p = torch.softmax(a, dim=-1)[..., 1:2]  # P(cell = 1), same scale as the {0,1} input
+        if self.state_bottleneck == "hard":
+            return (p > 0.5).to(p.dtype) + p - p.detach()  # 0/1 forward, straight-through grad
+        return p
+
+    def _forward_bottleneck(self, X, n_steps, init_state, return_state):
+        """M37 answer-only loop: step t sees only (s_t, z0, 0); no input recall, no latent carry.
+
+        Same parameters and the same per-step computation as the default forward (token mix ->
+        channel MLP -> norm -> readout); only what enters each step changes. ``init_state`` resumes
+        from the decoded answer of the given ``(z, a)``, so progressive / carried training restarts
+        from the observable state too.
+        """
+        B = X.shape[0]
+        steps = n_steps if n_steps is not None else self.n_steps
+        s = X.view(B, self.n_cells, 1) if init_state is None else self._decode_state(init_state[1])
+        z_init = self.z0.unsqueeze(0).expand(B, -1, -1)
+        a_slot = torch.zeros(B, self.n_cells, self.num_classes, device=X.device, dtype=X.dtype)
+        all_logits = [] if self.deep_supervision else None
+        z, a = z_init, a_slot
+        for _ in range(steps):
+            z = z_init
+            for _ in range(self.n_latent):
+                inp = torch.cat([s, z, a_slot], dim=-1)
+                if self.token_mix is None:
+                    mixed = inp
+                else:
+                    mixed = inp + self.token_mix(inp.transpose(1, 2)).transpose(1, 2)
+                z = self.norm(self.channel(mixed))
+            a = self.readout(z)
+            s = self._decode_state(a)
+            if self.deep_supervision:
+                all_logits.append(a)
         if return_state:
             return a, all_logits, (z, a)
         return a, all_logits

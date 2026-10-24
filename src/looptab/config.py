@@ -71,6 +71,13 @@ class ModelConfig(BaseModel):
     # always. 1 = every step = the M3b/M36 loss exactly (same terms, same order, same divisor).
     # Measures how much of the privileged trajectory the step operator needs.
     ds_stride: int = Field(default=1, ge=1)
+    # M37: answer-only STATE BOTTLENECK for `trm_mixer` (off = "none" ⇒ byte-identical). Each step
+    # sees only the current decoded state s_t (in the input slot; the original input only sets s_0),
+    # the learned per-cell z0 in the latent slot every step (no latent carry), and a zero answer
+    # slot — so the loop is forced to be a Markov map on the observable state. s_{t+1} is decoded
+    # from the step's readout: "soft" = P(class 1), "hard" = 0/1 with a straight-through gradient.
+    # Requires cell_dim == 1 and num_classes == 2 (binary per-cell state, e.g. `iterated`).
+    state_bottleneck: Literal["none", "soft", "hard"] = "none"
     # M7: mix weight between the progressive term and the standard full-T term in the
     # progressive loss: L = alpha·L_progressive + (1−alpha)·L_full. Deep Thinking keeps both
     # (the full term anchors the model so it doesn't collapse). Only used by progressive ds_modes.

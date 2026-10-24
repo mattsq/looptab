@@ -120,6 +120,10 @@ def _build_model(
         kwargs["use_rmsnorm"] = arm.use_rmsnorm
         kwargs["n_latent"] = arm.n_latent
         kwargs["token_hidden"] = arm.token_hidden
+    if arm.state_bottleneck != "none":  # M37, opt-in; omitted at default ⇒ construction unchanged
+        if arm.name != "trm_mixer":
+            raise ValueError("state_bottleneck is only implemented for trm_mixer")
+        kwargs["state_bottleneck"] = arm.state_bottleneck
     if arm.name in ("untied_mixer", "untied_mixer_matched"):  # M24e: mixing-matched §4b controls
         kwargs["use_rmsnorm"] = arm.use_rmsnorm
         kwargs["token_hidden"] = arm.token_hidden
