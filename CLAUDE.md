@@ -276,8 +276,9 @@ It decomposes into two mechanisms plus one broad architectural fact (narratives:
   regime-independent architectural pro-loop fact.
 
 Equally load-bearing, **what the loop does NOT buy** (so Task C isn't designed to chase a ghost):
-*not* depth-extrapolation or a transferable step operator (M1/M3b/M7 — over-unrolling decays even
-on a convergent target, M8); *not* adaptive test-time compute (M8); *not* a token-accuracy edge at
+*not* depth-extrapolation or a transferable step operator **for the FLAT loop or any
+final-target-trained loop** (M1/M3b/M7/M36 — over-unrolling decays even on a convergent target, M8;
+**overturned for the MIXER under step-aligned supervision, M36b — §11.2 #22**); *not* adaptive test-time compute (M8); *not* a token-accuracy edge at
 large w (M9); *not* universal across operator families (ff dominates per-cell-*easy* targets, M11);
 *not* a property of hard-convergence fixed points in general — it is CA/local-update specific
 (M13/M14); *not* a capacity-independent "beats-both" (ff wins at small model size, M11).
@@ -627,7 +628,9 @@ file and one index row, not here.
    on a convergent target (M8) — the decay is intrinsic to learned depth, not task
    non-convergence. Deep CA is unlearnable one-shot at T≥8 for all arms (a learnability wall).
    The loop's only Task-B edge is a shallow-depth parameter-efficiency win over a fair untied
-   stack, gone by T≥8.
+   stack, gone by T≥8. **SCOPE (M36/M36b, §11.2 #22): this holds for the flat loop and for any
+   loop trained against the FINAL state only — including the mixer (M36). It does NOT hold for
+   the mixer trained with a T-curriculum + step-aligned DS, which extrapolates to 2×T_max.**
 5. **Deep supervision is protocol-dependent, not inert** (M3b): final-state per-step DS is
    neutral-to-negative; step-aligned DS wins at SHORT horizon (+0.162 EM @ T=4) but flips
    negative by T≥8. Progressive loss is inert (M7/M7b). The canonical detached-carry DS
@@ -1022,8 +1025,35 @@ file and one index row, not here.
     it still silently skips DS-family arms — never in question); the electricity-scale DS question
     remains open/non-actionable (no real config can exercise it) but is no longer overstated. Only
     the `m23_sudoku_act_sweep` ACT row remains unrun.
+22. **★ First transferable step operator in the repo: the MIXER + T-curriculum + STEP-ALIGNED deep
+    supervision extrapolates in depth** (M36/M36b, `results/log/m36.md`; rule 110, w=24, 8 seeds,
+    all arms budget-matched within ±1.2%). Trained on T ≤ 8 (T ~ U{1..8}, loop step i supervised
+    against s_i), `trm_mixer` recovers s_12 / s_16 by running R'=12 / 16 loops: **acc 0.983 / 0.966,
+    whole-row EM 0.886 / 0.823**, where every control is at baseline (8/0, p=.0078, in all 16
+    diagonal cells). It is a CONJUNCTION, each half one-knob-isolated: the flat loop with identical
+    supervision fails (baseline past T=4), and the same mixer with final-state DS under the same
+    curriculum fails. M36 (single training depth T=4, final-state DS, with DS on/off and R=4/8
+    variants) is a clean null: baseline one CA step past training, and over-unrolling destroys the
+    in-distribution answer — so single-depth final-target training learns a fixed-depth circuit even
+    on the mixer, and the untied mixer there beats the tied one in distribution (−0.08 acc, 0/8).
+    Caveats: (a) step-aligned DS uses the privileged trajectory — the claim is "given intermediate
+    states, the mixer learns a repeatable local step", NOT "it discovers the algorithm from
+    input/output pairs"; (b) the tying control is not clean under step supervision (the untied
+    mixer ran DS-off and cannot unroll past 8); (c) one rule, one width, OOD only to 2×T_max;
+    (d) it is a transferable operator, not adaptive compute — off the R'=T diagonal accuracy is at
+    baseline, as it must be on a non-convergent CA. M36b also dissolves the "deep CA unlearnable
+    one-shot at T≥8" wall for the mixer (0.992 at T=8): that wall was a supervision limit. Also
+    checked: the ACT router-init trap (arXiv 2604.21999) does not apply to M23 — halting never sets
+    training depth in `train_act`.
 
 ### 11.3 Open work
+
+- **Follow up the M36b step-operator positive (§11.2 #22), cheapest first:** (1) a clean tying
+  control — an untied mixer with per-layer step-aligned readouts at T ≤ 8; (2) how far past 2×T_max
+  it holds (T_test 24/32, eval-only cost); (3) other rules and widths, and a non-uniform rule
+  (`mixed_converge`-style) where the step is not one shared local map; (4) a weaker signal than the
+  full trajectory — sparse intermediate states, or progressive loss (M7) on the mixer — to see how
+  much privileged supervision the operator needs.
 
 - **Only build H/L (M19) after a new Task-C gate passes** (§9.3): a `nested_converge` instance
   where the single-timescale loop plateaus below target **and** ff/untied/untied-mixer do NOT
