@@ -1004,6 +1004,7 @@ def _aggregate_extrapolation(
                     ]
                     stats["exact_match_mean"] = float(np.mean(ems))
                     stats["exact_match_std"] = _std(ems)
+                    stats["exact_match_per_seed"] = ems
                 agg[T][R][lbl] = stats
             # Paired Δ + sign test per (T, R') cell, so the extrapolation diagonal (R'=T) —
             # which carries the milestone headline (e.g. the M3b short-horizon stepDS win) —
@@ -1144,6 +1145,9 @@ def main():
 
     points = []  # one entry per axis point
     extrap_results = None
+    # (point label, extrapolation aggregate) for EVERY axis point. M38: the record used to keep
+    # only the last point's aggregate (`extrap_results` is overwritten at each point).
+    extrap_by_point: list[tuple[str, dict]] = []
 
     for point_label, overrides in axis_points:
         task_params = copy.deepcopy(cfg.task.params)
@@ -1257,6 +1261,7 @@ def main():
                 cfg.extrapolation.R_values,
                 delta_pairs=cfg.resolved_deltas(),
             )
+            extrap_by_point.append((point_label, extrap_results))
             print("\n=== Depth Extrapolation Summary ===")
             for T in cfg.extrapolation.T_values:
                 base_mean = extrap_results[T]["baseline_mean"]
@@ -1298,6 +1303,7 @@ def main():
                 "deltas": deltas,
                 "diagnostics": diag_agg,
                 "seeds": per_seed,
+                **({"extrapolation": extrap_results} if cfg.extrapolation is not None else {}),
             }
         )
 
@@ -1552,46 +1558,52 @@ def main():
         extrap_csv_path = out_dir / f"{tag}_{stamp}_extrapolation.csv"
         with open(extrap_csv_path, "w", newline="") as f:
             w = csv.writer(f)
-            w.writerow(["T_test", "R_test", "arm", "metric", "mean", "std"])
-            for T in cfg.extrapolation.T_values:
-                # Write baseline row for this T_test
-                w.writerow(
-                    [
-                        T,
-                        0,
-                        "baseline",
-                        "accuracy",
-                        extrap_results[T]["baseline_mean"],
-                        extrap_results[T]["baseline_std"],
-                    ]
-                )
-                if "exact_match" in extrap_results[T].get("baselines", {}):
-                    b = extrap_results[T]["baselines"]["exact_match"]
-                    w.writerow([T, 0, "baseline", "exact_match", b["mean"], b["std"]])
-                for R in cfg.extrapolation.R_values:
-                    for lbl in labels:
-                        stats = extrap_results[T][R][lbl]
+            w.writerow(["config", "T_test", "R_test", "arm", "metric", "mean", "std"])
+            for cfg_label, ex in extrap_by_point:
+                for T in cfg.extrapolation.T_values:
+                    # Write baseline row for this T_test
+                    w.writerow(
+                        [
+                            cfg_label,
+                            T,
+                            0,
+                            "baseline",
+                            "accuracy",
+                            ex[T]["baseline_mean"],
+                            ex[T]["baseline_std"],
+                        ]
+                    )
+                    if "exact_match" in ex[T].get("baselines", {}):
+                        b = ex[T]["baselines"]["exact_match"]
                         w.writerow(
-                            [
-                                T,
-                                R,
-                                lbl,
-                                "accuracy",
-                                stats["accuracy_mean"],
-                                stats["accuracy_std"],
-                            ]
+                            [cfg_label, T, 0, "baseline", "exact_match", b["mean"], b["std"]]
                         )
-                        if "exact_match_mean" in stats:
+                    for R in cfg.extrapolation.R_values:
+                        for lbl in labels:
+                            stats = ex[T][R][lbl]
                             w.writerow(
                                 [
+                                    cfg_label,
                                     T,
                                     R,
                                     lbl,
-                                    "exact_match",
-                                    stats["exact_match_mean"],
-                                    stats["exact_match_std"],
+                                    "accuracy",
+                                    stats["accuracy_mean"],
+                                    stats["accuracy_std"],
                                 ]
                             )
+                            if "exact_match_mean" in stats:
+                                w.writerow(
+                                    [
+                                        cfg_label,
+                                        T,
+                                        R,
+                                        lbl,
+                                        "exact_match",
+                                        stats["exact_match_mean"],
+                                        stats["exact_match_std"],
+                                    ]
+                                )
         print(f"Extrap  : {extrap_csv_path}")
 
         # Paired Δ + sign test per (T_test, R') cell — so the extrapolation diagonal carries
@@ -1600,25 +1612,27 @@ def main():
         with open(extrap_deltas_path, "w", newline="") as f:
             w = csv.writer(f)
             w.writerow(
-                ["T_test", "R_test", "delta", "delta_mean", "delta_std",
+                ["config", "T_test", "R_test", "delta", "delta_mean", "delta_std",
                  "sign_pos", "sign_neg", "sign_p"]
             )
-            for T in cfg.extrapolation.T_values:
-                for R in cfg.extrapolation.R_values:
-                    for pair, rep in extrap_results[T][R].get("_deltas", {}).items():
-                        st = rep.get("sign_test") or {}
-                        w.writerow(
-                            [
-                                T,
-                                R,
-                                pair,
-                                rep["delta_mean"],
-                                rep["delta_std"],
-                                st.get("n_pos", ""),
-                                st.get("n_neg", ""),
-                                st.get("p_value", ""),
-                            ]
-                        )
+            for cfg_label, ex in extrap_by_point:
+                for T in cfg.extrapolation.T_values:
+                    for R in cfg.extrapolation.R_values:
+                        for pair, rep in ex[T][R].get("_deltas", {}).items():
+                            st = rep.get("sign_test") or {}
+                            w.writerow(
+                                [
+                                    cfg_label,
+                                    T,
+                                    R,
+                                    pair,
+                                    rep["delta_mean"],
+                                    rep["delta_std"],
+                                    st.get("n_pos", ""),
+                                    st.get("n_neg", ""),
+                                    st.get("p_value", ""),
+                                ]
+                            )
         print(f"ExtrapΔ : {extrap_deltas_path}")
 
         _maybe_plot_extrapolation(

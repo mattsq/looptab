@@ -1019,3 +1019,48 @@ def test_trm_mixer_fused_rejects_amp():
     )
     with pytest.raises(ValueError, match="not supported with trm_mixer_fused"):
         run_point(cfg, cfg.task.params, seed=0)
+
+
+def test_extrapolation_records_every_sweep_point(tmp_path, monkeypatch):
+    """M38: per-step decoding is kept for EVERY sweep point (the aggregate used to keep only the
+    last one) with per-seed exact match, and both extrapolation CSVs carry a `config` column."""
+    import csv
+    import json
+    import sys
+
+    import yaml
+
+    from looptab.run import main
+
+    cfg = {
+        "task": {
+            "name": "iterated", "params": {"w": 8, "rule": 90, "T": 1}, "n_train": 64,
+            "n_test": 32, "task_seed": 42, "train_sample_seed": 1, "test_sample_seed": 2,
+        },
+        "sweep": {"param": "T", "values": [1, 2]},
+        "arms": [
+            {"name": "trm", "label": "trm", "hidden_dim": 8, "latent_dim": 8, "n_steps": 2},
+            {"name": "ff_matched", "label": "ff", "hidden_dim": 8, "latent_dim": 8, "n_steps": 2},
+        ],
+        "deltas": [["trm", "ff"]],
+        "train": {"epochs": 1, "batch_size": 32},
+        "extrapolation": {"param": None, "T_values": [0], "R_values": [1, 2]},
+        "seeds": [0, 1],
+        "results_dir": str(tmp_path),
+    }
+    path = tmp_path / "cfg.yaml"
+    path.write_text(yaml.safe_dump(cfg), encoding="utf-8")
+    monkeypatch.setattr(sys, "argv", ["run", "--config", str(path)])
+    main()
+
+    record = json.loads(next(tmp_path.glob("cfg_*[0-9].json")).read_text(encoding="utf-8"))
+    assert len(record["points"]) == 2
+    for p in record["points"]:
+        cell = p["extrapolation"]["0"]["2"]["trm"]
+        assert len(cell["exact_match_per_seed"]) == 2
+        # at the trained depth, per-step decoding reproduces that point's main evaluation
+        assert cell["accuracy_mean"] == pytest.approx(p["agg"]["trm"]["accuracy_mean"], abs=0)
+    for suffix in ("extrapolation", "extrapolation_deltas"):
+        with open(next(tmp_path.glob(f"cfg_*_{suffix}.csv")), encoding="utf-8") as f:
+            rows = list(csv.DictReader(f))
+        assert {r["config"] for r in rows} == {p["label"] for p in record["points"]}
