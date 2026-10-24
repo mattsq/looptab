@@ -497,7 +497,8 @@ file and one index row, not here.
   `exact_match`, `coherence_excess`, `majority_baseline`, `multilabel_f1` (micro+macro) +
   K-fold CV, and regression `evaluate_regression` (MSE/MAE/R²) + `persistence_baseline_mse`
   gated by `objective: regression` (M26). `delta_report` = paired Δ + variance + sign test,
-  with a ceiling-tie guard (`eps`/`near_tie_eps` + `sign_test_robust`, M29c). Optional M21
+  with a ceiling-tie guard (`eps`/`near_tie_eps` + `sign_test_robust`, M29c). Extrapolation
+  `unroll_untied` (M36c, off by default) evaluates untied stacks at min(R', depth). Optional M21
   introspection side-car (`eval/introspection.py`, off by default). Runner
   `python -m looptab.run --config <yaml>` (sweep / grid / extrapolation; pins `num_threads=1`
   — mandatory for the 3-D matmul arms `trm_decoupled`/`trm_mixer`/`train_stable`).
@@ -659,7 +660,9 @@ file and one index row, not here.
    growing with difficulty — TRM's real signature) where `trm_flat ≈ ff`. **But the win is the
    ARCHITECTURE, not recurrence:** a budget-matched *untied* mixer matches the tied loop
    (M24e/M24f/M26) — weight-tying adds only parameter EFFICIENCY (P1), no capability an untied
-   mixer of equal capacity lacks (mirrors M21's "dressed-up depth").
+   mixer of equal capacity lacks (mirrors M21's "dressed-up depth"). **Exception (M36c, #22): under
+   step-ALIGNED supervision on `iterated`, the tied mixer beats untied mixers of equal and 7.3×
+   capacity in distribution — tying is a capability when one shared step is the target.**
 8. **The mixer helps iff outputs are CROSS-CELL COUPLED *and* there is a SHARED input/output
    cell topology** (M24–M28) — the sharp version of the dividing line:
    - Fires on synthetic coupling: `converge` (win grows with w, SOLVES it — M24), dense
@@ -1038,22 +1041,32 @@ file and one index row, not here.
     on the mixer, and the untied mixer there beats the tied one in distribution (−0.08 acc, 0/8).
     Caveats: (a) step-aligned DS uses the privileged trajectory — the claim is "given intermediate
     states, the mixer learns a repeatable local step", NOT "it discovers the algorithm from
-    input/output pairs"; (b) the tying control is not clean under step supervision (the untied
-    mixer ran DS-off and cannot unroll past 8); (c) one rule, one width, OOD only to 2×T_max;
-    (d) it is a transferable operator, not adaptive compute — off the R'=T diagonal accuracy is at
-    baseline, as it must be on a non-convergent CA. M36b also dissolves the "deep CA unlearnable
-    one-shot at T≥8" wall for the mixer (0.992 at T=8): that wall was a supervision limit. Also
-    checked: the ACT router-init trap (arXiv 2604.21999) does not apply to M23 — halting never sets
-    training depth in `train_act`.
+    input/output pairs"; (b) one width (24), uniform 3-cell rules only; (c) it is a transferable
+    operator, not adaptive compute — off the R'=T diagonal accuracy is at baseline, as it must be on
+    a non-convergent CA. M36b also dissolves the "deep CA unlearnable one-shot at T≥8" wall for the
+    mixer (0.992 at T=8): that wall was a supervision limit. Also checked: the ACT router-init trap
+    (arXiv 2604.21999) does not apply to M23 — halting never sets training depth in `train_act`.
+    **M36c (GPU) — clean tying control + 4×T_max:** with step-aligned DS on BOTH (and the new opt-in
+    `extrapolation.unroll_untied` so untied arms stop after T blocks), the tied mixer beats the
+    budget-matched untied mixer at T=8 by +0.31 acc / +0.97 EM AND a 7.3×-parameter untied ceiling by
+    +0.05 acc / +0.58 EM (both 8/0) — **the first exception to #7's "tying adds only efficiency"**,
+    scoped to step supervision on a uniform rule (one shared step IS the target; each untied block
+    only learns from its own step). OOD the tied operator decays slowly: EM 0.973 (T=8) → 0.872 (16)
+    → 0.761 (24) → **0.690 at T=32 = 4×T_max** (acc 0.899; 6/8 seeds ≈0.95, 2 weaker). **M36d — rule
+    generality:** rules 30 (chaotic) and 54 (complex) replicate the conjunction (8/0 vs final-DS mixer
+    and step-DS flat loop at every T): rule 30 acc/EM 0.893/0.644 at T=16 (one failed seed of 8),
+    rule 54 0.998/0.981. Rule 54 is partly periodic (s_12 = s_16 on 76% of cells), so its final-DS
+    mixer keeps 0.90 acc OOD but only 0.29 EM.
 
 ### 11.3 Open work
 
-- **Follow up the M36b step-operator positive (§11.2 #22), cheapest first:** (1) a clean tying
-  control — an untied mixer with per-layer step-aligned readouts at T ≤ 8; (2) how far past 2×T_max
-  it holds (T_test 24/32, eval-only cost); (3) other rules and widths, and a non-uniform rule
-  (`mixed_converge`-style) where the step is not one shared local map; (4) a weaker signal than the
-  full trajectory — sparse intermediate states, or progressive loss (M7) on the mixer — to see how
-  much privileged supervision the operator needs.
+- **Follow up the M36 step-operator positive (§11.2 #22).** DONE: the clean tying control and
+  extrapolation to 4×T_max (M36c), rules 30/54 (M36d). Still open, cheapest first: (1) width
+  (w=48) at fixed rule; (2) a non-uniform rule (`mixed_converge`-style per-position rules) or a wider
+  neighbourhood, where the step is not one shared 3-cell map; (3) a weaker signal than the full
+  trajectory — sparse intermediate states, or progressive loss (M7) on the mixer — to see how much
+  privileged supervision the operator needs (the most important for the program's question, since
+  real tabular targets come without trajectories). Each M36c/d config runs in ~5 min on the RTX 2070.
 
 - **Only build H/L (M19) after a new Task-C gate passes** (§9.3): a `nested_converge` instance
   where the single-timescale loop plateaus below target **and** ff/untied/untied-mixer do NOT
