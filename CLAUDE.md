@@ -1090,8 +1090,26 @@ file and one index row, not here.
     not); M36c's within-architecture tying contrast; M36e's "dense trajectory required".
     **Rule for any future extrapolation claim: include an autoregressive rollout control — the best
     one-step predictor from the same labels, iterated on its own outputs.**
+24. **9×9 Sudoku (M38a, `results/log/m38.md`): the mixer's recursion is DEEP, and extra test-time
+    loops raise exact match.** 100 epochs, 8 seeds, all arms within ±0.5% budget. Mixer acc/EM
+    0.848/0.061 (30 clues) and 0.767/0.009 (26 clues), but train acc 1.000: the limit is
+    generalisation (4,000 puzzles), not fitting, and longer training than M34 memorised rather
+    than solved. Controls: +0.38–0.46 acc over ff/flat, and +0.04–0.05 over the budget-matched untied
+    mixer (8/0, both difficulties; both mixers fit train perfectly, so tying helps generalisation;
+    a second scoped exception to #7). Per-step decoding (26 clues): accuracy climbs over all 8 trained
+    steps (0.637 → 0.767); the flat loop is flat from step 1 (the ARC "shallow recursion" pattern
+    applies to it, not the mixer). Over-unrolling to R'=12/16 keeps cell accuracy (0.770/0.768) and
+    raises EM 0.009 → 0.034 → 0.054, a strong lead that still needs a paired test. Harness gap: the
+    extrapolation record keeps only the LAST sweep point and no per-seed EM; fix before M38b.
 
 ### 11.3 Open work
+
+- **Test-time compute on 9×9 Sudoku (M38, in progress; §11.2 #24).** M38a baseline DONE. Next,
+  M38b: (1) fix the harness so per-step decoding is kept per sweep point with per-seed EM; (2) per-step
+  noise plus K samples, selected by an exact constraint-violation count (Q-head selection reported
+  separately), against matched-compute controls: K-sample `ff` ensembles, more loops alone (R'
+  sweep), and the untied mixer. Then M38c: learned memory tokens in the mixing axis. Since the
+  limit is generalisation, one data-scaling point is also worth running.
 
 - **Follow up the M36 step-operator positive (§11.2 #22).** DONE: the clean tying control and
   extrapolation to 4×T_max (M36c), rules 30/54 (M36d), and the supervision-sparsity ladder (M36e —
